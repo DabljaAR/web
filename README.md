@@ -1,2 +1,26 @@
 # web
 The main web platform for the DabljaAR website.
+
+## Structure
+- `backend/`: Contains the backend server code.
+- `frontend/`: Contains the frontend client code.
+Each subdirectory has its own README file with specific instructions and details.
+
+## Setup Instructions
+Please refer to the README files in the `backend/` and `frontend/` directories for setup instructions for each component.
+- `backend/README.md`: Instructions for setting up and running the backend server.
+- `frontend/README.md`: Instructions for setting up and running the frontend client.
+
+## Technologies Used
+- Backend: NodeJS, Express, dbmate, PostgreSQL
+- Frontend: Typescript, React, Vite, Tailwind CSS
+
+## Quick Start (with docker-compose)
+
+1. Ensure you have Docker and Docker Compose installed on your machine.
+2. Navigate to the `web/` directory.
+3. Run the following command to start both the backend and frontend services:
+   ```bash
+   docker-compose up --build
+   ```
+4. Access the frontend at `http://localhost:5173` and the backend API at `http://localhost:3000`.
