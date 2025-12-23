@@ -12,7 +12,7 @@ Please refer to the README files in the `backend/` and `frontend/` directories f
 - `frontend/README.md`: Instructions for setting up and running the frontend client.
 
 ## Technologies Used
-- Backend: NodeJS, Express, dbmate, PostgreSQL
+- Backend: Python, FastAPI, dbmate, PostgreSQL
 - Frontend: Typescript, React, Vite, Tailwind CSS
 
 ## Quick Start (with docker-compose)
