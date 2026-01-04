@@ -1130,6 +1130,11 @@ Create a new dubbing/translation task.
 }
 ```
 
+**Validation rules for `media_input_id`:**
+
+- The referenced media input **must belong to the authenticated user** making the request. Tasks cannot be created using media owned by another user.
+- A single media input **can be reused across multiple tasks** as long as it remains accessible to the authenticated user.
+- Media inputs that are referenced by tasks in `pending` or `processing` status **cannot be deleted**. Attempts to delete such media inputs will be rejected (for example, with HTTP status `409 Conflict`), and the tasks will continue processing normally.
 **Response:** `201 Created`
 ```json
 {
