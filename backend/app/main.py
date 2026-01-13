@@ -2,11 +2,14 @@ from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.dependencies import connect_to_db, disconnect_from_db
 from app.core.router import router as core_router
+from app.core import init_db
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic
     await connect_to_db()
+    await init_db()
     try:
         yield
     finally:
