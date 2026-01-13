@@ -58,6 +58,29 @@ def get_subscription_plan_service(
     repo = SubscriptionPlanRepository(db, SubscriptionPlan)
     return SubscriptionPlanService(repo)
 
+def get_subscription_plan_service(
+    db: AsyncSession = Depends(get_db)
+) -> SubscriptionPlanService:
+    """Dependency injection factory for SubscriptionPlanService."""
+    repo = SubscriptionPlanRepository(db, SubscriptionPlan)
+    return SubscriptionPlanService(repo)
+
+
+def get_user_subscription_service(
+    db: AsyncSession = Depends(get_db)
+) -> UserSubscriptionService:
+    """Dependency injection factory for UserSubscriptionService."""
+    repo = UserSubscriptionRepository(db, UserSubscription)
+    return UserSubscriptionService(repo)
+
+
+def get_payment_service(
+    db: AsyncSession = Depends(get_db)
+) -> PaymentService:
+    """Dependency injection factory for PaymentService."""
+    repo = PaymentRepository(db, Payment)
+    return PaymentService(repo)
+
 
 def get_user_subscription_service(
     db: AsyncSession = Depends(get_db)
@@ -720,4 +743,4 @@ async def delete_payment(
         404 Not Found: Payment not found
     """
     await service.delete_payment(payment_id)
-    return None
+    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat() + "Z"}
