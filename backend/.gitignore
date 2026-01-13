@@ -109,3 +109,6 @@ venv.bak/
 
 # lint
 .ruff_cache
+
+
+../frontend/package-lock.json

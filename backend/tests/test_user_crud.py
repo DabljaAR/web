@@ -1,0 +1,292 @@
+"""Unit tests for User CRUD operations."""
+import pytest
+from datetime import datetime
+from unittest.mock import AsyncMock, Mock, patch
+from fastapi import HTTPException, status
+
+from app.core.models import User
+from app.core.schema import UserCreate, UserUpdate, UserResponse
+from app.core.services import UserService
+from app.core.repository import UserRepository
+from app.core.auth import AuthService
+from app.core.exceptions import UserAlreadyExistsException
+
+
+@pytest.fixture
+def mock_user_repo():
+    """Create a mock UserRepository."""
+    repo = Mock(spec=UserRepository)
+    repo.db = Mock()
+    return repo
+
+
+@pytest.fixture
+def mock_auth_service():
+    """Create a mock AuthService."""
+    auth_service = Mock(spec=AuthService)
+    auth_service.get_password_hash = Mock(return_value="hashed_password")
+    auth_service.verify_password = Mock(return_value=True)
+    auth_service.create_token_pair = Mock(return_value={
+        "access_token": "test_access_token",
+        "refresh_token": "test_refresh_token",
+        "token_type": "bearer"
+    })
+    return auth_service
+
+
+@pytest.fixture
+def user_service(mock_user_repo, mock_auth_service):
+    """Create a UserService instance with mocked dependencies."""
+    return UserService(mock_user_repo, mock_auth_service)
+
+
+@pytest.fixture
+def sample_user():
+    """Create a sample User object."""
+    return User(
+        user_id=1,
+        username="testuser",
+        email="test@example.com",
+        password="hashed_password",
+        first_name="Test",
+        last_name="User",
+        preferred_language="en",
+        avatar_url=None,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
+        last_login=None,
+        role_id=None
+    )
+
+
+@pytest.fixture
+def sample_user_create():
+    """Create a sample UserCreate object."""
+    return UserCreate(
+        username="testuser",
+        email="test@example.com",
+        password="TestPassword123!",
+        first_name="Test",
+        last_name="User",
+        preferred_language="en",
+        avatar_url=None
+    )
+
+
+@pytest.fixture
+def sample_user_update():
+    """Create a sample UserUpdate object."""
+    return UserUpdate(
+        first_name="Updated",
+        last_name="Name",
+        preferred_language="ar"
+    )
+
+
+@pytest.mark.asyncio
+class TestGetUserById:
+    """Test get_user_by_id method."""
+    
+    async def test_get_user_by_id_success(self, user_service, mock_user_repo, sample_user):
+        """Test successful retrieval of user by ID."""
+        mock_user_repo.get_by_id = AsyncMock(return_value=sample_user)
+        
+        result = await user_service.get_user_by_id(1)
+        
+        assert isinstance(result, UserResponse)
+        assert result.user_id == 1
+        assert result.username == "testuser"
+        assert result.email == "test@example.com"
+        mock_user_repo.get_by_id.assert_called_once_with(1)
+    
+    async def test_get_user_by_id_not_found(self, user_service, mock_user_repo):
+        """Test retrieval of non-existent user."""
+        mock_user_repo.get_by_id = AsyncMock(return_value=None)
+        
+        with pytest.raises(HTTPException) as exc_info:
+            await user_service.get_user_by_id(999)
+        
+        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert "not found" in str(exc_info.value.detail).lower()
+
+
+@pytest.mark.asyncio
+class TestGetAllUsers:
+    """Test get_all_users method."""
+    
+    async def test_get_all_users_success(self, user_service, mock_user_repo, sample_user):
+        """Test successful retrieval of all users."""
+        users = [sample_user]
+        mock_user_repo.get_all = AsyncMock(return_value=users)
+        
+        result = await user_service.get_all_users(skip=0, limit=10)
+        
+        assert len(result) == 1
+        assert isinstance(result[0], UserResponse)
+        assert result[0].user_id == 1
+        mock_user_repo.get_all.assert_called_once_with(skip=0, limit=10)
+    
+    async def test_get_all_users_empty(self, user_service, mock_user_repo):
+        """Test retrieval when no users exist."""
+        mock_user_repo.get_all = AsyncMock(return_value=[])
+        
+        result = await user_service.get_all_users(skip=0, limit=10)
+        
+        assert len(result) == 0
+        assert isinstance(result, list)
+    
+    async def test_get_all_users_pagination(self, user_service, mock_user_repo, sample_user):
+        """Test pagination parameters."""
+        mock_user_repo.get_all = AsyncMock(return_value=[])
+        
+        await user_service.get_all_users(skip=10, limit=5)
+        
+        mock_user_repo.get_all.assert_called_once_with(skip=10, limit=5)
+
+
+@pytest.mark.asyncio
+class TestUpdateUser:
+    """Test update_user method."""
+    
+    async def test_update_user_success(self, user_service, mock_user_repo, sample_user, sample_user_update):
+        """Test successful user update."""
+        mock_user_repo.get_by_id = AsyncMock(return_value=sample_user)
+        mock_user_repo.username_exists = AsyncMock(return_value=False)
+        mock_user_repo.email_exists = AsyncMock(return_value=False)
+        mock_user_repo.db.commit = AsyncMock()
+        mock_user_repo.db.refresh = AsyncMock()
+        mock_user_repo.db.add = Mock()
+        
+        result = await user_service.update_user(1, sample_user_update)
+        
+        assert isinstance(result, UserResponse)
+        assert result.first_name == "Updated"
+        assert result.last_name == "Name"
+        assert result.preferred_language == "ar"
+        mock_user_repo.db.commit.assert_called_once()
+    
+    async def test_update_user_not_found(self, user_service, mock_user_repo, sample_user_update):
+        """Test update of non-existent user."""
+        mock_user_repo.get_by_id = AsyncMock(return_value=None)
+        
+        with pytest.raises(HTTPException) as exc_info:
+            await user_service.update_user(999, sample_user_update)
+        
+        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+    
+    async def test_update_user_username_conflict(self, user_service, mock_user_repo, sample_user):
+        """Test update with conflicting username."""
+        update_data = UserUpdate(username="existing_user")
+        mock_user_repo.get_by_id = AsyncMock(return_value=sample_user)
+        mock_user_repo.username_exists = AsyncMock(return_value=True)
+        
+        with pytest.raises(UserAlreadyExistsException) as exc_info:
+            await user_service.update_user(1, update_data)
+        
+        assert "already registered" in str(exc_info.value.detail)
+    
+    async def test_update_user_email_conflict(self, user_service, mock_user_repo, sample_user):
+        """Test update with conflicting email."""
+        update_data = UserUpdate(email="existing@example.com")
+        mock_user_repo.get_by_id = AsyncMock(return_value=sample_user)
+        mock_user_repo.username_exists = AsyncMock(return_value=False)
+        mock_user_repo.email_exists = AsyncMock(return_value=True)
+        
+        with pytest.raises(UserAlreadyExistsException) as exc_info:
+            await user_service.update_user(1, update_data)
+        
+        assert "already registered" in str(exc_info.value.detail)
+    
+    async def test_update_user_password(self, user_service, mock_user_repo, sample_user):
+        """Test password update."""
+        update_data = UserUpdate(password="NewPassword123!")
+        mock_user_repo.get_by_id = AsyncMock(return_value=sample_user)
+        mock_user_repo.username_exists = AsyncMock(return_value=False)
+        mock_user_repo.email_exists = AsyncMock(return_value=False)
+        mock_user_repo.db.commit = AsyncMock()
+        mock_user_repo.db.refresh = AsyncMock()
+        mock_user_repo.db.add = Mock()
+        
+        result = await user_service.update_user(1, update_data)
+        
+        # Verify password was hashed
+        user_service.auth_service.get_password_hash.assert_called_once_with("NewPassword123!")
+        assert isinstance(result, UserResponse)
+    
+    async def test_update_user_same_username(self, user_service, mock_user_repo, sample_user):
+        """Test update with same username (should not check for conflicts)."""
+        update_data = UserUpdate(username="testuser", first_name="NewName")
+        mock_user_repo.get_by_id = AsyncMock(return_value=sample_user)
+        mock_user_repo.db.commit = AsyncMock()
+        mock_user_repo.db.refresh = AsyncMock()
+        mock_user_repo.db.add = Mock()
+        
+        result = await user_service.update_user(1, update_data)
+        
+        # Should not check username_exists for same username
+        mock_user_repo.username_exists.assert_not_called()
+        assert result.first_name == "NewName"
+
+
+@pytest.mark.asyncio
+class TestDeleteUser:
+    """Test delete_user method."""
+    
+    async def test_delete_user_success(self, user_service, mock_user_repo, sample_user):
+        """Test successful user deletion."""
+        mock_user_repo.get_by_id = AsyncMock(return_value=sample_user)
+        mock_user_repo.db.delete = AsyncMock()
+        mock_user_repo.db.commit = AsyncMock()
+        
+        result = await user_service.delete_user(1)
+        
+        assert result is True
+        mock_user_repo.db.delete.assert_called_once_with(sample_user)
+        mock_user_repo.db.commit.assert_called_once()
+    
+    async def test_delete_user_not_found(self, user_service, mock_user_repo):
+        """Test deletion of non-existent user."""
+        mock_user_repo.get_by_id = AsyncMock(return_value=None)
+        
+        with pytest.raises(HTTPException) as exc_info:
+            await user_service.delete_user(999)
+        
+        assert exc_info.value.status_code == status.HTTP_404_NOT_FOUND
+        assert "not found" in str(exc_info.value.detail).lower()
+
+
+@pytest.mark.asyncio
+class TestSignup:
+    """Test signup method (already exists but testing for completeness)."""
+    
+    async def test_signup_success(self, user_service, mock_user_repo, sample_user_create, sample_user):
+        """Test successful user registration."""
+        mock_user_repo.username_exists = AsyncMock(return_value=False)
+        mock_user_repo.email_exists = AsyncMock(return_value=False)
+        mock_user_repo.db.add = Mock()
+        mock_user_repo.db.commit = AsyncMock()
+        mock_user_repo.db.refresh = AsyncMock()
+        
+        # Mock the User creation
+        with patch('app.core.services.User', return_value=sample_user):
+            result = await user_service.signup(sample_user_create)
+        
+        assert isinstance(result, UserResponse)
+        mock_user_repo.username_exists.assert_called_once()
+        mock_user_repo.email_exists.assert_called_once()
+        mock_user_repo.db.commit.assert_called_once()
+    
+    async def test_signup_username_exists(self, user_service, mock_user_repo, sample_user_create):
+        """Test signup with existing username."""
+        mock_user_repo.username_exists = AsyncMock(return_value=True)
+        
+        with pytest.raises(UserAlreadyExistsException):
+            await user_service.signup(sample_user_create)
+    
+    async def test_signup_email_exists(self, user_service, mock_user_repo, sample_user_create):
+        """Test signup with existing email."""
+        mock_user_repo.username_exists = AsyncMock(return_value=False)
+        mock_user_repo.email_exists = AsyncMock(return_value=True)
+        
+        with pytest.raises(UserAlreadyExistsException):
+            await user_service.signup(sample_user_create)
