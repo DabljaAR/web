@@ -3,6 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '../../hooks/useAuth';
+import { authService } from '../../services/authService';
 import '../../styles/auth.css';
 
 const Login = () => {
@@ -10,11 +12,15 @@ const Login = () => {
   const { t } = useTranslation();
   const { toggleTheme } = useTheme();
   const { language, toggleLanguage } = useLanguage();
+  const { login } = useAuth();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     remember: false
   });
+  const [errors, setErrors] = useState({});
+  const [isLoading, setIsLoading] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -22,13 +28,44 @@ const Login = () => {
       ...prev,
       [name]: type === 'checkbox' ? checked : value
     }));
+    // Clear errors when user starts typing
+    if (errors[name]) {
+      setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+    if (submitError) {
+      setSubmitError('');
+    }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // Demo login - in real app, call auth service
-    alert('Login successful! (Demo)');
-    navigate('/');
+    setSubmitError('');
+    setErrors({});
+    setIsLoading(true);
+
+    try {
+      // Backend accepts username or email in the username field
+      const response = await authService.login(formData.email, formData.password);
+      
+      // Store tokens and user data using auth hook
+      if (response.access_token) {
+        login(response.user, response.access_token, response.refresh_token, formData.remember);
+        
+        // Redirect to dashboard or home
+        navigate('/dashboard');
+      } else {
+        setSubmitError('Invalid response from server');
+      }
+    } catch (error) {
+      // Handle error response
+      const errorMessage = error.message || 'Login failed. Please check your credentials and try again.';
+      setSubmitError(errorMessage);
+      
+      // Clear password field on error
+      setFormData(prev => ({ ...prev, password: '' }));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleGoogleLogin = () => {
@@ -96,17 +133,33 @@ const Login = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="auth-form">
+              {submitError && (
+                <div className="error-message" style={{ 
+                  color: 'var(--accent-pink)', 
+                  padding: '10px', 
+                  marginBottom: '15px',
+                  backgroundColor: 'rgba(255, 0, 0, 0.1)',
+                  borderRadius: '5px',
+                  border: '1px solid var(--accent-pink)'
+                }}>
+                  {submitError}
+                </div>
+              )}
+
               <div className="form-group">
                 <label htmlFor="email">{t('login.emailLabel')}</label>
                 <input
-                  type="email"
+                  type="text"
                   id="email"
                   name="email"
-                  placeholder={t('login.emailPlaceholder')}
+                  placeholder={t('login.emailPlaceholder') || 'Email or Username'}
                   value={formData.email}
                   onChange={handleChange}
                   required
                 />
+                {errors.email && (
+                  <small style={{ color: 'var(--accent-pink)' }}>{errors.email}</small>
+                )}
               </div>
 
               <div className="form-group">
@@ -120,6 +173,9 @@ const Login = () => {
                   onChange={handleChange}
                   required
                 />
+                {errors.password && (
+                  <small style={{ color: 'var(--accent-pink)' }}>{errors.password}</small>
+                )}
               </div>
 
               <div className="form-options">
@@ -135,11 +191,13 @@ const Login = () => {
                 <a href="#" className="forgot-link">{t('login.forgotPassword')}</a>
               </div>
 
-              <button type="submit" className="btn-submit">
-                <span>{t('login.signIn')}</span>
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <path d="M4 10h12m0 0l-4-4m4 4l-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+              <button type="submit" className="btn-submit" disabled={isLoading}>
+                <span>{isLoading ? 'Signing in...' : t('login.signIn')}</span>
+                {!isLoading && (
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M4 10h12m0 0l-4-4m4 4l-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
               </button>
 
               <div className="divider">

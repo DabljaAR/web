@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '../../hooks/useTranslation';
+import { useAuth } from '../../hooks/useAuth';
+import api from '../../services/api';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
@@ -7,9 +10,21 @@ import '../../styles/profile.css';
 
 const Profile = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { user: authUser, logout } = useAuth();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreview, setAvatarPreview] = useState(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const fileInputRef = useRef(null);
   const [formData, setFormData] = useState({
-    fullName: 'John Doe',
-    email: 'john@example.com',
+    firstName: '',
+    lastName: '',
+    email: '',
+    preferredLanguage: '',
     defaultDomain: 'general',
     translationStyle: 'neutral',
     defaultVoice: 'male1',
@@ -17,6 +32,39 @@ const Profile = () => {
     notifCredits: true,
     notifMarketing: false
   });
+
+  // Fetch user data from API
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!authUser?.user_id) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+        const userData = await api.get(`/users/${authUser.user_id}`);
+        setUser(userData);
+        
+        // Update form data with user information
+        setFormData(prev => ({
+          ...prev,
+          firstName: userData.first_name || '',
+          lastName: userData.last_name || '',
+          email: userData.email || '',
+          preferredLanguage: userData.preferred_language || ''
+        }));
+      } catch (err) {
+        setError(err.message || 'Failed to load user data');
+        console.error('Error fetching user data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUserData();
+  }, [authUser]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -26,22 +74,148 @@ const Profile = () => {
     }));
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    // Handle form submission
-    alert('Settings saved! (Demo)');
+  const uploadAvatar = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+    const response = await fetch(`${API_BASE_URL}/upload/avatar`, {
+      method: 'POST',
+      body: formData,
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || 'Failed to upload avatar');
+    }
+    
+    const data = await response.json();
+    return data.url;
+  };
+
+  const handleAvatarChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+      if (!validTypes.includes(file.type)) {
+        alert('Please select a valid image file (jpg, png, gif, webp)');
+        return;
+      }
+      
+      // Validate file size (5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('File size must be less than 5MB');
+        return;
+      }
+      
+      setAvatarFile(file);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAvatarPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleChangePhoto = () => {
-    alert('Change photo (Demo)');
+    fileInputRef.current?.click();
   };
 
-  const handleRemovePhoto = () => {
-    alert('Remove photo (Demo)');
+  const handleRemovePhoto = async () => {
+    if (!window.confirm('Are you sure you want to remove your profile picture?')) {
+      return;
+    }
+
+    if (!user?.user_id) return;
+
+    try {
+      setSaving(true);
+      const updatedUser = await api.put(`/users/${user.user_id}`, {
+        avatar_url: null
+      });
+      
+      setUser(updatedUser);
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      alert('Profile picture removed successfully');
+    } catch (err) {
+      alert(err.message || 'Failed to remove profile picture');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!user?.user_id) return;
+
+    try {
+      setSaving(true);
+      setError(null);
+
+      // Upload avatar if new file is selected
+      let avatarUrl = user.avatar_url;
+      if (avatarFile) {
+        setUploadingAvatar(true);
+        try {
+          avatarUrl = await uploadAvatar(avatarFile);
+        } catch (uploadError) {
+          alert(uploadError.message || 'Failed to upload avatar');
+          setUploadingAvatar(false);
+          setSaving(false);
+          return;
+        }
+        setUploadingAvatar(false);
+      }
+
+      // Prepare update data
+      const updateData = {};
+      const first_name = formData.firstName.trim() || null;
+      const last_name = formData.lastName.trim() || null;
+      
+      if (first_name !== (user.first_name || '')) {
+        updateData.first_name = first_name;
+      }
+      if (last_name !== (user.last_name || '')) {
+        updateData.last_name = last_name;
+      }
+      if (formData.preferredLanguage !== (user.preferred_language || '')) {
+        updateData.preferred_language = formData.preferredLanguage || null;
+      }
+      if (avatarUrl !== user.avatar_url) {
+        updateData.avatar_url = avatarUrl;
+      }
+
+      // Only update if there are changes
+      if (Object.keys(updateData).length === 0) {
+        alert('No changes to save');
+        setSaving(false);
+        return;
+      }
+
+      const updatedUser = await api.put(`/users/${user.user_id}`, updateData);
+      
+      setUser(updatedUser);
+      setAvatarFile(null);
+      setAvatarPreview(null);
+      
+      // Update auth user in localStorage
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      
+      alert('Profile updated successfully!');
+    } catch (err) {
+      setError(err.message || 'Failed to update profile');
+      alert(err.message || 'Failed to update profile');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleChangePassword = () => {
-    alert('Change password (Demo)');
+    alert('Change password functionality coming soon!');
   };
 
   const handleUpgradePremium = () => {
@@ -52,21 +226,80 @@ const Profile = () => {
     alert('Buy Credits (Demo)');
   };
 
-  const handleDeleteAccount = () => {
-    if (window.confirm(t('profile.deleteConfirm'))) {
-      alert('Account deletion (Demo)');
+  const handleDeleteAccount = async () => {
+    if (!user?.user_id) return;
+
+    const confirmMessage = t('profile.deleteConfirm') || 'Are you sure you want to delete your account? This action cannot be undone.';
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+
+    // Double confirmation
+    const doubleConfirm = window.prompt('Type "DELETE" to confirm account deletion:');
+    if (doubleConfirm !== 'DELETE') {
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await api.delete(`/users/${user.user_id}`);
+      
+      // Logout and redirect
+      logout();
+      navigate('/');
+      alert('Your account has been deleted successfully');
+    } catch (err) {
+      alert(err.message || 'Failed to delete account');
+      setSaving(false);
     }
   };
 
   // Get initials for profile picture
   const getInitials = () => {
-    return formData.fullName
-      .split(' ')
-      .map(n => n[0])
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
+    if (user?.first_name && user?.last_name) {
+      return `${user.first_name[0]}${user.last_name[0]}`.toUpperCase();
+    } else if (user?.first_name) {
+      return user.first_name[0].toUpperCase();
+    } else if (user?.username) {
+      return user.username[0].toUpperCase();
+    }
+    return 'U';
   };
+
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  if (loading) {
+    return (
+      <div className="profile-page">
+        <BackgroundDecorations />
+        <Navbar />
+        <div className="main-container">
+          <div style={{ textAlign: 'center', padding: '50px' }}>
+            <p>Loading profile...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="profile-page">
+        <BackgroundDecorations />
+        <Navbar />
+        <div className="main-container">
+          <div style={{ textAlign: 'center', padding: '50px', color: 'var(--accent-red)' }}>
+            <p>Error: {error}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="profile-page">
@@ -88,35 +321,72 @@ const Profile = () => {
           </h2>
           
           <div className="profile-picture-container">
-            <div className="profile-picture">{getInitials()}</div>
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
+              onChange={handleAvatarChange}
+              style={{ display: 'none' }}
+            />
+            {(avatarPreview || user?.avatar_url) ? (
+              <div className="profile-picture" style={{ 
+                backgroundImage: `url(${avatarPreview || user.avatar_url})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center'
+              }}>
+              </div>
+            ) : (
+              <div className="profile-picture">{getInitials()}</div>
+            )}
             <div className="picture-actions">
               <button 
                 type="button" 
                 className="btn btn-secondary btn-small" 
                 onClick={handleChangePhoto}
+                disabled={saving || uploadingAvatar}
               >
                 {t('profile.changePhoto')}
               </button>
-              <button 
-                type="button" 
-                className="btn btn-secondary btn-small" 
-                onClick={handleRemovePhoto}
-              >
-                {t('profile.removePhoto')}
-              </button>
+              {user?.avatar_url && (
+                <button 
+                  type="button" 
+                  className="btn btn-secondary btn-small" 
+                  onClick={handleRemovePhoto}
+                  disabled={saving || uploadingAvatar}
+                >
+                  {t('profile.removePhoto')}
+                </button>
+              )}
             </div>
+            {avatarFile && (
+              <small style={{ color: 'var(--text-light)', fontSize: '12px', marginTop: '8px', display: 'block' }}>
+                New image selected. Click "Save Changes" to update.
+              </small>
+            )}
           </div>
 
           <form className="form-grid" onSubmit={handleSubmit}>
             <div className="form-group">
-              <label className="form-label">{t('profile.fullName')}</label>
+              <label className="form-label">First Name</label>
               <input
                 type="text"
                 className="form-input"
-                name="fullName"
-                value={formData.fullName}
+                name="firstName"
+                value={formData.firstName}
                 onChange={handleChange}
-                placeholder={t('profile.fullNamePlaceholder')}
+                placeholder="Enter your first name"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Last Name</label>
+              <input
+                type="text"
+                className="form-input"
+                name="lastName"
+                value={formData.lastName}
+                onChange={handleChange}
+                placeholder="Enter your last name"
               />
             </div>
 
@@ -133,9 +403,35 @@ const Profile = () => {
               <input
                 type="email"
                 className="form-input"
-                value={formData.email}
+                value={user?.email || formData.email}
                 disabled
               />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Username</label>
+              <input
+                type="text"
+                className="form-input"
+                value={user?.username || ''}
+                disabled
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Preferred Language</label>
+              <select
+                className="form-input"
+                name="preferredLanguage"
+                value={formData.preferredLanguage}
+                onChange={handleChange}
+              >
+                <option value="">Not set</option>
+                <option value="en">English</option>
+                <option value="ar">Arabic</option>
+                <option value="fr">French</option>
+                <option value="es">Spanish</option>
+              </select>
             </div>
 
             <div className="form-group">
@@ -148,16 +444,33 @@ const Profile = () => {
               />
             </div>
 
+            {error && (
+              <div style={{ 
+                color: 'var(--accent-red)', 
+                padding: '10px', 
+                marginBottom: '15px',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                borderRadius: '5px',
+                border: '1px solid var(--accent-red)'
+              }}>
+                {error}
+              </div>
+            )}
             <div className="action-buttons">
               <button 
                 type="button" 
                 className="btn btn-secondary" 
                 onClick={handleChangePassword}
+                disabled={saving}
               >
                 {t('profile.changePassword')}
               </button>
-              <button type="submit" className="btn btn-primary">
-                {t('profile.saveChanges')}
+              <button 
+                type="submit" 
+                className="btn btn-primary"
+                disabled={saving || uploadingAvatar}
+              >
+                {uploadingAvatar ? 'Uploading image...' : saving ? 'Saving...' : t('profile.saveChanges')}
               </button>
             </div>
           </form>
@@ -240,7 +553,19 @@ const Profile = () => {
           <div className="stats-grid">
             <div className="stat-item">
               <div className="stat-label">{t('profile.memberSince')}</div>
-              <div className="stat-value">Jan 2025</div>
+              <div className="stat-value">
+                {user?.created_at ? formatDate(user.created_at) : 'N/A'}
+              </div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-label">Last Login</div>
+              <div className="stat-value">
+                {user?.last_login ? formatDate(user.last_login) : 'Never'}
+              </div>
+            </div>
+            <div className="stat-item">
+              <div className="stat-label">User ID</div>
+              <div className="stat-value">{user?.user_id || 'N/A'}</div>
             </div>
             <div className="stat-item">
               <div className="stat-label">{t('profile.totalVideos')}</div>
@@ -367,8 +692,9 @@ const Profile = () => {
             type="button" 
             className="btn btn-danger" 
             onClick={handleDeleteAccount}
+            disabled={saving}
           >
-            {t('profile.deleteAccount')}
+            {saving ? 'Deleting...' : t('profile.deleteAccount')}
           </button>
         </section>
       </div>

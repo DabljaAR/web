@@ -1,12 +1,13 @@
 import api from './api';
 
 export const authService = {
-  login: async (email, password) => {
-    return api.post('/auth/login', { email, password });
+  login: async (username, password) => {
+    // Backend accepts username or email in the username field
+    return api.post('/login', { username, password });
   },
 
   register: async (userData) => {
-    return api.post('/auth/register', userData);
+    return api.post('/signup', userData);
   },
 
   logout: async () => {
@@ -17,8 +18,8 @@ export const authService = {
     return api.get('/auth/me');
   },
 
-  refreshToken: async () => {
-    return api.post('/auth/refresh');
+  refreshToken: async (refreshToken) => {
+    return api.post('/auth/refresh', { refresh_token: refreshToken });
   },
 };
 
