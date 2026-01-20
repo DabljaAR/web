@@ -138,7 +138,7 @@ const api = {
     } catch (error) {
       // Handle network errors
       if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Unable to connect to the server. Please check if the backend is running and CORS is configured correctly.');
+        throw new Error('Something went wrong');
       }
       throw error;
     }
@@ -254,7 +254,7 @@ const api = {
     } catch (error) {
       // Handle network errors (CORS, connection refused, etc.)
       if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Unable to connect to the server. Please check if the backend is running and CORS is configured correctly.');
+        throw new Error('Something went wrong');
       }
       throw error;
     }
@@ -362,7 +362,7 @@ const api = {
     } catch (error) {
       // Handle network errors
       if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Unable to connect to the server. Please check if the backend is running and CORS is configured correctly.');
+        throw new Error('Something went wrong');
       }
       throw error;
     }
@@ -488,7 +488,7 @@ const api = {
     } catch (error) {
       // Handle network errors
       if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Unable to connect to the server. Please check if the backend is running and CORS is configured correctly.');
+        throw new Error('Something went wrong');
       }
       throw error;
     }

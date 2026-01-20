@@ -105,6 +105,17 @@ async def login(
     
     Returns access token, refresh token, and user information.
     """
+    # Test logging 
+    # import logging
+    # import traceback
+    # logger = logging.getLogger(__name__)
+    # logger.error("Test error", exc_info=True)
+    # logger.warning("Test warning", exc_info=True)
+    # logger.info("Test info", exc_info=True)
+    # logger.debug("Test debug", exc_info=True)
+    # logger.error("Test error", exc_info=True)
+    # logger.critical("Test critical", exc_info=True)
+    # raise Exception("Test error")
     try:
         return await user_service.login(login_data.username, login_data.password)
     except InvalidCredentialsException as e:

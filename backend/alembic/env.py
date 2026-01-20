@@ -5,6 +5,18 @@ from sqlalchemy import pool
 
 from alembic import context
 
+# Import app config and models
+import sys
+from pathlib import Path
+
+# Add the backend directory to the path
+backend_dir = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(backend_dir))
+
+from app.config import settings
+from app.core.db import Base
+from app.core.models import User, Role  # Import all models for autogenerate
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -14,11 +26,19 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+# Get database URL from settings and convert async to sync
+database_url = settings.DATABASE_URL
+# Convert asyncpg to psycopg2 for Alembic (which uses sync SQLAlchemy)
+if "+asyncpg" in database_url:
+    database_url = database_url.replace("+asyncpg", "+psycopg2")
+elif database_url.startswith("postgresql+asyncpg://"):
+    database_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+
+# Set the database URL in the config
+config.set_main_option("sqlalchemy.url", database_url)
+
+# Set target_metadata for autogenerate support
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
