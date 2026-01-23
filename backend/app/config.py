@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
+import os
 
 # Load environment variables from a .env file
 load_dotenv()
@@ -8,14 +9,17 @@ load_dotenv()
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
-    # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar"
+    DATABASE_URL: str = os.getenv(
+            "DATABASE_URL", 
+            "postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar"
+        )
     
-    # JWT Authentication
-    SECRET_KEY: str = "your-secret-key-change-this-in-production"  # Should be set via env var: JWT_SECRET
-    ALGORITHM: str = "HS256"  # JWT signing algorithm
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15  # Access token expiration (15 minutes)
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7  # Refresh token expiration (7 days)
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
+    ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+    
+    # Note: os.getenv returns strings, so we must cast to int
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15))
+    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
     
     class Config:
         env_file = ".env"
