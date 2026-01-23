@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest --coverage"
+    "test:coverage": "vitest --coverage",
+    "coverage:percentage": "node scripts/get-coverage.js"
   },
   "dependencies": {
     "react": "^19.2.0",
