@@ -32,7 +32,9 @@ database_url = settings.DATABASE_URL
 if "+asyncpg" in database_url:
     database_url = database_url.replace("+asyncpg", "+psycopg2")
 elif database_url.startswith("postgresql+asyncpg://"):
-    database_url = database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    database_url = database_url.replace(
+        "postgresql+asyncpg://", "postgresql+psycopg2://"
+    )
 
 # Set the database URL in the config
 config.set_main_option("sqlalchemy.url", database_url)
@@ -85,7 +87,10 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            compare_server_default=True,
         )
 
         with context.begin_transaction():
