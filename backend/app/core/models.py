@@ -18,6 +18,7 @@ class Role(Base):
         onupdate=datetime.utcnow
     )
     
+    # Note: relationship commented out as role_id doesn't exist in users table
     users: Mapped[List["User"]] = relationship("User", back_populates="role")
     
     def __repr__(self):
@@ -32,7 +33,7 @@ class User(Base):
     first_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     last_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
-    password: Mapped[str] = mapped_column(String(255), nullable=False)
+    password: Mapped[str] = mapped_column("hashed_password", String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, 
@@ -46,7 +47,9 @@ class User(Base):
     )
     preferred_language: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, default=True, nullable=True)
     
+    # Note: role_id column doesn't exist in current database schema
     role_id: Mapped[Optional[int]] = mapped_column(
         Integer, 
         ForeignKey("roles.role_id", ondelete="SET NULL"), 

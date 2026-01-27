@@ -83,7 +83,7 @@ backend/
     uvicorn app.main:app --reload
     ```
 
-## Environment Variables
+### Environment Variables
 
 To run the application, you need to set the following environment variables:
 
@@ -97,7 +97,16 @@ DATABASE_URL=postgresql://user:password@localhost/dbname
 SECRET_KEY=your_secret_key
 ```
 
-## Running Tests
+### Development Commands
+
+To generate new database migrations after making changes to the models, use:
+
+```bash
+alembic revision --autogenerate -m "Your migration message"
+alembic upgrade head
+```
+
+### Running Tests
 To run the tests, use the following command:
 
 ```bash
