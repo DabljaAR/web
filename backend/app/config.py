@@ -22,6 +22,21 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
     
+
+        # Logging Configuration
+    LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    LOG_DIR: str = "logs"  # Directory for log files
+    LOG_FILE: str = "app.log"  # Main log file name
+    LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10MB - max size before rotation
+    LOG_BACKUP_COUNT: int = 5  # Number of backup log files to keep
+    LOG_ENABLE_CONSOLE: bool = True  # Enable console logging
+    LOG_ENABLE_FILE: bool = True  # Enable file logging
+    LOG_JSON_FORMAT: bool = False  # Use JSON format for logs
+    LOG_ENABLE_SUCCESS: bool = True  # Enable success request logging (2xx status codes)
+   
+
+
+   
     class Config:
         env_file = ".env"
         case_sensitive = False
