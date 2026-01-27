@@ -32,7 +32,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Health check - simple HTTP check without database dependency
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()" || exit 1
 
 # Expose port
 EXPOSE 8000

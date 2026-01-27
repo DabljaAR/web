@@ -9,7 +9,7 @@ services:
     ports:
       - "5433:5432"  # Changed from 5432:5432 to 5433:5432
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - dabljaar_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d dabljaar"]
       interval: 10s
@@ -40,4 +40,4 @@ services:
 
 
 volumes:
-  postgres_data:
+  dabljaar_postgres_data:
