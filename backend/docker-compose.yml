@@ -1,5 +1,4 @@
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     container_name: dabljaar_postgres
@@ -8,7 +7,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: dabljaar
     ports:
-      - "5433:5432"
+      - "5433:5432"  # Changed from 5432:5432 to 5433:5432
     volumes:
       - dabljaar_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,15 +15,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - dabljaar_network
 
-  # Backend API (FastAPI)
-  backend:
+  app:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
-    container_name: dabljaar_backend
+    container_name: dabljaar_app
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
@@ -34,32 +30,14 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend:/app
-      - /app/__pycache__
+      - .:/app
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
-    networks:
-      - dabljaar_network
 
-  # Frontend (React/Vite)
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: dabljaar_frontend
-    ports:
-      - "5173:5173"
-    depends_on:
-      - backend
-    restart: unless-stopped
-    networks:
-      - dabljaar_network
+
+
 
 volumes:
   dabljaar_postgres_data:
-
-networks:
-  dabljaar_network:
-    driver: bridge
