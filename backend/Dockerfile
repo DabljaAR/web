@@ -21,6 +21,10 @@ COPY . .
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+
+# Copy entrypoint script with proper permissions
+COPY --chown=appuser:appuser --chmod=755 entrypoint.sh /app/entrypoint.sh
+
 USER appuser
 
 # Set Python environment variables
@@ -37,5 +41,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # Expose port
 EXPOSE 8000
 
-# Run application WITHOUT --reload in production
+# Set entrypoint to migration script
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
