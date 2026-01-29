@@ -2,7 +2,16 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from pydantic import model_validator
-
+from decimal import Decimal
+from pydantic import BaseModel, Field
+from app.core.enums import (
+    CurrencyEnum,
+    PaymentMethodEnum,
+    PaymentGatewayEnum,
+    PaymentStatusEnum,
+    SubscriptionStatusEnum,
+    languageEnum,
+)
 
 
 class UserBase(BaseModel):
@@ -18,21 +27,17 @@ class UserBase(BaseModel):
         description="User's email address",
         examples=["user@example.com", "moustafa@company.com"]
     )
-    first_name: Optional[str] = Field(
-        None,
+    first_name: str = Field(
         max_length=255,
         description="User's first name",
         examples=["moustafa", "abdallah"]
     )
-    last_name: Optional[str] = Field(
-        None,
+    last_name: str = Field(
         max_length=255,
         description="User's last name",
         examples=["magdy", "ibrahim"]
     )
-    preferred_language: Optional[str] = Field(
-        None,
-        max_length=10,
+    preferred_language: languageEnum = Field(
         description="User's preferred language code (e.g., 'en', 'ar')",
         examples=["en", "ar", "fr"]
     )
@@ -41,6 +46,12 @@ class UserBase(BaseModel):
         max_length=500,
         description="URL to user's avatar image",
         examples=["https://example.com/avatars/user123.jpg"]
+    )
+
+    is_active: bool = Field(
+        True,
+        description="Whether the user is active",
+        examples=[True]
     )
 
     @field_validator('username')
@@ -227,6 +238,11 @@ class UserResponse(UserBase):
         examples=["2024-01-25T09:15:00Z"]
     )
 
+    is_active: bool = Field(
+        True,
+        description="Whether the user is active",
+        examples=[True]
+    )
     model_config = ConfigDict(
         from_attributes=True,  # Allows conversion from SQLAlchemy models
         json_schema_extra={
@@ -240,7 +256,8 @@ class UserResponse(UserBase):
                 "avatar_url": "https://example.com/avatars/user123.jpg",
                 "created_at": "2024-01-15T10:30:00Z",
                 "updated_at": "2024-01-20T14:45:00Z",
-                "last_login": "2024-01-25T09:15:00Z"
+                "last_login": "2024-01-25T09:15:00Z",
+                "is_active": True
             }
         }
     )
@@ -258,6 +275,7 @@ class UserPublicResponse(BaseModel):
     last_name: Optional[str] = None
     avatar_url: Optional[str] = None
     preferred_language: Optional[str] = None
+
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -342,3 +360,119 @@ class UserLoginResponse(BaseModel):
             }
         }
     )
+
+
+class SubscriptionPlanBase(BaseModel):
+    name: str = Field(
+        ...,
+        min_length=3,
+        max_length=100,
+        examples=["Basic", "Pro", "Enterprise"]
+    )
+    description: Optional[str] = Field(
+        None,
+        examples=["Basic monthly plan"]
+    )
+    price: Decimal = Field(
+        ...,
+        ge=0,
+        examples=["99.99", "199.00"]
+    )
+    is_active: bool = Field(
+        True,
+        examples=[True]
+    )
+
+class SubscriptionPlanCreate(SubscriptionPlanBase):
+    pass
+
+
+class SubscriptionPlanUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=3, max_length=100, description="Name of the subscription plan")
+    description: Optional[str] = Field(None, description="Description of the subscription plan")
+    price: Optional[float] = Field(None, ge=0, description="Price of the subscription plan")
+    is_active: Optional[bool] = Field(None, description="Whether the subscription plan is active")
+
+
+class SubscriptionPlanResponse(SubscriptionPlanBase):
+    plan_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserSubscriptionBase(BaseModel):
+    user_id: int = Field(..., examples=[1])
+    plan_id: int = Field(..., examples=[1])
+    start_date: datetime = Field(
+        default_factory=datetime.utcnow,
+        examples=["2026-01-01T00:00:00Z"]
+    )
+    end_date: datetime = Field(
+        ...,
+        examples=["2027-01-01T00:00:00Z"]
+    )
+
+class UserSubscriptionCreate(UserSubscriptionBase):
+    pass
+
+
+class UserSubscriptionUpdate(BaseModel):
+    plan_id: Optional[int] = Field(None, description="ID of the subscription plan")
+    end_date: Optional[datetime] = Field(None, description="End date of the subscription")
+
+
+class UserSubscriptionResponse(UserSubscriptionBase):
+    subscription_id: int
+    status: SubscriptionStatusEnum = Field(
+        examples=[SubscriptionStatusEnum.ACTIVE]
+    )
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaymentBase(BaseModel):
+    subscription_id: int = Field(..., examples=[1])
+    amount: Decimal = Field(
+        ...,
+        ge=0,
+        examples=["49.99"]
+    )
+    currency: CurrencyEnum = Field(
+        examples=[CurrencyEnum.USD]
+    )
+    payment_method: PaymentMethodEnum = Field(
+        examples=[PaymentMethodEnum.CARD]
+    )
+    payment_gateway: PaymentGatewayEnum = Field(
+        examples=[PaymentGatewayEnum.STRIPE]
+    )
+    status: PaymentStatusEnum = Field(
+        default=PaymentStatusEnum.PENDING,
+        examples=[PaymentStatusEnum.PAID]
+    )
+    transaction_id: str = Field(
+        ...,
+        examples=["txn_1N9ZQe2eZvKYlo2C"]
+    )
+
+class PaymentCreate(PaymentBase):
+    pass
+
+
+class PaymentUpdate(BaseModel):
+    amount: Optional[float] = Field(None, ge=0, description="Payment amount")
+    payment_method: Optional[str] = Field(None, max_length=100, description="Payment method")
+    status: Optional[str] = Field(None, max_length=50, description="Payment status")
+
+
+class PaymentResponse(PaymentBase):
+    payment_id: int
+    payment_date: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+

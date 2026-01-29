@@ -1,4 +1,3 @@
-"""API router for core endpoints."""
 from datetime import datetime, timezone
 from typing import List
 import os
