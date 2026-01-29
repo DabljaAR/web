@@ -72,7 +72,7 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    """Schema for creating a new user."""
+    """Schema for creating a new user - ONLY user-provided fields, NOT database-generated ones."""
     password: str = Field(
         ...,
         min_length=8,
@@ -81,6 +81,11 @@ class UserCreate(UserBase):
         examples=["SecurePass123!", "MyP@ssw0rd"]
     )
 
+    is_active: bool = Field(
+        True,
+        description="Whether the user is active",
+        examples=[True]
+    )
     @field_validator('password')
     @classmethod
     def validate_password(cls, v: str) -> str:
@@ -108,6 +113,7 @@ class UserCreate(UserBase):
             }
         }
     )
+
 
 
 # ============================================================================
@@ -232,17 +238,18 @@ class UserResponse(UserBase):
         description="Timestamp when the user was last updated",
         examples=["2024-01-20T14:45:00Z"]
     )
-    last_login: Optional[datetime] = Field(
+    last_login: datetime = Field(
         None,
         description="Timestamp of the user's last login",
         examples=["2024-01-25T09:15:00Z"]
     )
 
     is_active: bool = Field(
-        True,
+        ...,
         description="Whether the user is active",
         examples=[True]
     )
+
     model_config = ConfigDict(
         from_attributes=True,  # Allows conversion from SQLAlchemy models
         json_schema_extra={

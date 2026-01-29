@@ -28,17 +28,14 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Get database URL from settings and convert async to sync
+# 1. Get database URL from settings
 database_url = settings.DATABASE_URL
-# Convert asyncpg to psycopg2 for Alembic (which uses sync SQLAlchemy)
-if "+asyncpg" in database_url:
-    database_url = database_url.replace("+asyncpg", "+psycopg2")
-elif database_url.startswith("postgresql+asyncpg://"):
-    database_url = database_url.replace(
-        "postgresql+asyncpg://", "postgresql+psycopg2://"
-    )
 
-# Set the database URL in the config
+# 2. ENSURE it is using asyncpg (Remove the old logic that was converting it to psycopg2)
+if "postgresql://" in database_url and "+asyncpg" not in database_url:
+    database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+
+# 3. Set the database URL in the config
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Set target_metadata for autogenerate support
@@ -74,41 +71,25 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def do_run_migrations(connection):
-    context.configure(
-        connection=connection,
-        target_metadata=target_metadata
-    )
-
-    with context.begin_transaction():
-        context.run_migrations()
-
-
 async def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
     connectable = create_async_engine(
         config.get_main_option("sqlalchemy.url"),
         poolclass=pool.NullPool,
     )
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-            compare_server_default=True,
-        )
+    # Use 'async with' instead of 'with'
+    async with connectable.connect() as connection:
+        # Use 'await connection.run_sync' to bridge the async connection to sync Alembic
+        await connection.run_sync(do_run_migrations)
 
-        with context.begin_transaction():
-            context.run_migrations()
+    await connectable.dispose()
 
+def do_run_migrations(connection):
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+    )
 
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    asyncio.run(run_migrations_online())
+    with context.begin_transaction():
+        context.run_migrations()

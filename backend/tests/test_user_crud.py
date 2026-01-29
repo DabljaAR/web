@@ -54,7 +54,8 @@ def sample_user():
         avatar_url=None,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
-        last_login=None,
+        last_login=datetime.utcnow(),
+        is_active = True,
         role_id=None
     )
 
@@ -290,3 +291,8 @@ class TestSignup:
         
         with pytest.raises(UserAlreadyExistsException):
             await user_service.signup(sample_user_create)
+
+
+
+
+

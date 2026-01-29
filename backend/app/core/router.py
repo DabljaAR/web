@@ -6,12 +6,20 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.schema import UserCreate, UserLogin, TokenRefresh, UserLoginResponse, TokenResponse, UserResponse, UserUpdate
+from app.core.schema import (
+    UserCreate, UserLogin, TokenRefresh, UserLoginResponse, TokenResponse, 
+    UserResponse, UserUpdate, SubscriptionPlanCreate, SubscriptionPlanResponse,
+    SubscriptionPlanUpdate, UserSubscriptionCreate, UserSubscriptionResponse,
+    UserSubscriptionUpdate, PaymentCreate, PaymentResponse, PaymentUpdate
+)
 from app.core.db import get_db
-from app.core.models import User
-from app.core.repository import UserRepository
+from app.core.models import User, SubscriptionPlan, UserSubscription, Payment
+from app.core.repository import (
+    UserRepository, SubscriptionPlanRepository, 
+    UserSubscriptionRepository, PaymentRepository
+)
 from app.core.auth import AuthService, get_auth_service, get_current_user
-from app.core.services import UserService
+from app.core.services import UserService, SubscriptionPlanService, UserSubscriptionService, PaymentService
 from app.core.exceptions import UserAlreadyExistsException, InvalidCredentialsException, TokenExpiredException
 from app.core.rate_limiter import limiter
 from fastapi import Request
@@ -44,6 +52,29 @@ def get_user_service(
     """
     user_repo = UserRepository(db, User)
     return UserService(user_repo, auth_service)
+
+def get_subscription_plan_service(
+    db: AsyncSession = Depends(get_db)
+) -> SubscriptionPlanService:
+    """Dependency injection factory for SubscriptionPlanService."""
+    repo = SubscriptionPlanRepository(db, SubscriptionPlan)
+    return SubscriptionPlanService(repo)
+
+
+def get_user_subscription_service(
+    db: AsyncSession = Depends(get_db)
+) -> UserSubscriptionService:
+    """Dependency injection factory for UserSubscriptionService."""
+    repo = UserSubscriptionRepository(db, UserSubscription)
+    return UserSubscriptionService(repo)
+
+
+def get_payment_service(
+    db: AsyncSession = Depends(get_db)
+) -> PaymentService:
+    """Dependency injection factory for PaymentService."""
+    repo = PaymentRepository(db, Payment)
+    return PaymentService(repo)
 
 
 @router.post("/signup", response_model=dict, status_code=status.HTTP_201_CREATED, tags=["auth"])
@@ -280,3 +311,411 @@ async def health_check():
     Returns service status and current UTC timestamp.
     """
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat() + "Z"}
+
+
+
+
+
+# subscription_plans_router = APIRouter(prefix="/subscription-plans", tags=["subscription-plans"])
+
+
+@router.post("/subscription-plans", response_model=SubscriptionPlanResponse, status_code=status.HTTP_201_CREATED, tags=["subscription-plans"])
+async def create_subscription_plan(
+    data: SubscriptionPlanCreate,
+    service: SubscriptionPlanService = Depends(get_subscription_plan_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create a new subscription plan.
+    
+    Request body:
+    - **name**: Plan name (3-100 characters)
+    - **description**: Plan description
+    - **price**: Plan price (>= 0)
+    - **is_active**: Whether the plan is active
+    
+    Requires JWT authentication.
+    
+    Returns:
+        Created subscription plan
+    """
+    return await service.create_plan(data)
+
+
+@router.get("/subscription-plans", response_model=List[SubscriptionPlanResponse], tags=["subscription-plans"])
+async def list_subscription_plans(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    service: SubscriptionPlanService = Depends(get_subscription_plan_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all subscription plans with pagination.
+    
+    Query parameters:
+    - **skip**: Number of records to skip
+    - **limit**: Maximum number of records to return
+    
+    Requires JWT authentication.
+    
+    Returns:
+        List of subscription plans
+    """
+    return await service.get_all_plans(skip=skip, limit=limit)
+
+
+@router.get("/subscription-plans/{plan_id}", response_model=SubscriptionPlanResponse, tags=["subscription-plans"])
+async def get_subscription_plan(
+    plan_id: int,
+    service: SubscriptionPlanService = Depends(get_subscription_plan_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get a specific subscription plan by ID.
+    
+    Path parameters:
+    - **plan_id**: Subscription plan ID
+    
+    Requires JWT authentication.
+    
+    Returns:
+        Subscription plan data
+        
+    Raises:
+        404 Not Found: Plan not found
+    """
+    return await service.get_plan_by_id(plan_id)
+
+
+@router.put("/subscription-plans/{plan_id}", response_model=SubscriptionPlanResponse, tags=["subscription-plans"])
+async def update_subscription_plan(
+    plan_id: int,
+    data: SubscriptionPlanUpdate,
+    service: SubscriptionPlanService = Depends(get_subscription_plan_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update a subscription plan.
+    
+    Path parameters:
+    - **plan_id**: Subscription plan ID
+    
+    Request body:
+    - **data**: Plan update data (all fields optional)
+    
+    Requires JWT authentication.
+    
+    Returns:
+        Updated subscription plan
+        
+    Raises:
+        404 Not Found: Plan not found
+    """
+    return await service.update_plan(plan_id, data)
+
+
+@router.delete("/subscription-plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["subscription-plans"])
+async def delete_subscription_plan(
+    plan_id: int,
+    service: SubscriptionPlanService = Depends(get_subscription_plan_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete a subscription plan.
+    
+    Path parameters:
+    - **plan_id**: Subscription plan ID
+    
+    Requires JWT authentication.
+    
+    Returns:
+        204 No Content on success
+        
+    Raises:
+        404 Not Found: Plan not found
+    """
+    await service.delete_plan(plan_id)
+    return None
+
+
+# ============================================================================
+# User Subscription Routes
+# ============================================================================
+
+
+@router.post("/subscriptions", response_model=UserSubscriptionResponse, status_code=status.HTTP_201_CREATED, tags=["subscriptions"])
+async def subscribe(
+    data: UserSubscriptionCreate,
+    service: UserSubscriptionService = Depends(get_user_subscription_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Subscribe user to a subscription plan.
+    
+    Request body:
+    - **user_id**: User ID
+    - **plan_id**: Subscription plan ID
+    - **start_date**: Subscription start date
+    - **end_date**: Subscription end date
+    
+    Requires JWT authentication.
+    
+    Returns:
+        Created user subscription
+    """
+    return await service.create_subscription(data)
+
+
+@router.get("/subscriptions", response_model=List[UserSubscriptionResponse], tags=["subscriptions"])
+async def list_subscriptions(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    service: UserSubscriptionService = Depends(get_user_subscription_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all user subscriptions with pagination.
+    
+    Query parameters:
+    - **skip**: Number of records to skip
+    - **limit**: Maximum number of records to return
+    
+    Requires JWT authentication.
+    
+    Returns:
+        List of user subscriptions
+    """
+    return await service.get_all_subscriptions(skip=skip, limit=limit)
+
+
+@router.get("/subscriptions/me", response_model=List[UserSubscriptionResponse], tags=["subscriptions"])
+async def my_subscriptions(
+    service: UserSubscriptionService = Depends(get_user_subscription_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get current user's subscriptions.
+    
+    Requires JWT authentication.
+    
+    Returns:
+        List of current user's subscriptions
+    """
+    return await service.get_user_subscriptions(current_user.user_id)
+
+
+@   router.get("/subscriptions/{subscription_id}", response_model=UserSubscriptionResponse, tags=["subscriptions"])
+async def get_subscription(
+    subscription_id: int,
+    service: UserSubscriptionService = Depends(get_user_subscription_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get a specific user subscription by ID.
+    
+    Path parameters:
+    - **subscription_id**: User subscription ID
+    
+    Requires JWT authentication.
+    
+    Returns:
+        User subscription data
+        
+    Raises:
+        404 Not Found: Subscription not found
+    """
+    return await service.get_subscription_by_id(subscription_id)
+
+
+@router.put("/subscriptions/{subscription_id}", response_model=UserSubscriptionResponse, tags=["subscriptions"])
+async def update_subscription(
+    subscription_id: int,
+    data: UserSubscriptionUpdate,
+    service: UserSubscriptionService = Depends(get_user_subscription_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update a user subscription.
+    
+    Path parameters:
+    - **subscription_id**: User subscription ID
+    
+    Request body:
+    - **data**: Subscription update data (all fields optional)
+    
+    Requires JWT authentication.
+    
+    Returns:
+        Updated user subscription
+        
+    Raises:
+        404 Not Found: Subscription not found
+    """
+    return await service.update_subscription(subscription_id, data)
+
+
+@router.delete("/subscriptions/{subscription_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["subscriptions"])
+async def delete_subscription(
+    subscription_id: int,
+    service: UserSubscriptionService = Depends(get_user_subscription_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete a user subscription.
+    
+    Path parameters:
+    - **subscription_id**: User subscription ID
+    
+    Requires JWT authentication.
+    
+    Returns:
+        204 No Content on success
+        
+    Raises:
+        404 Not Found: Subscription not found
+    """
+    await service.delete_subscription(subscription_id)
+    return None
+
+
+# ============================================================================
+# Payment Routes
+# ============================================================================
+
+
+@router.post("/payments", response_model=PaymentResponse, status_code=status.HTTP_201_CREATED, tags=["payments"])
+async def create_payment(
+    data: PaymentCreate,
+    service: PaymentService = Depends(get_payment_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create a new payment.
+    
+    Request body:
+    - **subscription_id**: User subscription ID
+    - **amount**: Payment amount
+    - **currency**: Currency (e.g., USD)
+    - **payment_method**: Payment method (e.g., CARD)
+    - **payment_gateway**: Payment gateway (e.g., STRIPE)
+    - **status**: Payment status
+    - **transaction_id**: Transaction ID from payment gateway
+    
+    Requires JWT authentication.
+    
+    Returns:
+        Created payment
+    """
+    return await service.create_payment(data)
+
+
+@router.get("", response_model=List[PaymentResponse], tags=["payments"])
+async def list_payments(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    service: PaymentService = Depends(get_payment_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all payments with pagination.
+    
+    Query parameters:
+    - **skip**: Number of records to skip
+    - **limit**: Maximum number of records to return
+    
+    Requires JWT authentication.
+    
+    Returns:
+        List of payments
+    """
+    return await service.get_all_payments(skip=skip, limit=limit)
+
+
+@router.get("/me", response_model=List[PaymentResponse], tags=["payments"])
+async def my_payments(
+    service: PaymentService = Depends(get_payment_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get current user's payments.
+    
+    Requires JWT authentication.
+    
+    Returns:
+        List of current user's payments
+    """
+    return await service.list_user_payments(current_user.user_id)
+
+
+@router.get("/{payment_id}", response_model=PaymentResponse, tags=["payments"])
+async def get_payment(
+    payment_id: int,
+    service: PaymentService = Depends(get_payment_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get a specific payment by ID.
+    
+    Path parameters:
+    - **payment_id**: Payment ID
+    
+    Requires JWT authentication.
+    
+    Returns:
+        Payment data
+        
+    Raises:
+        404 Not Found: Payment not found
+    """
+    return await service.get_payment_by_id(payment_id)
+
+
+@router.put("/{payment_id}", response_model=PaymentResponse, tags=["payments"])
+async def update_payment(
+    payment_id: int,
+    data: PaymentUpdate,
+    service: PaymentService = Depends(get_payment_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update a payment.
+    
+    Path parameters:
+    - **payment_id**: Payment ID
+    
+    Request body:
+    - **data**: Payment update data (all fields optional)
+    
+    Requires JWT authentication.
+    
+    Returns:
+        Updated payment
+        
+    Raises:
+        404 Not Found: Payment not found
+    """
+    return await service.update_payment(payment_id, data)
+
+
+@router.delete("/{payment_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["payments"])
+async def delete_payment(
+    payment_id: int,
+    service: PaymentService = Depends(get_payment_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete a payment.
+    
+    Path parameters:
+    - **payment_id**: Payment ID
+    
+    Requires JWT authentication.
+    
+    Returns:
+        204 No Content on success
+        
+    Raises:
+        404 Not Found: Payment not found
+    """
+    await service.delete_payment(payment_id)
+    return None

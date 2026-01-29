@@ -44,20 +44,19 @@ class User(Base):
     first_name: Mapped[str] = mapped_column(String(255), nullable=True)
     last_name: Mapped[str] = mapped_column(String(255), nullable=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
-    password: Mapped[str] = mapped_column("hashed_password", String(255), nullable=False)
+    password: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, 
         default=datetime.utcnow, 
         onupdate=datetime.utcnow
     )
-    last_login: Mapped[Optional[datetime]] = mapped_column(
+    last_login: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
     )
     preferred_language: Mapped[languageEnum] = mapped_column(SQLEnum(languageEnum, name="languages_enum"),nullable=False,default=languageEnum.ENGLISH)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, default=True, nullable=True)
     
     # Note: role_id column doesn't exist in current database schema
     role_id: Mapped[Optional[int]] = mapped_column(
@@ -70,7 +69,6 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False) #online
     role: Mapped[Optional["Role"]] = relationship("Role", back_populates="users")
     subscriptions: Mapped[List["UserSubscription"]] = relationship("UserSubscription", back_populates="user")
-    payments: Mapped[List["Payment"]] = relationship("Payment", back_populates="user")
 
  
     def __repr__(self):
@@ -127,7 +125,6 @@ class Payment(Base):
     __tablename__ = "payments"
 
     payment_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
     subscription_id: Mapped[int] = mapped_column(Integer, ForeignKey("user_subscriptions.subscription_id"),nullable=False,index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     currency: Mapped[CurrencyEnum] = mapped_column(SQLEnum(CurrencyEnum, name="currency_enum"),nullable=False,default=CurrencyEnum.USD)

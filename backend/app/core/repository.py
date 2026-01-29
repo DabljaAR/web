@@ -12,63 +12,63 @@ UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 
 
 class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
-
+    
     def __init__(self, db: AsyncSession, model: Type[T]):
         self.db = db
         self.model = model
-
+    
     async def create(self, obj_in: CreateSchemaType) -> T:
-        db_obj = self.model(**obj_in.model_dump())
+        db_obj = self.model(**obj_in.dict())
         self.db.add(db_obj)
         await self.db.commit()
         await self.db.refresh(db_obj)
         return db_obj
-
+    
     async def get_by_id(self, id: int) -> Optional[T]:
-        primary_key = inspect(self.model).primary_key[0]
-        stmt = select(self.model).where(primary_key == id)
+        stmt = select(self.model).where(self.model.user_id == id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-
+    
     async def get_all(self, skip: int = 0, limit: int = 10) -> List[T]:
         stmt = select(self.model).offset(skip).limit(limit)
         result = await self.db.execute(stmt)
         return result.scalars().all()
-
+    
     async def update(self, id: int, obj_in: UpdateSchemaType) -> T:
         db_obj = await self.get_by_id(id)
-
+        
         if not db_obj:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"{self.model.__name__} not found"
             )
-
-        update_data = obj_in.model_dump(exclude_unset=True)
+        
+        update_data = obj_in.dict(exclude_unset=True)
         for field, value in update_data.items():
             setattr(db_obj, field, value)
-
+        
+        self.db.add(db_obj)
         await self.db.commit()
         await self.db.refresh(db_obj)
         return db_obj
-
+    
     async def delete(self, id: int) -> bool:
         db_obj = await self.get_by_id(id)
-
+        
         if not db_obj:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"{self.model.__name__} not found"
             )
-
-        await self.db.delete(db_obj)
+        
+        self.db.delete(db_obj)
         await self.db.commit()
         return True
-
+    
     async def count(self) -> int:
-        stmt = select(func.count()).select_from(self.model)
+        stmt = select(self.model)
         result = await self.db.execute(stmt)
-        return result.scalar_one()
+        return len(result.scalars().all())
 
 
 class UserRepository(BaseRepository):
@@ -94,15 +94,17 @@ class UserRepository(BaseRepository):
         return result.scalars().all()
     
     async def get_active_users(self, skip: int = 0, limit: int = 10) -> List[T]:
+        from datetime import datetime, timedelta
+        
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         stmt = (
             select(self.model)
-            .where(self.model.is_active == True)
+            .where(self.model.last_login >= thirty_days_ago)
             .offset(skip)
             .limit(limit)
         )
         result = await self.db.execute(stmt)
         return result.scalars().all()
-
     
     async def username_exists(self, username: str) -> bool:
         user = await self.get_by_username(username)
