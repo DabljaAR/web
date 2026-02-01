@@ -1,15 +1,32 @@
-"""User service layer for business logic."""
 from datetime import datetime
+from sqlalchemy import true
 from typing import Optional, List
 from fastapi import HTTPException, status
-
 from app.core.models import User
-from app.core.schema import UserCreate, UserResponse, UserLoginResponse, UserUpdate
-from app.core.repository import UserRepository
+from app.core.schema import (
+    UserCreate,
+    UserUpdate,
+    UserResponse,
+    UserLoginResponse,
+    SubscriptionPlanCreate,
+    SubscriptionPlanUpdate,
+    SubscriptionPlanResponse,
+    UserSubscriptionCreate,
+    UserSubscriptionUpdate,
+    UserSubscriptionResponse,
+    PaymentCreate,
+    PaymentUpdate,
+    PaymentResponse
+)
+from app.core.repository import UserRepository, SubscriptionPlanRepository, UserSubscriptionRepository, PaymentRepository
 from app.core.auth import AuthService
-from app.core.exceptions import UserAlreadyExistsException, InvalidCredentialsException
-
-
+from app.core.exceptions import (
+    UserAlreadyExistsException,
+    InvalidCredentialsException
+)
+from app.config import settings
+import logging
+logger = logging.getLogger(__name__)
 class UserService:
     """User service with dependency injection."""
     
@@ -60,7 +77,8 @@ class UserService:
             first_name=user_data.first_name,
             last_name=user_data.last_name,
             preferred_language=user_data.preferred_language,
-            avatar_url=user_data.avatar_url
+            avatar_url=user_data.avatar_url,
+            is_active = user_data.is_active
         )
         
         # Save to database
@@ -68,6 +86,7 @@ class UserService:
         await self.user_repo.db.commit()
         await self.user_repo.db.refresh(db_user)
         
+        logger.info(db_user)
         # Return user response
         return UserResponse.model_validate(db_user)
     
@@ -246,3 +265,80 @@ class UserService:
         await self.user_repo.db.commit()
         
         return True
+
+class SubscriptionPlanService:
+    def __init__(self, subscription_plan_repo: "SubscriptionPlanRepository"):
+        self.subscription_plan_repo = subscription_plan_repo
+
+    async def create_plan(self, plan_data: "SubscriptionPlanCreate") -> "SubscriptionPlanResponse":
+        plan = await self.subscription_plan_repo.create(plan_data)
+        return SubscriptionPlanResponse.model_validate(plan)
+
+    async def get_plan_by_id(self, plan_id: int) -> "SubscriptionPlanResponse":
+        plan = await self.subscription_plan_repo.get_by_id(plan_id)
+        if not plan:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subscription plan not found")
+        return SubscriptionPlanResponse.model_validate(plan)
+
+    async def get_all_plans(self, skip: int = 0, limit: int = 10) -> List["SubscriptionPlanResponse"]:
+        plans = await self.subscription_plan_repo.get_all(skip=skip, limit=limit)
+        return [SubscriptionPlanResponse.model_validate(plan) for plan in plans]
+
+    async def update_plan(self, plan_id: int, plan_data: "SubscriptionPlanUpdate") -> "SubscriptionPlanResponse":
+        plan = await self.subscription_plan_repo.update(plan_id, plan_data)
+        return SubscriptionPlanResponse.model_validate(plan)
+
+    async def delete_plan(self, plan_id: int) -> bool:
+        return await self.subscription_plan_repo.delete(plan_id)
+
+
+class UserSubscriptionService:
+    def __init__(self, user_subscription_repo: "UserSubscriptionRepository"):
+        self.user_subscription_repo = user_subscription_repo
+
+    async def create_subscription(self, subscription_data: "UserSubscriptionCreate") -> "UserSubscriptionResponse":
+        subscription = await self.user_subscription_repo.create(subscription_data)
+        return UserSubscriptionResponse.model_validate(subscription)
+
+    async def get_subscription_by_id(self, subscription_id: int) -> "UserSubscriptionResponse":
+        subscription = await self.user_subscription_repo.get_by_id(subscription_id)
+        if not subscription:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User subscription not found")
+        return UserSubscriptionResponse.model_validate(subscription)
+
+    async def get_all_subscriptions(self, skip: int = 0, limit: int = 10) -> List["UserSubscriptionResponse"]:
+        subscriptions = await self.user_subscription_repo.get_all(skip=skip, limit=limit)
+        return [UserSubscriptionResponse.model_validate(sub) for sub in subscriptions]
+
+    async def update_subscription(self, subscription_id: int, subscription_data: "UserSubscriptionUpdate") -> "UserSubscriptionResponse":
+        subscription = await self.user_subscription_repo.update(subscription_id, subscription_data)
+        return UserSubscriptionResponse.model_validate(subscription)
+
+    async def delete_subscription(self, subscription_id: int) -> bool:
+        return await self.user_subscription_repo.delete(subscription_id)
+
+
+class PaymentService:
+    def __init__(self, payment_repo: "PaymentRepository"):
+        self.payment_repo = payment_repo
+
+    async def create_payment(self, payment_data: "PaymentCreate") -> "PaymentResponse":
+        payment = await self.payment_repo.create(payment_data)
+        return PaymentResponse.model_validate(payment)
+
+    async def get_payment_by_id(self, payment_id: int) -> "PaymentResponse":
+        payment = await self.payment_repo.get_by_id(payment_id)
+        if not payment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+        return PaymentResponse.model_validate(payment)
+
+    async def get_all_payments(self, skip: int = 0, limit: int = 10) -> List["PaymentResponse"]:
+        payments = await self.payment_repo.get_all(skip=skip, limit=limit)
+        return [PaymentResponse.model_validate(payment) for payment in payments]
+
+    async def update_payment(self, payment_id: int, payment_data: "PaymentUpdate") -> "PaymentResponse":
+        payment = await self.payment_repo.update(payment_id, payment_data)
+        return PaymentResponse.model_validate(payment)
+
+    async def delete_payment(self, payment_id: int) -> bool:
+        return await self.payment_repo.delete(payment_id)

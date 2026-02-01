@@ -28,6 +28,11 @@ backend/
 │   │   ├── services.py             # Business logic (auth, user management)
 │   │   ├── repository.py           # Data access layer
 │   │   └── exceptions.py           # Core-specific exceptions
+│   │   ├── routers/                # Sub-routers for different entities
+│   │       ├── subscription_plan.py
+│   │       ├── user_subscription.py
+│   │       ├── payment.py
+│   │       └── recipe.py
 │   │
 │   ├── stt/                        # Speech-to-Text module
 │   ├── nmt/                        # Neural Machine Translation module
@@ -75,13 +80,60 @@ backend/
     pip install -r requirements.txt
     ```
 4. Set up the database:
-    ```bash
-    alembic upgrade head
-    ```
+    *   Create a `.env` file in the project root and add the following environment variables:
+        ```env
+        DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar
+        SECRET_KEY=your_secret_key
+        ```
+    *   Run database migrations:
+        ```bash
+        alembic upgrade head
+        ```
 5. Start the development server:
     ```bash
     uvicorn app.main:app --reload
     ```
+    The application will be available at `http://127.0.0.1:8000`.
+
+## API Endpoints
+
+### User Endpoints (`/api/users`)
+- `POST /api/signup`: Register a new user.
+- `POST /api/login`: Authenticate user and get access/refresh tokens.
+- `POST /api/auth/refresh`: Refresh access token using refresh token.
+- `GET /api/users/{user_id}`: Get a user by ID.
+- `GET /api/users`: List all users with pagination.
+- `PUT /api/users/{user_id}`: Update a user's information.
+- `DELETE /api/users/{user_id}`: Delete a user by ID.
+- `GET /api/health`: Simple health check endpoint.
+
+### Subscription Plan Endpoints (`/api/subscription-plans`)
+- `POST /api/subscription-plans/`: Create a new subscription plan.
+- `GET /api/subscription-plans/{plan_id}`: Get a subscription plan by ID.
+- `GET /api/subscription-plans/`: List all subscription plans with pagination.
+- `PUT /api/subscription-plans/{plan_id}`: Update a subscription plan.
+- `DELETE /api/subscription-plans/{plan_id}`: Delete a subscription plan.
+
+### User Subscription Endpoints (`/api/user-subscriptions`)
+- `POST /api/user-subscriptions/`: Create a new user subscription.
+- `GET /api/user-subscriptions/{subscription_id}`: Get a user subscription by ID.
+- `GET /api/user-subscriptions/`: List all user subscriptions with pagination.
+- `PUT /api/user-subscriptions/{subscription_id}`: Update a user subscription.
+- `DELETE /api/user-subscriptions/{subscription_id}`: Delete a user subscription.
+
+### Payment Endpoints (`/api/payments`)
+- `POST /api/payments/`: Create a new payment.
+- `GET /api/payments/{payment_id}`: Get a payment by ID.
+- `GET /api/payments/`: List all payments with pagination.
+- `PUT /api/payments/{payment_id}`: Update a payment.
+- `DELETE /api/payments/{payment_id}`: Delete a payment.
+
+### Recipe Endpoints (`/api/recipes`)
+- `POST /api/recipes/`: Create a new recipe.
+- `GET /api/recipes/{recipe_id}`: Get a recipe by ID.
+- `GET /api/recipes/`: List all recipes with pagination.
+- `PUT /api/recipes/{recipe_id}`: Update a recipe.
+- `DELETE /api/recipes/{recipe_id}`: Delete a recipe.
 
 ### Environment Variables
 

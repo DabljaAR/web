@@ -4,6 +4,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import DeclarativeBase
 from fastapi import HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import inspect, func
 
 T = TypeVar("T", bound=DeclarativeBase)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
@@ -112,3 +113,58 @@ class UserRepository(BaseRepository):
     async def email_exists(self, email: str) -> bool:
         user = await self.get_by_email(email)
         return user is not None
+
+
+class SubscriptionPlanRepository(BaseRepository):
+    pass
+
+
+class UserSubscriptionRepository(BaseRepository):
+    
+    async def get_by_user_id(self, user_id: int) -> List[T]:
+        stmt = select(self.model).where(self.model.user_id == user_id)
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+
+    async def get_by_plan_id(self, plan_id: int) -> List[T]:
+        stmt = select(self.model).where(self.model.plan_id == plan_id)
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+
+    async def get_active_by_user_id(self, user_id: int) -> List[T]:
+        stmt = (
+            select(self.model)
+            .where(
+                self.model.user_id == user_id,
+                self.model.status == SubscriptionStatusEnum.ACTIVE,
+                self.model.end_date >= datetime.utcnow()
+            )
+        )
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+
+
+class PaymentRepository(BaseRepository):
+    
+    async def get_by_subscription_id(self, subscription_id: int) -> List[T]:
+        stmt = select(self.model).where(self.model.subscription_id == subscription_id)
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+
+    async def get_completed_by_subscription(self, subscription_id: int) -> List[T]:
+        stmt = (
+            select(self.model)
+            .where(
+                self.model.subscription_id == subscription_id,
+                self.model.status == PaymentStatusEnum.COMPLETED
+            )
+        )
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
+
+
+    async def get_by_transaction_id(self, transaction_id: str) -> Optional[T]:
+        stmt = select(self.model).where(self.model.transaction_id == transaction_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
