@@ -1,0 +1,32 @@
+name: "Deliverables"
+description: "Each issue is a deliverable that relates to a Goal"
+title: "Short name for the Deliverable"
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Purpose**: Add your deliverables here and keep adding your tasks/activities needed to finish the deliverable.
+
+
+  - type: textarea
+    id: Deliverable
+    attributes:
+      label: "Add the deliverable and any relevant details"
+    validations:
+      required: true
+
+  - type: textarea
+    id: tasks
+    attributes:
+        label: "Tasks/activitiesAcceptance criteria (Definition of Done)"
+        value: |
+          - [ ] Task 1 (1 unit)
+          - [ ] Task 2 (2 units)
+          - [ ] ... [Add/remove as needed] 
+
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: "Risks & notes & unknowns"
