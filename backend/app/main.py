@@ -98,7 +98,11 @@ async def read_root():
     return {"message": "Welcome to DabljaAR Backend"}
 
 
+from app.api.media_routers import router as media_router
+
 app.include_router(core_router, prefix="/api")
+app.include_router(media_router, prefix="/api")
+
 
 # Mount static files for uploaded avatars
 uploads_dir = Path("uploads")
