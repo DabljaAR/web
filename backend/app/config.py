@@ -22,6 +22,23 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
     
+    # Auth0 / Social configuration
+    GOOGLE_REDIRECT_URL: str = os.getenv("GOOGLE_REDIRECT_URL", "")
+    FACEBOOK_REDIRECT_URL: str = os.getenv("FACEBOOK_REDIRECT_URL", "")
+    AUTH0_DOMAIN: str = os.getenv("AUTH0_DOMAIN", "")
+    AUTH0_CLIENT_ID: str = os.getenv("AUTH0_CLIENT_ID", "")
+    AUTH0_CLIENT_SECRET: str = os.getenv("AUTH0_CLIENT_SECRET", "")
+    AUTH0_AUDIENCE: str = os.getenv("AUTH0_AUDIENCE", "")
+
+    # MinIO / S3 Configuration
+    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "dablaja-minio:9000")
+
+    MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+    MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+    MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
+    MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "False").lower() == "true"
+
+    
 
         # Logging Configuration
     LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -40,6 +57,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+        extra = "ignore"
+
 
 
 settings = Settings()
