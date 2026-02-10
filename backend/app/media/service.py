@@ -103,6 +103,108 @@ async def process_video_task(video_id: str, file_path_key: str):
                 await db.commit()
 
 
+
+async def process_video_hls_task(video_id: str, file_path_key: str):
+    """
+    Background task logic for HLS processing.
+    """
+    logger.info(f"Starting HLS processing for video {video_id}")
+    storage = get_storage_service()
+    ffmpeg = FFmpegService()
+    
+    async with AsyncSessionLocal() as db:
+        try:
+            # 1. Update status to PROCESSING
+            video = await db.get(Video, video_id)
+            if not video:
+                logger.error(f"Video {video_id} not found during processing")
+                return
+            
+            video.status = VideoStatus.PROCESSING
+            await db.commit()
+
+            # 2. Prepare file for ffmpeg (Download if S3)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                local_video_path = Path(temp_dir) / "input_video"
+                output_hls_dir = Path(temp_dir) / "hls"
+                output_hls_dir.mkdir()
+                
+                # Check if storage is S3 or Local
+                if isinstance(storage, S3StorageService):
+                    # Download from S3
+                    async with storage.session.client("s3", 
+                        endpoint_url=storage.endpoint_url,
+                        aws_access_key_id=storage.access_key,
+                        aws_secret_access_key=storage.secret_key
+                    ) as s3:
+                         await s3.download_file(storage.bucket_name, file_path_key, str(local_video_path))
+                else:
+                    abs_path = storage.get_absolute_path(file_path_key)
+                    local_video_path = Path(abs_path) 
+
+                # 3. Generate HLS
+                success = await ffmpeg.generate_hls(str(local_video_path), str(output_hls_dir))
+                if not success:
+                    raise MediaProcessingError("HLS Generation failed")
+
+                # 4. Upload HLS Directory
+                # We upload to videos/{user_id}/{video_id}/hls/
+                hls_key_prefix = await storage.upload_directory(str(output_hls_dir), f"videos/{video.user_id}/{video.id}/hls")
+                
+                # Index file is at prefix/index.m3u8
+                hls_playlist_key = f"{hls_key_prefix}/index.m3u8"
+                
+                # 5. Extract Metadata (from original)
+                metadata = await ffmpeg.get_metadata(str(local_video_path))
+                
+                # Update DB with metadata
+                video.duration = metadata.duration
+                video.width = metadata.width
+                video.height = metadata.height
+                video.size_bytes = metadata.size
+                video.format = "hls"
+                video.codec = metadata.codec
+                video.frame_rate = metadata.frame_rate
+                
+                # 6. Extract Audio (Optional, kept for consistency)
+                audio_key = None
+                if metadata.audio_present:
+                    audio_filename = f"{video_id}.mp3"
+                    audio_local_path = Path(temp_dir) / audio_filename
+                    success = await ffmpeg.extract_audio(str(local_video_path), str(audio_local_path))
+                    if success:
+                         audio_key = await storage.save_file(str(audio_local_path), directory=f"audio/{video.user_id}")
+
+                # 7. Generate Thumbnail
+                thumbnail_key = None
+                thumbnail_filename = f"{video_id}.jpg"
+                thumbnail_local_path = Path(temp_dir) / thumbnail_filename
+                success = await ffmpeg.generate_thumbnail(str(local_video_path), str(thumbnail_local_path))
+                if success:
+                    thumbnail_key = await storage.save_file(str(thumbnail_local_path), directory=f"thumbnails/{video.user_id}")
+
+                # Update File Path to point to the m3u8 playlist instead of the raw file
+                # Optional: Delete the raw file from storage if we only want to keep HLS?
+                # For now, let's keep the raw file as a "source" but update the main path to HLS.
+                # actually, user wants "store as chunk".
+                # video.file_path was the raw uploads. 
+                # Let's update file_path to be the HLS playlist.
+                video.file_path = hls_playlist_key
+                video.audio_path = audio_key
+                video.thumbnail_path = thumbnail_key
+                video.status = VideoStatus.COMPLETED
+                await db.commit()
+                logger.info(f"HLS Processing completed for video {video_id}")
+
+        except Exception as e:
+            logger.error(f"HLS Processing failed for video {video_id}: {e}")
+            video = await db.get(Video, video_id)
+            if video:
+                video.status = VideoStatus.FAILED
+                video.error_message = str(e)
+                await db.commit()
+
+
 class VideoService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -135,8 +237,48 @@ class VideoService:
         await self.db.commit()
         await self.db.refresh(new_video)
         
-        # 4. Task
+        # 4. Populate URL for immediate response
+        if new_video.file_path:
+            new_video.url = self.storage.get_url(new_video.file_path)
+
+        # 5. Task
         background_tasks.add_task(process_video_task, new_video.id, file_path_key)
+        
+        return new_video
+
+    async def upload_video_hls(
+        self, 
+        user_id: int, 
+        file: UploadFile, 
+        background_tasks: BackgroundTasks
+    ) -> Video:
+        # 1. Validation
+        if not file.content_type.startswith("video/"):
+            raise HTTPException(status_code=400, detail="Invalid file type.")
+            
+        # 2. Upload Raw Source first
+        file_path_key = await self.storage.save(file, directory=f"videos/{user_id}/source")
+        
+        # 3. Create DB Record
+        new_video = Video(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            title=file.filename or "Untitled",
+            original_filename=file.filename,
+            file_path=file_path_key, # Temporarily points to raw source
+            status=VideoStatus.PENDING,
+            size_bytes=file.size 
+        )
+        self.db.add(new_video)
+        await self.db.commit()
+        await self.db.refresh(new_video)
+        
+        # 4. Populate URL
+        if new_video.file_path:
+            new_video.url = self.storage.get_url(new_video.file_path)
+
+        # 5. Task - Use the HLS task
+        background_tasks.add_task(process_video_hls_task, new_video.id, file_path_key)
         
         return new_video
 

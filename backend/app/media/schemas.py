@@ -16,6 +16,13 @@ class VideoUpdate(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class VideoUploadResponse(BaseModel):
+    id: str
+    message: str = "The media is being processed"
+    status: VideoStatus
+    
+    model_config = ConfigDict(from_attributes=True)
+
 class VideoResponse(VideoBase):
     id: str
     user_id: int

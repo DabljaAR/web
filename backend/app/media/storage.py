@@ -31,6 +31,10 @@ class StorageService(Protocol):
         """Delete a file."""
         ...
 
+    async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
+        """Upload a local directory to storage."""
+        ...
+
 class LocalStorageService:
     def __init__(self, base_dir: str = "uploads", base_url: str = "/uploads"):
         self.base_dir = Path(base_dir)
@@ -87,6 +91,30 @@ class LocalStorageService:
             full_path.unlink()
             return True
         return False
+        
+    async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
+        """For local storage, we just copy contents to the target dir."""
+        target_dir = self.base_dir / remote_prefix
+        target_dir.mkdir(parents=True, exist_ok=True)
+        
+        local_path = Path(local_dir)
+        
+        try:
+            # We iterate and copy to ensure we control the structure
+            if not local_path.is_dir():
+                raise ValueError(f"{local_dir} is not a directory")
+                
+            for item in local_path.rglob("*"):
+                if item.is_file():
+                    relative_path = item.relative_to(local_path)
+                    dest = target_dir / relative_path
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, dest)
+            
+            return remote_prefix
+        except Exception as e:
+            logger.error(f"Error uploading directory locally: {e}")
+            raise e
 
 class S3StorageService:
     def __init__(self):
@@ -162,6 +190,28 @@ class S3StorageService:
         except Exception as e:
             logger.error(f"Error deleting from S3: {e}")
             return False
+            
+    async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
+        """Upload recursively to S3."""
+        local_path = Path(local_dir)
+        if not local_path.is_dir():
+             raise ValueError(f"{local_dir} is not a directory")
+
+        async with self.session.client("s3",
+            endpoint_url=self.endpoint_url,
+            aws_access_key_id=self.access_key,
+            aws_secret_access_key=self.secret_key
+        ) as s3:
+            await self._ensure_bucket(s3)
+            
+            for item in local_path.rglob("*"):
+                if item.is_file():
+                    relative_path = item.relative_to(local_path)
+                    # For windows paths, ensure forward slashes
+                    key = f"{remote_prefix}/{relative_path}".replace("\\", "/")
+                    await s3.upload_file(str(item), self.bucket_name, key)
+                    
+        return remote_prefix
 
 def get_storage_service() -> StorageService:
     # Prefer S3/MinIO if configured, otherwise fallback to Local
