@@ -5,7 +5,7 @@ from app.core.db import get_db
 from app.core.models import User
 from app.core.services import UserService 
 from app.media.models import Video
-from app.media.schemas import VideoResponse, VideoCreate
+from app.media.schemas import VideoResponse, VideoCreate, VideoUploadResponse
 from app.media.service import VideoService
 
 # Note: We need a way to get the current user. Assuming app.core.dependencies or similar exists.
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/videos", tags=["Media"])
 async def get_video_service(db: AsyncSession = Depends(get_db)) -> VideoService:
     return VideoService(db)
 
-@router.post("/upload", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/upload", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -29,7 +29,22 @@ async def upload_video(
     """
     Upload a video file.
     """
-    return await service.upload_video(current_user.user_id, file, background_tasks)
+    video = await service.upload_video(current_user.user_id, file, background_tasks)
+    return VideoUploadResponse(id=video.id, status=video.status)
+
+@router.post("/upload/hls", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_video_hls(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    service: VideoService = Depends(get_video_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload a video file and process it into HLS (HTTP Live Streaming) chunks.
+    This creates an .m3u8 playlist and .ts segment files in storage.
+    """
+    video = await service.upload_video_hls(current_user.user_id, file, background_tasks)
+    return VideoUploadResponse(id=video.id, status=video.status)
 
 @router.get("/", response_model=List[VideoResponse])
 async def list_videos(
@@ -54,7 +69,7 @@ async def get_video(
         raise HTTPException(status_code=403, detail="Not authorized to view this video")
     return video
 
-@router.delete("/{video_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{video_id}", status_code=status.HTTP_200_OK)
 async def delete_video(
     video_id: str,
     service: VideoService = Depends(get_video_service),
@@ -75,4 +90,4 @@ async def delete_video(
         print(f"Error deleting video: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
     
-    return None
+    return {"message": "Video deleted successfully"}

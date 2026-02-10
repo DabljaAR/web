@@ -156,3 +156,42 @@ class FFmpegService:
         except Exception as e:
             logger.error(f"Error generating thumbnail: {e}")
             return False
+
+    async def generate_hls(self, input_path: str, output_dir: str, segment_time: int = 10) -> bool:
+        """
+        Generate HLS playlist and segments.
+        output_dir: Directory where .m3u8 and .ts files will be saved.
+        """
+        output_playlist = Path(output_dir) / "index.m3u8"
+        
+        # Simple HLS conversion: copy video if possible or transcode to h264/aac
+        # We enforce h264/aac for compatibility
+        cmd = [
+            self.ffmpeg_path,
+            "-i", input_path,
+            "-codec:v", "libx264",
+            "-codec:a", "aac",
+            "-map", "0",
+            "-f", "hls",
+            "-hls_time", str(segment_time),
+            "-hls_list_size", "0", # Include all segments in the playlist
+            "-hls_segment_filename", str(Path(output_dir) / "segment_%03d.ts"),
+            str(output_playlist)
+        ]
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                logger.error(f"ffmpeg hls failed: {stderr.decode()}")
+                return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error generating HLS: {e}")
+            return False
