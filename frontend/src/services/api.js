@@ -23,7 +23,7 @@ const saveTokens = (accessToken, refreshToken) => {
   const storage = getStorage();
   storage.setItem('access_token', accessToken);
   storage.setItem('refresh_token', refreshToken);
-  
+
   // Also update the other storage if it exists (for migration)
   const otherStorage = storage === localStorage ? sessionStorage : localStorage;
   if (otherStorage.getItem('access_token')) {
@@ -95,11 +95,11 @@ const api = {
         'Content-Type': 'application/json',
         ...options.headers,
       };
-      
+
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      
+
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'GET',
         headers,
@@ -151,15 +151,23 @@ const api = {
         'Content-Type': 'application/json',
         ...options.headers,
       };
-      
+
+      let body;
+      if (data instanceof FormData) {
+        delete headers['Content-Type'];
+        body = data;
+      } else {
+        body = JSON.stringify(data);
+      }
+
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      
+
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(data),
+        body,
         ...options,
       });
 
@@ -173,7 +181,7 @@ const api = {
             const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
               method: 'POST',
               headers,
-              body: JSON.stringify(data),
+              body,
               ...options,
             });
 
@@ -267,11 +275,11 @@ const api = {
         'Content-Type': 'application/json',
         ...options.headers,
       };
-      
+
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      
+
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'PUT',
         headers,
@@ -375,11 +383,11 @@ const api = {
         'Content-Type': 'application/json',
         ...options.headers,
       };
-      
+
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
       }
-      
+
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'DELETE',
         headers,

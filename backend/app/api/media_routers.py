@@ -32,6 +32,32 @@ async def upload_video(
     video = await service.upload_video(current_user.user_id, file, background_tasks)
     return VideoUploadResponse(id=video.id, status=video.status)
 
+@router.post("/upload/audio", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_audio(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    service: VideoService = Depends(get_video_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload an audio file.
+    """
+    audio = await service.upload_audio(current_user.user_id, file, background_tasks)
+    return VideoUploadResponse(id=audio.id, status=audio.status)
+
+@router.post("/upload/text", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_text(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    service: VideoService = Depends(get_video_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload a text file.
+    """
+    text = await service.upload_text(current_user.user_id, file, background_tasks)
+    return VideoUploadResponse(id=text.id, status=text.status)
+
 @router.post("/upload/hls", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video_hls(
     background_tasks: BackgroundTasks,

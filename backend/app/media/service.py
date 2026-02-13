@@ -8,7 +8,7 @@ from typing import List, Optional
 from fastapi import UploadFile, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
-from app.media.models import Video, VideoStatus
+from app.media.models import Video, VideoStatus, MediaType
 from app.media.storage import get_storage_service, S3StorageService
 from app.media.ffmpeg_service import FFmpegService, MediaProcessingError
 from app.core.db import AsyncSessionLocal
@@ -35,33 +35,20 @@ async def process_video_task(video_id: str, file_path_key: str):
             video.status = VideoStatus.PROCESSING
             await db.commit()
 
-            # 2. Prepare file for ffmpeg (Download if S3)
+            # 2. Prepare file
             with tempfile.TemporaryDirectory() as temp_dir:
                 local_video_path = Path(temp_dir) / "input_video"
                 
-                # Check if storage is S3 or Local
-                # If S3, we must download. If Local, we could use path effectively if we knew absolute path mapping.
-                # safely: always download/copy to temp for processing to avoid lock issues or network latency during processing
-                
                 if isinstance(storage, S3StorageService):
-                    # Download from S3
-                    async with storage.session.client("s3", 
-                        endpoint_url=storage.endpoint_url,
-                        aws_access_key_id=storage.access_key,
-                        aws_secret_access_key=storage.secret_key
-                    ) as s3:
+                    async with storage.session.client("s3", endpoint_url=storage.endpoint_url, aws_access_key_id=storage.access_key, aws_secret_access_key=storage.secret_key) as s3:
                          await s3.download_file(storage.bucket_name, file_path_key, str(local_video_path))
                 else:
-                    # Local storage: copy or symlink? Copy is safer.
-                    # Use get_absolute_path if available
                     abs_path = storage.get_absolute_path(file_path_key)
-                    # We can use it directly? Yes, but ffmpeg might be slow.
                     local_video_path = Path(abs_path) 
 
                 # 3. Extract Metadata
                 metadata = await ffmpeg.get_metadata(str(local_video_path))
                 
-                # Update DB with metadata
                 video.duration = metadata.duration
                 video.width = metadata.width
                 video.height = metadata.height
@@ -70,29 +57,50 @@ async def process_video_task(video_id: str, file_path_key: str):
                 video.codec = metadata.codec
                 video.frame_rate = metadata.frame_rate
                 
-                # 4. Extract Audio
+                # Metadata Done - Commit metadata
+                await db.commit()
+                await db.refresh(video)
+                
                 audio_key = None
-                if metadata.audio_present:
-                    audio_filename = f"{video_id}.mp3"
-                    audio_local_path = Path(temp_dir) / audio_filename
-                    success = await ffmpeg.extract_audio(str(local_video_path), str(audio_local_path))
-                    if success:
-                         # Upload Audio
-                         audio_key = await storage.save_file(str(audio_local_path), directory=f"audio/{video.user_id}")
-
-                # 5. Generate Thumbnail
                 thumbnail_key = None
-                thumbnail_filename = f"{video_id}.jpg"
-                thumbnail_local_path = Path(temp_dir) / thumbnail_filename
-                success = await ffmpeg.generate_thumbnail(str(local_video_path), str(thumbnail_local_path))
-                if success:
-                    thumbnail_key = await storage.save_file(str(thumbnail_local_path), directory=f"thumbnails/{video.user_id}")
+                
+                logger.info(f"Media type: {video.media_type}")
 
-                video.audio_path = audio_key
-                video.thumbnail_path = thumbnail_key
+                # Processing based on Media Type
+                if video.media_type == MediaType.VIDEO:
+                    # 4. Extract Audio
+                    if metadata.audio_present:
+                        logger.info("Audio present, extracting...")
+                        
+                        audio_filename = f"{video_id}.mp3"
+                        audio_local_path = Path(temp_dir) / audio_filename
+                        success = await ffmpeg.extract_audio(str(local_video_path), str(audio_local_path))
+                        
+                        logger.info(f"Audio extraction success: {success}")
+                        if success and audio_local_path.exists():
+                             audio_key = await storage.save_file(str(audio_local_path), directory=f"audio/{video.user_id}")
+                    
+                    # 5. Generate Thumbnail
+                    thumbnail_filename = f"{video_id}.jpg"
+                    thumbnail_local_path = Path(temp_dir) / thumbnail_filename
+                    success = await ffmpeg.generate_thumbnail(str(local_video_path), str(thumbnail_local_path))
+                    if success:
+                        thumbnail_key = await storage.save_file(str(thumbnail_local_path), directory=f"thumbnails/{video.user_id}")
+                        
+                    video.audio_path = audio_key
+                    video.thumbnail_path = thumbnail_key
+
+                elif video.media_type == MediaType.AUDIO:
+                     # Audio specific steps if any
+                     # If it's pure audio, we might want to skip extraction but maybe validate?
+                     logger.info("Processing AUDIO type")
+
+                elif video.media_type == MediaType.TEXT:
+                     logger.info("Processing TEXT type")
+
                 video.status = VideoStatus.COMPLETED
                 await db.commit()
-                logger.info(f"Processing completed for video {video_id}")
+                logger.info(f"Processing completed for {video.media_type} {video_id}")
 
         except Exception as e:
             logger.error(f"Processing failed for video {video_id}: {e}")
@@ -218,7 +226,7 @@ class VideoService:
     ) -> Video:
         # 1. Validation
         if not file.content_type.startswith("video/"):
-            raise HTTPException(status_code=400, detail="Invalid file type.")
+            raise HTTPException(status_code=400, detail="Invalid file type. Expected video.")
             
         # 2. Upload
         file_path_key = await self.storage.save(file, directory=f"videos/{user_id}")
@@ -231,7 +239,8 @@ class VideoService:
             original_filename=file.filename,
             file_path=file_path_key,
             status=VideoStatus.PENDING,
-            size_bytes=file.size 
+            size_bytes=file.size,
+            media_type=MediaType.VIDEO
         )
         self.db.add(new_video)
         await self.db.commit()
@@ -245,6 +254,102 @@ class VideoService:
         background_tasks.add_task(process_video_task, new_video.id, file_path_key)
         
         return new_video
+
+    async def upload_audio(
+        self, 
+        user_id: int, 
+        file: UploadFile, 
+        background_tasks: BackgroundTasks
+    ) -> Video:
+        # 1. Validation
+        # Strict check: Must be audio MIME type AND not be a video disguised
+        if not file.content_type.startswith("audio/"):
+            # Check for specific edge cases where browser might send application/octet-stream for audio
+            # But here we want to STRICTLY forbid video/text
+            if file.content_type.startswith("video/") or file.content_type.startswith("text/"):
+                 raise HTTPException(status_code=400, detail="Invalid file type. Expected audio.")
+            
+            # If completely unknown, maybe check extension?
+            # But let's enforce audio/ for now as per requirement.
+            # Actually, user asked "if send file audio as type but the file found other like mp4".
+            # This implies content-type says "audio/..." but extension is ".mp4".
+            # Browsers set content-type based on extension mostly.
+            # If a user manually renames .mp4 to .mp3, browser might send audio/mp3.
+            # Backend validation usually inspects file header (magic bytes) which is expensive/complex here without magic library.
+            # But we can check extension + MIME consistency.
+            pass
+
+        if not file.content_type.startswith("audio/"):
+             raise HTTPException(status_code=400, detail="Invalid file type. Expected audio.")
+
+        # Extra Check: Reject if extension is clearly video
+        filename = (file.filename or "").lower()
+        if filename.endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
+             raise HTTPException(status_code=400, detail="Invalid file extension. Expected audio file.")
+
+        # 2. Upload
+        file_path_key = await self.storage.save(file, directory=f"audio/{user_id}")
+        
+        # 3. Create DB Record
+        new_audio = Video(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            title=file.filename or "Untitled",
+            original_filename=file.filename,
+            file_path=file_path_key,
+            status=VideoStatus.PENDING,
+            size_bytes=file.size,
+            media_type=MediaType.AUDIO
+        )
+        self.db.add(new_audio)
+        await self.db.commit()
+        await self.db.refresh(new_audio)
+        
+        # 4. Populate URL
+        if new_audio.file_path:
+            new_audio.url = self.storage.get_url(new_audio.file_path)
+
+        # 5. Task
+        background_tasks.add_task(process_video_task, new_audio.id, file_path_key)
+        
+        return new_audio
+
+    async def upload_text(
+        self, 
+        user_id: int, 
+        file: UploadFile, 
+        background_tasks: BackgroundTasks
+    ) -> Video:
+        # 1. Validation
+        if file.content_type.startswith("video/") or file.content_type.startswith("audio/"):
+             raise HTTPException(status_code=400, detail="Invalid file type. Expected text.")
+             
+        if not (file.content_type.startswith("text/") or file.filename.endswith(".txt")):
+             raise HTTPException(status_code=400, detail="Invalid file type. Expected text.")
+
+        # 2. Upload
+        file_path_key = await self.storage.save(file, directory=f"text/{user_id}")
+        
+        # 3. Create DB Record
+        new_text = Video(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            title=file.filename or "Untitled",
+            original_filename=file.filename,
+            file_path=file_path_key,
+            status=VideoStatus.COMPLETED, # Text usually doesn't need heavy processing unless we do translation immediately
+            size_bytes=file.size,
+            media_type=MediaType.TEXT
+        )
+        self.db.add(new_text)
+        await self.db.commit()
+        await self.db.refresh(new_text)
+        
+        # 4. Populate URL
+        if new_text.file_path:
+            new_text.url = self.storage.get_url(new_text.file_path)
+            
+        return new_text
 
     async def upload_video_hls(
         self, 
