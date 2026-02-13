@@ -58,28 +58,32 @@ class FFmpegService:
             video_stream = next((s for s in streams if s["codec_type"] == "video"), None)
             audio_stream = next((s for s in streams if s["codec_type"] == "audio"), None)
             
-            if not video_stream:
-                raise MediaProcessingError("No video stream found")
+            if not video_stream and not audio_stream:
+                raise MediaProcessingError("No video or audio stream found")
                 
             # Extract duration safely
             duration = float(format_info.get("duration", 0))
-            if duration == 0 and video_stream.get("duration"):
+            if duration == 0 and video_stream and video_stream.get("duration"):
                  duration = float(video_stream["duration"])
+            elif duration == 0 and audio_stream and audio_stream.get("duration"):
+                 duration = float(audio_stream["duration"])
             
             # Extract basic info
-            width = int(video_stream.get("width", 0))
-            height = int(video_stream.get("height", 0))
-            codec = video_stream.get("codec_name", "unknown")
+            width = int(video_stream.get("width", 0)) if video_stream else 0
+            height = int(video_stream.get("height", 0)) if video_stream else 0
+            codec = video_stream.get("codec_name", "unknown") if video_stream else (audio_stream.get("codec_name", "unknown") if audio_stream else "unknown")
             format_name = format_info.get("format_name", "unknown")
             size = int(format_info.get("size", 0))
             
             # Frame rate parsing (e.g. "30/1")
-            frame_rate_str = video_stream.get("r_frame_rate", "0/0")
-            try:
-                num, den = map(int, frame_rate_str.split('/'))
-                frame_rate = num / den if den != 0 else 0.0
-            except:
-                frame_rate = 0.0
+            frame_rate = 0.0
+            if video_stream:
+                frame_rate_str = video_stream.get("r_frame_rate", "0/0")
+                try:
+                    num, den = map(int, frame_rate_str.split('/'))
+                    frame_rate = num / den if den != 0 else 0.0
+                except:
+                    frame_rate = 0.0
 
             return VideoMetadata(
                 duration=duration,
@@ -94,7 +98,7 @@ class FFmpegService:
 
         except Exception as e:
             logger.error(f"Error getting metadata for {file_path}: {e}")
-            raise MediaProcessingError(f"Failed to analyze video file: {str(e)}")
+            raise MediaProcessingError(f"Failed to analyze file: {str(e)}")
 
     async def extract_audio(self, input_path: str, output_path: str) -> bool:
         """Extract audio to MP3/AAC."""
@@ -151,7 +155,11 @@ class FFmpegService:
                 if time_offset > 0:
                     return await self.generate_thumbnail(input_path, output_path, 0.0)
                 return False
-                
+            
+            # Additional check: ensure file exists
+            if not Path(output_path).exists() or Path(output_path).stat().st_size == 0:
+                 return False
+
             return True
         except Exception as e:
             logger.error(f"Error generating thumbnail: {e}")

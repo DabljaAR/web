@@ -11,6 +11,11 @@ class VideoStatus(str, enum.Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
+class MediaType(str, enum.Enum):
+    VIDEO = "VIDEO"
+    AUDIO = "AUDIO"
+    TEXT = "TEXT"
+
 class Video(Base):
     __tablename__ = "videos"
 
@@ -19,6 +24,8 @@ class Video(Base):
     
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    
+    media_type: Mapped[MediaType] = mapped_column(SQLEnum(MediaType), default=MediaType.VIDEO, nullable=False)
     
     file_path: Mapped[str] = mapped_column(String(512), nullable=False) # Path or key
     thumbnail_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
