@@ -19,8 +19,8 @@ class StorageService(Protocol):
         """Save a local file by path and return its key."""
         ...
 
-    def get_url(self, path: str) -> str:
-        """Get public URL for a file path."""
+    async def get_url(self, path: str, filename: str = None) -> str:
+        """Get public or presigned URL for a file path. Optionally set download filename."""
         ...
 
     def get_absolute_path(self, path: str) -> str:
@@ -79,7 +79,9 @@ class LocalStorageService:
             return f"{directory}/{unique_name}"
         return unique_name
 
-    def get_url(self, path: str) -> str:
+    async def get_url(self, path: str, filename: str = None) -> str:
+        # Local storage serving usually doesn't support dynamic content-disposition via URL alone 
+        # unless served by a smart controller. For now, just return path.
         return f"{self.base_url}/{path}"
         
     def get_absolute_path(self, path: str) -> str:
@@ -127,6 +129,9 @@ class S3StorageService:
         self.secret_key = settings.MINIO_SECRET_KEY
         self.bucket_name = settings.MINIO_BUCKET_NAME
         self.session = aioboto3.Session()
+        # Create a specific config for presigning if needed, usually defaults work
+        from botocore.config import Config
+        self.config = Config(signature_version='s3v4')
 
     async def _ensure_bucket(self, s3_client):
         try:
@@ -171,9 +176,29 @@ class S3StorageService:
             
         return key
 
-    def get_url(self, path: str) -> str:
-        # Assuming public bucket
-        return f"{self.endpoint_url}/{self.bucket_name}/{path}"
+    async def get_url(self, path: str, filename: str = None) -> str:
+        # Generate presigned URL
+        try:
+            params = {'Bucket': self.bucket_name, 'Key': path}
+            if filename:
+                params['ResponseContentDisposition'] = f'attachment; filename="{filename}"'
+
+            async with self.session.client("s3",
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                config=self.config
+            ) as s3:
+                url = await s3.generate_presigned_url(
+                    'get_object',
+                    Params=params,
+                    ExpiresIn=3600  # 1 hour
+                )
+                return url
+        except Exception as e:
+            logger.error(f"Error generating presigned URL: {e}")
+            # Fallback (though probably won't work if private)
+            return f"{self.endpoint_url}/{self.bucket_name}/{path}"
 
     def get_absolute_path(self, path: str) -> str:
         raise NotImplementedError("S3 storage does not support direct filesystem access.")

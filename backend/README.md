@@ -94,7 +94,7 @@ backend/
     uvicorn app.main:app --reload
     ```
     The application will be available at `http://127.0.0.1:8000`.
-
+./prometheus --config.file=prometheus.yml
 ## API Endpoints
 
 ### User Endpoints (`/api/users`)

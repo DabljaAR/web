@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
+import { mediaService } from '../../services/mediaService';
 import '../../styles/history.css';
 
 const History = () => {
@@ -15,53 +16,139 @@ const History = () => {
     sortBy: 'dateNewest'
   });
 
-  const [historyItems] = useState([
-    {
-      id: 1,
-      title: 'Tech_Tutorial_2024.mp4',
-      status: 'completed',
-      domain: 'Technical',
-      style: 'Neutral',
-      voice: 'Male Voice 1',
-      duration: '15:30',
-      size: '145 MB',
-      processed: 'Nov 20, 2025 at 2:30 PM',
-      creditsUsed: 5
-    },
-    {
-      id: 2,
-      title: 'Medical_Lecture_Nov.mp4',
-      status: 'completed',
-      domain: 'Medical',
-      style: 'Formal',
-      voice: 'Female Voice 2',
-      duration: '45:20',
-      size: '520 MB',
-      processed: 'Nov 19, 2025 at 10:15 AM',
-      creditsUsed: 8
-    },
-    {
-      id: 3,
-      title: 'Large_Video_Test.mp4',
-      status: 'failed',
-      domain: 'General',
-      style: 'Neutral',
-      voice: 'Male Voice 1',
-      error: 'File size exceeded limit',
-      attempted: 'Nov 18, 2025 at 3:45 PM'
-    },
-    {
-      id: 4,
-      title: 'New_Tutorial.mp4',
-      status: 'processing',
-      domain: 'Technical',
-      style: 'Neutral',
-      voice: 'Male Voice 1',
-      progress: 67,
-      started: 'Nov 23, 2025 at 11:20 AM',
-      estCompletion: '1 minute'
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 5,
+    total: 0,
+    pages: 1,
+    totalCompleted: 0,
+    totalFailed: 0
+  });
+
+  const [historyItems, setHistoryItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [debouncedSearch, setDebouncedSearch] = useState(filters.search);
+
+  const formatDuration = (seconds) => {
+    if (!seconds) return '00:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const formatSize = (bytes) => {
+    if (!bytes) return '0 MB';
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(1)} MB`;
+  };
+
+  const formatDate = (dateString, isFullFormat = true) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    if (!isFullFormat) {
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: true
+      });
     }
-  ]);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: true
+    });
+  };
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(filters.search);
+      // Reset to page 1 on new search
+      if (filters.search !== debouncedSearch) {
+        setPagination(prev => ({ ...prev, page: 1 }));
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [filters.search]);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        setLoading(true);
+        const data = await mediaService.getVideos({
+          page: pagination.page,
+          limit: pagination.limit,
+          search: debouncedSearch,
+          sortBy: filters.sortBy,
+          dateRange: filters.dateRange,
+          status: filters.status
+        });
+
+        const videos = Array.isArray(data) ? data : data.items || [];
+        const total = data.total || videos.length;
+        const pages = data.pages || 1;
+        const totalCompleted = data.total_completed || 0;
+        const totalFailed = data.total_failed || 0;
+
+        const mappedItems = videos.map(video => ({
+          id: video.id,
+          title: video.title || video.original_filename,
+          thumbnail: video.thumbnail_url,
+          status: video.status.toLowerCase(),
+          domain: 'General', // Default as backend doesn't store this yet
+          style: 'Neutral',  // Default
+          voice: 'Male Voice 1', // Default
+          duration: formatDuration(video.duration),
+          size: formatSize(video.size_bytes),
+          processed: formatDate(video.updated_at),
+          started: formatDate(video.created_at),
+          attempted: formatDate(video.created_at),
+          rawDate: video.created_at, // Use created_at for sorting/filtering by date
+          creditsUsed: 0, // Default
+          error: video.error_message,
+          progress: video.status === 'PROCESSING' ? 50 : (video.status === 'PENDING' ? 0 : 100), // Mock progress
+          estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : ''
+        }));
+
+
+        setHistoryItems(mappedItems);
+        setPagination(prev => ({
+          ...prev,
+          total: total,
+          pages: pages,
+          totalCompleted: totalCompleted,
+          totalFailed: totalFailed
+        }));
+        setError(null);
+      } catch (err) {
+        console.error("Failed to fetch history:", err);
+        setError('Failed to load history items.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status]);
+
+  const filteredItems = historyItems; // Backend handles filtering now
+
+
+
+
+  // Handle Page Change
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= pagination.pages) {
+      setPagination(prev => ({ ...prev, page: newPage }));
+    }
+  };
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
@@ -69,6 +156,18 @@ const History = () => {
       ...prev,
       [name]: value
     }));
+    setPagination(prev => ({ ...prev, page: 1 }));
+  };
+
+  const handleResetFilters = () => {
+    setFilters({
+      search: '',
+      status: 'all',
+      domain: 'all',
+      dateRange: 'last30Days',
+      sortBy: 'dateNewest'
+    });
+    setPagination(prev => ({ ...prev, page: 1 }));
   };
 
   const handlePreview = (id) => {
@@ -83,9 +182,51 @@ const History = () => {
     alert(`Re-dub video ${id} (Demo)`);
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (window.confirm(t('history.deleteConfirm'))) {
-      alert(`Delete video ${id} (Demo)`);
+      try {
+        await mediaService.deleteVideo(id);
+        // Refresh the list to keep pagination correct
+        const data = await mediaService.getVideos({
+          page: pagination.page,
+          limit: pagination.limit,
+          search: debouncedSearch,
+          sortBy: filters.sortBy,
+          dateRange: filters.dateRange,
+          status: filters.status
+        });
+        const videos = Array.isArray(data) ? data : data.items || [];
+        const total = data.total || videos.length;
+        const pages = data.pages || 1;
+        const totalCompleted = data.total_completed || 0;
+        const totalFailed = data.total_failed || 0;
+
+        const mappedItems = videos.map(video => ({
+          id: video.id,
+          title: video.title || video.original_filename,
+          thumbnail: video.thumbnail_url,
+          status: video.status.toLowerCase(),
+          domain: 'General',
+          style: 'Neutral',
+          voice: 'Male Voice 1',
+          duration: formatDuration(video.duration),
+          size: formatSize(video.size_bytes),
+          processed: formatDate(video.updated_at),
+          started: formatDate(video.created_at),
+          attempted: formatDate(video.created_at),
+          rawDate: video.created_at,
+          creditsUsed: 0,
+          error: video.error_message,
+          progress: video.status === 'PROCESSING' ? 50 : (video.status === 'PENDING' ? 0 : 100),
+          estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : ''
+        }));
+
+        setHistoryItems(mappedItems);
+        setPagination(prev => ({ ...prev, total, pages, totalCompleted, totalFailed }));
+      } catch (err) {
+        console.error("Failed to delete video:", err);
+        alert("Failed to delete video");
+      }
     }
   };
 
@@ -106,6 +247,7 @@ const History = () => {
       case 'failed':
         return 'status-failed';
       case 'processing':
+      case 'pending':
         return 'status-processing';
       default:
         return '';
@@ -119,6 +261,7 @@ const History = () => {
       case 'failed':
         return '✗';
       case 'processing':
+      case 'pending':
         return '⏳';
       default:
         return '';
@@ -132,23 +275,37 @@ const History = () => {
       case 'failed':
         return t('history.statusFailed');
       case 'processing':
+      case 'pending':
         return t('history.statusProcessing');
       default:
-        return '';
+        return status;
     }
   };
 
   const stats = {
-    total: 47,
-    completed: 45,
-    failed: 2
+    total: pagination.total,
+    completed: pagination.totalCompleted,
+    failed: pagination.totalFailed
   };
+
+  if (loading) {
+    return (
+      <div className="history-page">
+        <BackgroundDecorations />
+        <Navbar />
+        <div className="main-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+          <div className="loading-spinner" style={{ color: 'white' }}>Loading history...</div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="history-page">
       <BackgroundDecorations />
       <Navbar />
-      
+
       <div className="main-container">
         {/* Page Header */}
         <div className="page-header">
@@ -158,7 +315,7 @@ const History = () => {
         {/* Filter Section */}
         <div className="filter-section">
           <h3 className="filter-title">{t('history.filterSearch')}</h3>
-          
+
           {/* Search Box */}
           <div className="search-box">
             <input
@@ -235,6 +392,16 @@ const History = () => {
                 <option value="nameZA">{t('history.nameZA')}</option>
               </select>
             </div>
+
+            <div className="filter-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button
+                className="btn btn-secondary"
+                onClick={handleResetFilters}
+                style={{ height: '42px' }}
+              >
+                {t('history.resetFilters', 'Reset Filters')}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -256,159 +423,211 @@ const History = () => {
 
         {/* History List */}
         <div className="history-list">
-          {historyItems.map((item) => (
-            <div key={item.id} className="history-item">
-              <div className="item-content">
-                <div className="item-thumbnail">📹</div>
-                <div className="item-details">
-                  <div className="item-header">
-                    <h3 className="item-title">{item.title}</h3>
-                    <span className={`item-status ${getStatusClass(item.status)}`}>
-                      <span>{getStatusIcon(item.status)}</span>
-                      <span>{getStatusText(item.status)}</span>
-                    </span>
-                  </div>
-
-                  {item.error && (
-                    <div className="error-message">
-                      <strong>{t('history.error')}</strong> {item.error}
-                    </div>
-                  )}
-
-                  {item.status === 'processing' && (
-                    <>
-                      <div className="progress-bar">
-                        <div className="progress-fill" style={{width: `${item.progress}%`}}></div>
-                      </div>
-                      <div className="progress-text">
-                        <span>{t('history.processing')} {item.progress}%</span> |{' '}
-                        <span>{t('history.estCompletion')}</span> {item.estCompletion}
-                      </div>
-                    </>
-                  )}
-
-                  {item.status !== 'processing' && item.status !== 'failed' && (
-                    <div className="item-meta">
-                      <div className="meta-item">
-                        <span className="meta-label">{t('history.metaDomain')}</span>
-                        <span className="meta-value">{item.domain}</span>
-                      </div>
-                      <div className="meta-item">
-                        <span className="meta-label">{t('history.metaStyle')}</span>
-                        <span className="meta-value">{item.style}</span>
-                      </div>
-                      <div className="meta-item">
-                        <span className="meta-label">{t('history.metaVoice')}</span>
-                        <span className="meta-value">{item.voice}</span>
-                      </div>
-                      <div className="meta-item">
-                        <span className="meta-label">{t('history.metaDuration')}</span>
-                        <span className="meta-value">{item.duration}</span>
-                      </div>
-                      <div className="meta-item">
-                        <span className="meta-label">{t('history.metaSize')}</span>
-                        <span className="meta-value">{item.size}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="item-info">
-                    {item.status === 'processing' && (
-                      <>
-                        <span>{t('history.started')}</span> {item.started}
-                      </>
-                    )}
-                    {item.status === 'failed' && (
-                      <>
-                        <span>{t('history.attempted')}</span> {item.attempted} |{' '}
-                        <span>{t('history.creditsNotCharged')}</span>
-                      </>
-                    )}
-                    {item.status === 'completed' && (
-                      <>
-                        <span>{t('history.processed')}</span> {item.processed} |{' '}
-                        <span>{t('history.creditsUsed')}</span> {item.creditsUsed}
-                      </>
+          {filteredItems.length === 0 ? (
+            <div className="no-items" style={{ textAlign: 'center', padding: '2rem', color: 'rgba(255,255,255,0.6)' }}>
+              {error ? error : t('history.noItems', 'No history items found.')}
+            </div>
+          ) : (
+            filteredItems.map((item) => (
+              <div key={item.id} className="history-item">
+                <div className="item-content">
+                  <div className="item-thumbnail">
+                    {item.thumbnail ? (
+                      <img src={item.thumbnail} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px' }} />
+                    ) : (
+                      '📹'
                     )}
                   </div>
+                  <div className="item-details">
+                    <div className="item-header">
+                      <h3 className="item-title">{item.title}</h3>
+                      <span className={`item-status ${getStatusClass(item.status)}`}>
+                        <span>{getStatusIcon(item.status)}</span>
+                        <span>{getStatusText(item.status)}</span>
+                      </span>
+                    </div>
 
-                  <div className="item-actions">
-                    {item.status === 'completed' && (
+                    {item.error && (
+                      <div className="error-message">
+                        <strong>{t('history.error')}</strong> {item.error}
+                      </div>
+                    )}
+
+                    {(item.status === 'processing' || item.status === 'pending') && (
                       <>
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => handlePreview(item.id)}
-                        >
-                          <span>👁</span>
-                          <span>{t('history.preview')}</span>
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => handleDownload(item.id)}
-                        >
-                          <span>⬇</span>
-                          <span>{t('history.download')}</span>
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => handleRedub(item.id)}
-                        >
-                          <span>🔄</span>
-                          <span>{t('history.redub')}</span>
-                        </button>
-                        <button
-                          className="btn btn-danger btn-icon"
-                          onClick={() => handleDelete(item.id)}
-                        >
-                          🗑
-                        </button>
+                        <div className="progress-bar">
+                          <div className="progress-fill" style={{ width: `${item.progress}%` }}></div>
+                        </div>
+                        <div className="progress-text">
+                          <span>{t('history.processing')} {item.progress}%</span> |{' '}
+                          <span>{t('history.estCompletion')}</span> {item.estCompletion}
+                        </div>
                       </>
                     )}
-                    {item.status === 'failed' && (
-                      <>
-                        <button
-                          className="btn btn-primary"
-                          onClick={() => handleRetry(item.id)}
-                        >
-                          <span>🔄</span>
-                          <span>{t('history.retry')}</span>
-                        </button>
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => handlePreview(item.id)}
-                        >
-                          <span>ℹ</span>
-                          <span>{t('history.details')}</span>
-                        </button>
-                      </>
+
+                    {item.status !== 'processing' && item.status !== 'pending' && item.status !== 'failed' && (
+                      <div className="item-meta">
+                        <div className="meta-item">
+                          <span className="meta-label">{t('history.metaDomain')}</span>
+                          <span className="meta-value">{item.domain}</span>
+                        </div>
+                        <div className="meta-item">
+                          <span className="meta-label">{t('history.metaStyle')}</span>
+                          <span className="meta-value">{item.style}</span>
+                        </div>
+                        <div className="meta-item">
+                          <span className="meta-label">{t('history.metaVoice')}</span>
+                          <span className="meta-value">{item.voice}</span>
+                        </div>
+                        <div className="meta-item">
+                          <span className="meta-label">{t('history.metaDuration')}</span>
+                          <span className="meta-value">{item.duration}</span>
+                        </div>
+                        <div className="meta-item">
+                          <span className="meta-label">{t('history.metaSize')}</span>
+                          <span className="meta-value">{item.size}</span>
+                        </div>
+                      </div>
                     )}
-                    {item.status === 'processing' && (
-                      <button
-                        className="btn btn-danger"
-                        onClick={() => handleCancelProcessing(item.id)}
-                      >
-                        <span>❌</span>
-                        <span>{t('history.cancelProcessing')}</span>
-                      </button>
-                    )}
+
+                    <div className="item-info">
+                      {(item.status === 'processing' || item.status === 'pending') && (
+                        <>
+                          <span>{t('history.started')}</span> {item.started}
+                        </>
+                      )}
+                      {item.status === 'failed' && (
+                        <>
+                          <span>{t('history.attempted')}</span> {item.attempted} |{' '}
+                          <span>{t('history.creditsNotCharged')}</span>
+                        </>
+                      )}
+                      {item.status === 'completed' && (
+                        <>
+                          <span>{t('history.processed')}</span> {item.processed} |{' '}
+                          <span>{t('history.creditsUsed')}</span> {item.creditsUsed}
+                        </>
+                      )}
+                    </div>
+
+                    <div className="item-actions">
+                      {item.status === 'completed' && (
+                        <>
+                          <div className="action-group" style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => handlePreview(item.id)}
+                            >
+                              <span>👁</span>
+                              <span>{t('history.preview')}</span>
+                            </button>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => handleDownload(item.id)}
+                            >
+                              <span>⬇</span>
+                              <span>{t('history.download')}</span>
+                            </button>
+                          </div>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => handleRedub(item.id)}
+                          >
+                            <span>🔄</span>
+                            <span>{t('history.redub')}</span>
+                          </button>
+                          <button
+                            className="btn btn-danger btn-icon"
+                            onClick={() => handleDelete(item.id)}
+                          >
+                            🗑
+                          </button>
+                        </>
+                      )}
+                      {item.status === 'failed' && (
+                        <>
+                          <button
+                            className="btn btn-primary"
+                            onClick={() => handleRetry(item.id)}
+                          >
+                            <span>🔄</span>
+                            <span>{t('history.retry')}</span>
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            onClick={() => handlePreview(item.id)}
+                          >
+                            <span>ℹ</span>
+                            <span>{t('history.details')}</span>
+                          </button>
+                        </>
+                      )}
+                      {item.status === 'processing' || item.status === 'pending' ? (
+                        <button
+                          className="btn btn-danger"
+                          onClick={() => handleCancelProcessing(item.id)}
+                        >
+                          <span>❌</span>
+                          <span>{t('history.cancelProcessing')}</span>
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
         {/* Pagination */}
-        <div className="pagination">
-          <button className="page-btn active">1</button>
-          <button className="page-btn">2</button>
-          <button className="page-btn">3</button>
-          <button className="page-btn">...</button>
-          <button className="page-btn">10</button>
-        </div>
+        {pagination.pages > 1 && (
+          <div className="pagination">
+            <button
+              className="page-btn"
+              disabled={pagination.page === 1}
+              onClick={() => handlePageChange(pagination.page - 1)}
+            >
+              &lt;
+            </button>
+
+            {[...Array(pagination.pages)].map((_, i) => {
+              const pageNum = i + 1;
+              // Show first, last, current, and surrounding pages
+              if (
+                pageNum === 1 ||
+                pageNum === pagination.pages ||
+                (pageNum >= pagination.page - 1 && pageNum <= pagination.page + 1)
+              ) {
+                return (
+                  <button
+                    key={pageNum}
+                    className={`page-btn ${pagination.page === pageNum ? 'active' : ''}`}
+                    onClick={() => handlePageChange(pageNum)}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              } else if (
+                pageNum === pagination.page - 2 ||
+                pageNum === pagination.page + 2
+              ) {
+                return <span key={pageNum} className="page-dots">...</span>;
+              }
+              return null;
+            })}
+
+            <button
+              className="page-btn"
+              disabled={pagination.page === pagination.pages}
+              onClick={() => handlePageChange(pagination.page + 1)}
+            >
+              &gt;
+            </button>
+          </div>
+        )}
       </div>
       <Footer />
-    </div>
+    </div >
   );
 };
 

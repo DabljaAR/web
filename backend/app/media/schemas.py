@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
-from app.media.models import VideoStatus
+from app.media.models import VideoStatus, MediaType
 
 class VideoBase(BaseModel):
     title: str
@@ -37,6 +37,7 @@ class VideoResponse(VideoBase):
     format: Optional[str] = None
     codec: Optional[str] = None
     frame_rate: Optional[float] = None
+    media_type: MediaType
     status: VideoStatus
     error_message: Optional[str] = None
     created_at: datetime
@@ -47,3 +48,16 @@ class VideoResponse(VideoBase):
     audio_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+class PaginatedVideoResponse(BaseModel):
+    items: List[VideoResponse]
+    total: int
+    page: int
+    size: int
+    pages: int
+    total_completed: int
+    total_failed: int
+
+class DashboardResponse(BaseModel):
+    active: List[VideoResponse]
+    recent: List[VideoResponse]

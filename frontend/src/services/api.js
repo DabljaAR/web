@@ -107,6 +107,56 @@ const api = {
       });
 
       if (!response.ok) {
+        // If 401 Unauthorized, try to refresh token
+        if (response.status === 401 && getRefreshToken()) {
+          try {
+            const newAccessToken = await refreshAccessToken();
+            // Retry the original request with new token
+            headers['Authorization'] = `Bearer ${newAccessToken}`;
+            const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
+              method: 'GET',
+              headers,
+              ...options,
+            });
+
+            if (!retryResponse.ok) {
+              // If retry still fails, throw error
+              let errorMessage = `API Error: ${retryResponse.statusText}`;
+              try {
+                const errorData = await retryResponse.json();
+                if (errorData.detail) {
+                  if (Array.isArray(errorData.detail)) {
+                    const validationErrors = errorData.detail.map(err => {
+                      const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
+                      return `${field}: ${err.msg}`;
+                    });
+                    errorMessage = validationErrors.join(', ');
+                  } else {
+                    errorMessage = errorData.detail;
+                  }
+                } else if (errorData.message) {
+                  errorMessage = errorData.message;
+                }
+              } catch (e) {
+                // If response is not JSON, use status text
+              }
+              const error = new Error(errorMessage);
+              error.status = retryResponse.status;
+              error.response = retryResponse;
+              throw error;
+            }
+
+            return retryResponse.json();
+          } catch (refreshError) {
+            // Token refresh failed, clear tokens and redirect to login
+            clearTokens();
+            if (window.location.pathname !== '/login') {
+              window.location.href = '/login';
+            }
+            throw refreshError;
+          }
+        }
+
         // Try to extract error detail from response
         let errorMessage = `API Error: ${response.statusText}`;
         try {
