@@ -1,17 +1,13 @@
-from typing import List
-from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.models import User
 from app.core.services import UserService 
 from app.media.models import Video
-from app.media.schemas import VideoResponse, VideoCreate, VideoUploadResponse
-from app.media.service import VideoService
-
-# Note: We need a way to get the current user. Assuming app.core.dependencies or similar exists.
-# I'll check existing auth dependencies.
-
 from app.core.auth import get_current_user
+from app.media.schemas import VideoResponse, VideoCreate, VideoUploadResponse, PaginatedVideoResponse, DashboardResponse
+from app.media.service import VideoService
 
 router = APIRouter(prefix="/videos", tags=["Media"])
 
@@ -72,15 +68,32 @@ async def upload_video_hls(
     video = await service.upload_video_hls(current_user.user_id, file, background_tasks)
     return VideoUploadResponse(id=video.id, status=video.status)
 
-@router.get("/", response_model=List[VideoResponse])
+@router.get("/", response_model=PaginatedVideoResponse)
 async def list_videos(
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(10, ge=1, le=100, description="Items per page"),
+    search: Optional[str] = Query(None, description="Search by title or filename"),
+    sort_by: str = Query("date-desc", alias="sortBy", description="Sort order"),
+    date_range: str = Query("allTime", alias="dateRange", description="Date range filter"),
+    status: Optional[str] = Query(None, description="Filter by status"),
+    media_type: Optional[str] = Query(None, alias="mediaType", description="Filter by media type (VIDEO, AUDIO, TEXT)"),
     service: VideoService = Depends(get_video_service),
     current_user: User = Depends(get_current_user)
 ):
     """
-    List all videos for the current user.
+    List videos for the current user with pagination and search support.
     """
-    return await service.get_user_videos(current_user.user_id)
+    return await service.get_user_videos(current_user.user_id, page, limit, search, sort_by, date_range, status, media_type)
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard_data(
+    service: VideoService = Depends(get_video_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get dashboard data: active jobs and recent history.
+    """
+    return await service.get_dashboard_jobs(current_user.user_id)
 
 @router.get("/{video_id}", response_model=VideoResponse)
 async def get_video(

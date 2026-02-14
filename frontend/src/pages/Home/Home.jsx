@@ -7,6 +7,7 @@ import FeaturesSection from '../../components/home/FeaturesSection';
 import HowItWorksSection from '../../components/home/HowItWorksSection';
 import DemoSection from '../../components/home/DemoSection';
 import TeamSection from '../../components/home/TeamSection';
+import TryItNowSection from '../../components/home/TryItNowSection';
 import Footer from '../../components/layout/Footer';
 import '../../styles/home.css';
 
@@ -19,7 +20,8 @@ const Home = () => {
       <ProblemSection />
       <FeaturesSection />
       <HowItWorksSection />
-      <DemoSection />
+      <TryItNowSection />
+      {/* <DemoSection /> */}
       <TeamSection />
       <Footer />
     </div>

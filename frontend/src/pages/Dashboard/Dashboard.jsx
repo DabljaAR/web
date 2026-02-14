@@ -6,7 +6,129 @@ import { mediaService } from '../../services/mediaService';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
+import MediaPreviewModal from '../../components/common/MediaPreviewModal';
+import FileSelectorModal from '../../components/dashboard/FileSelectorModal';
 import '../../styles/dashboard.css';
+import '../../styles/dashboard-job-item.css'; // New styles
+
+// Sub-component for Job Item to handle menu state locally
+const JobItem = ({ job, t, onPreview, onDownload, onDelete, onRetry, onDetails, onPreviewAudio, onDownloadAudio }) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  const toggleMenu = (e) => {
+    e.stopPropagation();
+    setMenuOpen(!menuOpen);
+  };
+
+  const isVideo = job.mediaType === 'VIDEO' || (!job.mediaType && job.name.match(/\.(mp4|mov|avi|mkv)$/i));
+  const isAudio = job.mediaType === 'AUDIO' || (!job.mediaType && job.name.match(/\.(mp3|wav|m4a)$/i));
+  const isText = job.mediaType === 'TEXT' || (!job.mediaType && job.name.match(/\.(txt)$/i));
+
+  // Determine Icon/Thumbnail
+  let thumbnailContent;
+  if (job.thumbnailUrl) {
+    thumbnailContent = <img src={job.thumbnailUrl} alt={job.name} className="job-thumbnail-img" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />;
+  }
+
+  // Fallback icon
+  const fallbackIcon = (
+    <div className="job-type-icon">
+      {isVideo ? '🎬' : isAudio ? '🎵' : '📄'}
+    </div>
+  );
+
+  return (
+    <div className="job-item-container">
+      {/* Thumbnail / Icon */}
+      <div className="job-thumbnail-wrapper" onClick={() => onPreview(job.id)}>
+        {thumbnailContent}
+        {!job.thumbnailUrl && fallbackIcon}
+
+        {/* Play Overlay for previewable content */}
+        {(isVideo || isAudio) && job.status === 'completed' && (
+          <div className="thumbnail-overlay">
+            <span className="play-icon-overlay">▶</span>
+          </div>
+        )}
+      </div>
+
+      {/* Info */}
+      <div className="job-info-content">
+        <div className="job-title" title={job.name}>{job.name}</div>
+        <div className="job-meta">
+          <span className={`status-badge ${job.status}`}>
+            {t(`dashboard.${job.status}`) || job.status}
+          </span>
+          {/* Add date or size here if available later */}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="job-actions-container" ref={menuRef}>
+        <button className="btn-icon-menu" onClick={toggleMenu} title="Options">
+          {/* Kebab Icon (Vertical Dots) */}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="1"></circle>
+            <circle cx="12" cy="5" r="1"></circle>
+            <circle cx="12" cy="19" r="1"></circle>
+          </svg>
+        </button>
+
+        {menuOpen && (
+          <div className="action-menu-dropdown">
+            {job.status === 'completed' ? (
+              <>
+                <button className="action-menu-item" onClick={() => { onPreview(job.id); setMenuOpen(false); }}>
+                  <span>👁️</span> {t('dashboard.preview')}
+                </button>
+                <button className="action-menu-item" onClick={() => { onDownload(job.id); setMenuOpen(false); }}>
+                  <span>⬇️</span> {t('dashboard.download')}
+                </button>
+                {/* Audio Option */}
+                {job.audioUrl && (
+                  <>
+                    <button className="action-menu-item" onClick={() => { onPreviewAudio(job.id); setMenuOpen(false); }}>
+                      <span>🎵</span> {t('dashboard.previewAudio') || 'Preview Audio'}
+                    </button>
+                    <button className="action-menu-item" onClick={() => { onDownloadAudio(job.id); setMenuOpen(false); }}>
+                      <span>⬇️</span> {t('dashboard.downloadAudio') || 'Download Audio'}
+                    </button>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <button className="action-menu-item" onClick={() => { onRetry(job.id); setMenuOpen(false); }}>
+                  <span>🔄</span> {t('dashboard.retry')}
+                </button>
+                <button className="action-menu-item" onClick={() => { onDetails(job.id); setMenuOpen(false); }}>
+                  <span>ℹ️</span> {t('dashboard.details')}
+                </button>
+              </>
+            )}
+            <div style={{ height: '1px', background: '#eee', margin: '4px 0' }}></div>
+            <button className="action-menu-item danger" onClick={() => { onDelete(job.id); setMenuOpen(false); }}>
+              <span>🗑️</span> {t('dashboard.delete')}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 const Dashboard = () => {
   const { t } = useTranslation();
@@ -23,6 +145,7 @@ const Dashboard = () => {
     setActiveTab(tabName);
     localStorage.setItem('dashboardActiveTab', tabName);
     setSelectedFile(null); // Clear selected file when switching tabs
+    setSelectedLibraryFile(null); // Clear selected library file
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -45,22 +168,37 @@ const Dashboard = () => {
   const [isPolling, setIsPolling] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Preview Modal State
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewJob, setPreviewJob] = useState(null);
+
+  // Library Selection State
+  const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
+  const [selectedLibraryFile, setSelectedLibraryFile] = useState(null);
+
   // Fetch jobs
   const fetchJobs = async () => {
     try {
-      const videos = await mediaService.getVideos();
+      const data = await mediaService.getDashboardData();
 
-      const pending = videos.filter(v => v.status === 'PENDING' || v.status === 'PROCESSING').map(v => ({
+      const active = data.active || [];
+      const recent = data.recent || [];
+
+      const pending = active.map(v => ({
         id: v.id,
         name: v.title || v.original_filename,
         status: v.status.toLowerCase(),
         estTime: 'Processing...'
       }));
 
-      const completed = videos.filter(v => v.status === 'COMPLETED' || v.status === 'FAILED').map(v => ({
+      const completed = recent.map(v => ({
         id: v.id,
         name: v.title || v.original_filename,
         status: v.status.toLowerCase(),
+        url: v.url,
+        thumbnailUrl: v.thumbnail_url,
+        audioUrl: v.audio_url,
+        mediaType: v.media_type,
         type: v.status === 'COMPLETED' ? 'success' : 'failed'
       }));
 
@@ -72,7 +210,7 @@ const Dashboard = () => {
 
     } catch (error) {
       console.error("Error fetching jobs:", error);
-      setIsPolling(false); // Stop polling on error to avoid loops? Or retry? Safer to stop or keep trying. Let's stop.
+      setIsPolling(false);
     } finally {
       setIsLoading(false);
     }
@@ -134,16 +272,24 @@ const Dashboard = () => {
   };
 
   const handleStartProcessing = async () => {
-    if (activeTab === 'text' && !formData.textInput && !selectedFile) {
+    if (activeTab === 'text' && !formData.textInput && !selectedFile && !selectedLibraryFile) {
       // Correct check logic for text tab
-      if (!selectedFile && !formData.textInput) {
+      if (!selectedFile && !selectedLibraryFile && !formData.textInput) {
         alert(t('dashboard.textPlaceholder'));
         return;
       }
     }
 
-    if ((activeTab === 'video' || activeTab === 'audio') && !selectedFile) {
-      alert("Please select a file first.");
+    if ((activeTab === 'video' || activeTab === 'audio') && !selectedFile && !selectedLibraryFile) {
+      alert("Please select or upload a file first.");
+      return;
+    }
+
+    // library selection
+    if (selectedLibraryFile) {
+      alert("Processing library file: " + (selectedLibraryFile.title || selectedLibraryFile.original_filename) + " (Workflow not fully integrated with backend for re-processing existing files yet, but UI is ready)");
+      // For now, if we want to process an existing file, we might need a specific endpoint.
+      // But user just wanted the UI/Model to choose.
       return;
     }
 
@@ -220,11 +366,72 @@ const Dashboard = () => {
   };
 
   const handlePreview = (id) => {
-    alert(`Preview job ${id} (Demo)`);
+    const job = recentJobs.find(j => j.id === id);
+    if (job && job.url) {
+      setPreviewJob(job);
+      setPreviewModalOpen(true);
+    } else {
+      alert("No preview URL available.");
+    }
   };
 
   const handleDownload = (id) => {
-    alert(`Download job ${id} (Demo)`);
+    const job = recentJobs.find(j => j.id === id);
+    if (job && job.url) {
+      const link = document.createElement('a');
+      link.href = job.url;
+      link.download = job.name || 'download';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      alert("No download URL available.");
+    }
+  };
+
+  const handlePreviewAudio = (id) => {
+    const job = recentJobs.find(j => j.id === id);
+    if (job && job.audioUrl) {
+      // Create a specific object for audio preview from this job
+      setPreviewJob({
+        ...job,
+        url: job.audioUrl,
+        mediaType: 'AUDIO',
+        name: `${job.name} (Audio)`
+      });
+      setPreviewModalOpen(true);
+    } else {
+      alert("No audio URL available for this job.");
+    }
+  };
+
+  const handleDownloadAudio = (id) => {
+    const job = recentJobs.find(j => j.id === id);
+    if (job && job.audioUrl) {
+      const link = document.createElement('a');
+      link.href = job.audioUrl;
+      link.download = `${job.name}_audio.mp3`; // Assuming mp3
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      alert("No audio URL available.");
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm("Are you sure you want to delete this job?")) {
+      try {
+        await mediaService.deleteVideo(id);
+        // Optimistically remove from UI
+        setRecentJobs(prev => prev.filter(job => job.id !== id));
+        setProcessingJobs(prev => prev.filter(job => job.id !== id));
+        alert("Deleted successfully.");
+      } catch (error) {
+        console.error("Delete failed", error);
+        alert("Failed to delete job.");
+      }
+    }
   };
 
   const handleRetry = (id) => {
@@ -294,38 +501,83 @@ const Dashboard = () => {
             </button>
           </div>
 
-          {/* Upload Area */}
-          {(activeTab === 'video' || activeTab === 'audio' || activeTab === 'text') && (
-            <div
-              className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
-              onClick={handleFileSelect}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <div className="upload-icon">📁</div>
-              <div className="upload-text">
-                <h3>{selectedFile ? selectedFile.name : t('dashboard.uploadTitle')}</h3>
-                <p>{selectedFile ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB` : t('dashboard.uploadSubtitle')}</p>
+          {/* Upload Area Split */}
+          {(activeTab === 'video' || activeTab === 'audio' || activeTab === 'text') && !selectedFile && !selectedLibraryFile && (
+            <div className="upload-split-container">
+              {/* Option 1: New Upload */}
+              <div
+                className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
+                onClick={handleFileSelect}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <div className="upload-icon">📤</div>
+                <div className="upload-text">
+                  <h3>{t('dashboard.uploadTitle')}</h3>
+                  <p>{t('dashboard.uploadSubtitle')}</p>
+                </div>
+                <div className="upload-formats">
+                  <span>{
+                    activeTab === 'video' ? 'Supported: MP4, MOV, AVI' :
+                      activeTab === 'audio' ? 'Supported: MP3, WAV' :
+                        'Supported: TXT'
+                  }</span>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  hidden
+                  accept={
+                    activeTab === 'video' ? 'video/*,.mp4,.mov,.avi,.mkv' :
+                      activeTab === 'audio' ? '.mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a' :
+                        '.txt,text/plain'
+                  }
+                  onChange={handleFileChange}
+                />
               </div>
-              <div className="upload-formats">
-                <span>{
-                  activeTab === 'video' ? 'Supported: MP4, MOV, AVI' :
-                    activeTab === 'audio' ? 'Supported: MP3, WAV' :
-                      'Supported: TXT'
-                }</span>
+
+              {/* Option 2: Choose Existing */}
+              <div
+                className="choose-existing-area"
+                onClick={() => setIsLibraryModalOpen(true)}
+              >
+                <div className="upload-icon">📚</div>
+                <div className="upload-text">
+                  <h3>{t('dashboard.chooseExisting')}</h3>
+                  <p>{t('dashboard.chooseExistingSubtitle')}</p>
+                </div>
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                hidden
-                accept={
-                  activeTab === 'video' ? 'video/*,.mp4,.mov,.avi,.mkv' :
-                    activeTab === 'audio' ? '.mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a' :
-                      '.txt,text/plain'
-                }
-                onChange={handleFileChange}
-              />
+            </div>
+          )}
+
+          {/* Selected File Display (For both Upload and Library) */}
+          {(selectedFile || selectedLibraryFile) && (
+            <div className="selected-file-info">
+              <div className="selected-file-details">
+                <span style={{ fontSize: '1.5rem' }}>
+                  {activeTab === 'video' ? '🎬' : activeTab === 'audio' ? '🎵' : '📄'}
+                </span>
+                <div>
+                  <div className="selected-file-name">
+                    {selectedFile ? selectedFile.name : (selectedLibraryFile.title || selectedLibraryFile.original_filename)}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
+                    {selectedFile ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB` : t('dashboard.selectedFile')}
+                  </div>
+                </div>
+              </div>
+              <button
+                className="selected-file-clear"
+                onClick={() => {
+                  setSelectedFile(null);
+                  setSelectedLibraryFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                title="Change selection"
+              >
+                ✕
+              </button>
             </div>
           )}
 
@@ -523,50 +775,18 @@ const Dashboard = () => {
 
           <div className="recent-jobs">
             {recentJobs.map((job) => (
-              <div key={job.id} className="recent-job-item">
-                <div className="job-info">
-                  <div className={`job-icon ${job.type}`}>
-                    {job.type === 'success' ? '✓' : '✗'}
-                  </div>
-                  <div className="job-details">
-                    <h4>{job.name}</h4>
-                    <p>{t(`dashboard.${job.status}`)}</p>
-                  </div>
-                </div>
-                <div className="job-actions">
-                  {job.status === 'completed' ? (
-                    <>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handlePreview(job.id)}
-                      >
-                        {t('dashboard.preview')}
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleDownload(job.id)}
-                      >
-                        {t('dashboard.download')}
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleRetry(job.id)}
-                      >
-                        {t('dashboard.retry')}
-                      </button>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleDetails(job.id)}
-                      >
-                        {t('dashboard.details')}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
+              <JobItem
+                key={job.id}
+                job={job}
+                t={t}
+                onPreview={handlePreview}
+                onDownload={handleDownload}
+                onDelete={handleDelete}
+                onRetry={handleRetry}
+                onDetails={handleDetails}
+                onPreviewAudio={handlePreviewAudio}
+                onDownloadAudio={handleDownloadAudio}
+              />
             ))}
           </div>
 
@@ -580,7 +800,32 @@ const Dashboard = () => {
         </div>
       </div>
       <Footer />
-    </div>
+
+      {/* Media Preview Modal */}
+      {
+        previewJob && (
+          <MediaPreviewModal
+            isOpen={previewModalOpen}
+            onClose={() => setPreviewModalOpen(false)}
+            url={previewJob.url}
+            type={previewJob.mediaType}
+            title={previewJob.name}
+          />
+        )
+      }
+
+      {/* File Selector Modal */}
+      <FileSelectorModal
+        isOpen={isLibraryModalOpen}
+        onClose={() => setIsLibraryModalOpen(false)}
+        activeTab={activeTab}
+        onSelect={(file) => {
+          setSelectedLibraryFile(file);
+          setSelectedFile(null); // Clear manual upload selection
+          setIsLibraryModalOpen(false);
+        }}
+      />
+    </div >
   );
 };
 
