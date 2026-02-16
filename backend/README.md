@@ -94,7 +94,53 @@ backend/
     uvicorn app.main:app --reload
     ```
     The application will be available at `http://127.0.0.1:8000`.
-./prometheus --config.file=prometheus.yml
+## 6. MinIO Storage Setup
+
+### Run this ONLY ONCE (installation)
+
+```bash
+wget https://dl.min.io/server/minio/release/linux-amd64/minio -O minio \
+&& chmod +x minio \
+&& sudo mv minio /usr/local/bin/ \
+&& mkdir -p ~/minio-data
+```
+
+---
+
+### Add this to your `.env` file
+
+```env
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+
+MINIO_ENDPOINT=http://localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET_NAME=dablajaar
+MINIO_SECURE=false
+```
+
+---
+
+### Start MinIO (every time before running backend)
+
+```bash
+export MINIO_ROOT_USER=minioadmin
+export MINIO_ROOT_PASSWORD=minioadmin
+minio server ~/minio-data --console-address ":9001"
+```
+
+---
+
+### Open MinIO Dashboard
+
+http://localhost:9001
+
+Login with:
+
+Username: minioadmin  
+Password: minioadmin
+
 ## API Endpoints
 
 ### User Endpoints (`/api/users`)

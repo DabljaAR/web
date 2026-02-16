@@ -258,6 +258,7 @@ async def delete_user(
     return None
 
 
+# @router.post("/upload/avatar", tags=["upload"], dependencies=[Depends(get_current_user)])
 @router.post("/upload/avatar", tags=["upload"])
 async def upload_avatar(file: UploadFile = File(...)):
     """

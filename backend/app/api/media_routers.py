@@ -9,7 +9,11 @@ from app.core.auth import get_current_user
 from app.media.schemas import VideoResponse, VideoCreate, VideoUploadResponse, PaginatedVideoResponse, DashboardResponse
 from app.media.service import VideoService
 
-router = APIRouter(prefix="/videos", tags=["Media"])
+router = APIRouter(
+    prefix="/videos",
+    tags=["Media"],
+    dependencies=[Depends(get_current_user)]
+)
 
 
 async def get_video_service(db: AsyncSession = Depends(get_db)) -> VideoService:
