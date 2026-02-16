@@ -483,6 +483,10 @@ body {
     flex-direction: row-reverse;
 }
 
+[dir="rtl"] .hero-cta .btn svg {
+    transform: scaleX(-1);
+}
+
 .btn {
     padding: 16px 32px;
     font-size: 1.125rem;
@@ -1043,6 +1047,19 @@ body {
     font-size: 2rem;
     color: var(--accent-blue);
     font-weight: 700;
+}
+
+[dir="rtl"] .workflow-arrow {
+    transform: scaleX(-1);
+}
+
+.process-arrow {
+    font-size: 1.5rem;
+    color: var(--accent-blue);
+}
+
+[dir="rtl"] .process-arrow {
+    transform: scaleX(-1);
 }
 
 /* Demo/Upload Section */
@@ -1611,6 +1628,7 @@ body {
     .team-grid { grid-template-columns: repeat(2, 1fr); }
     .workflow { flex-direction: column; }
     .workflow-arrow { transform: rotate(90deg); }
+    [dir="rtl"] .workflow-arrow { transform: rotate(90deg) scaleX(1); }
     .not-found-number { font-size: 10rem; }
     .not-found-title { font-size: 2.5rem; }
     .about-grid { grid-template-columns: repeat(2, 1fr); }

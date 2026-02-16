@@ -18,8 +18,8 @@ vi.mock('../../components/home/FeaturesSection', () => ({
 vi.mock('../../components/home/HowItWorksSection', () => ({
   default: () => <div data-testid="how-it-works-section">HowItWorks</div>,
 }));
-vi.mock('../../components/home/DemoSection', () => ({
-  default: () => <div data-testid="demo-section">Demo</div>,
+vi.mock('../../components/home/TryItNowSection', () => ({
+  default: () => <div data-testid="try-it-now-section">TryItNow</div>,
 }));
 vi.mock('../../components/home/TeamSection', () => ({
   default: () => <div data-testid="team-section">Team</div>,
@@ -50,7 +50,7 @@ describe('Home Page', () => {
     expect(screen.getByTestId('problem-section')).toBeInTheDocument();
     expect(screen.getByTestId('features-section')).toBeInTheDocument();
     expect(screen.getByTestId('how-it-works-section')).toBeInTheDocument();
-    expect(screen.getByTestId('demo-section')).toBeInTheDocument();
+    expect(screen.getByTestId('try-it-now-section')).toBeInTheDocument();
     expect(screen.getByTestId('team-section')).toBeInTheDocument();
   });
 

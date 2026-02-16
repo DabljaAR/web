@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import useStore from '../store/store';
 
 // Helper functions to get/set tokens based on remember me
 const getStorage = () => {
@@ -12,13 +13,13 @@ const getInitialUser = () => {
     // Check localStorage first (remember me)
     let token = localStorage.getItem('access_token');
     let userData = localStorage.getItem('user');
-    
+
     // If not in localStorage, check sessionStorage
     if (!token || !userData) {
       token = sessionStorage.getItem('access_token');
       userData = sessionStorage.getItem('user');
     }
-    
+
     if (token && userData) {
       return JSON.parse(userData);
     }
@@ -35,35 +36,40 @@ const getInitialUser = () => {
 };
 
 export const useAuth = () => {
-  // Initialize user state synchronously from localStorage
-  const [user, setUser] = useState(getInitialUser);
+  const { user, setUser: setGlobalUser } = useStore();
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    // Ensure store is initialized with storage value if not already set
+    if (!user) {
+      const initialUser = getInitialUser();
+      if (initialUser) setGlobalUser(initialUser);
+    }
+
     // Listen for storage changes (e.g., logout in another tab)
     const handleStorageChange = (e) => {
       if (e.key === 'access_token' || e.key === 'user' || e.key === 'remember_me') {
         const newUser = getInitialUser();
-        setUser(newUser);
+        setGlobalUser(newUser);
       }
     };
 
     // Listen for localStorage changes (works across tabs)
     window.addEventListener('storage', handleStorageChange);
-    
+
     return () => {
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, []);
+  }, [setGlobalUser, user]);
 
   const login = (userData, accessToken, refreshToken, rememberMe = false) => {
     const storage = rememberMe ? localStorage : sessionStorage;
-    
+
     // Store tokens in appropriate storage
     storage.setItem('access_token', accessToken);
     storage.setItem('refresh_token', refreshToken);
     storage.setItem('user', JSON.stringify(userData));
-    
+
     // Store remember_me flag in localStorage (always)
     if (rememberMe) {
       localStorage.setItem('remember_me', 'true');
@@ -74,8 +80,8 @@ export const useAuth = () => {
       localStorage.removeItem('refresh_token');
       localStorage.removeItem('user');
     }
-    
-    setUser(userData);
+
+    setGlobalUser(userData);
   };
 
   const logout = () => {
@@ -87,7 +93,7 @@ export const useAuth = () => {
     sessionStorage.removeItem('access_token');
     sessionStorage.removeItem('refresh_token');
     sessionStorage.removeItem('user');
-    setUser(null);
+    setGlobalUser(null);
   };
 
   return {

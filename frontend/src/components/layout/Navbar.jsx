@@ -64,9 +64,7 @@ const Navbar = () => {
 
   const handleLogout = () => {
     logout();
-    navigate('/');
-    setIsUserMenuOpen(false);
-    setIsMenuOpen(false);
+    window.location.href = '/';
   };
 
   // Close user menu when clicking outside

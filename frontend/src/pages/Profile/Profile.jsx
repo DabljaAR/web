@@ -46,7 +46,7 @@ const Profile = () => {
         setError(null);
         const userData = await api.get(`/users/${authUser.user_id}`);
         setUser(userData);
-        
+
         // Update form data with user information
         setFormData(prev => ({
           ...prev,
@@ -77,18 +77,18 @@ const Profile = () => {
   const uploadAvatar = async (file) => {
     const formData = new FormData();
     formData.append('file', file);
-    
+
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
     const response = await fetch(`${API_BASE_URL}/upload/avatar`, {
       method: 'POST',
       body: formData,
     });
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.detail || 'Failed to upload avatar');
     }
-    
+
     const data = await response.json();
     return data.url;
   };
@@ -102,15 +102,15 @@ const Profile = () => {
         alert('Please select a valid image file (jpg, png, gif, webp)');
         return;
       }
-      
+
       // Validate file size (5MB)
       if (file.size > 5 * 1024 * 1024) {
         alert('File size must be less than 5MB');
         return;
       }
-      
+
       setAvatarFile(file);
-      
+
       // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -136,7 +136,7 @@ const Profile = () => {
       const updatedUser = await api.put(`/users/${user.user_id}`, {
         avatar_url: null
       });
-      
+
       setUser(updatedUser);
       setAvatarFile(null);
       setAvatarPreview(null);
@@ -175,7 +175,7 @@ const Profile = () => {
       const updateData = {};
       const first_name = formData.firstName.trim() || null;
       const last_name = formData.lastName.trim() || null;
-      
+
       if (first_name !== (user.first_name || '')) {
         updateData.first_name = first_name;
       }
@@ -197,14 +197,14 @@ const Profile = () => {
       }
 
       const updatedUser = await api.put(`/users/${user.user_id}`, updateData);
-      
+
       setUser(updatedUser);
       setAvatarFile(null);
       setAvatarPreview(null);
-      
+
       // Update auth user in localStorage
       localStorage.setItem('user', JSON.stringify(updatedUser));
-      
+
       alert('Profile updated successfully!');
     } catch (err) {
       setError(err.message || 'Failed to update profile');
@@ -243,11 +243,11 @@ const Profile = () => {
     try {
       setSaving(true);
       await api.delete(`/users/${user.user_id}`);
-      
+
       // Logout and redirect
       logout();
-      navigate('/');
       alert('Your account has been deleted successfully');
+      window.location.href = '/';
     } catch (err) {
       alert(err.message || 'Failed to delete account');
       setSaving(false);
@@ -305,7 +305,7 @@ const Profile = () => {
     <div className="profile-page">
       <BackgroundDecorations />
       <Navbar />
-      
+
       <div className="main-container">
         {/* Page Header */}
         <div className="page-header">
@@ -319,7 +319,7 @@ const Profile = () => {
             <span className="section-icon">👤</span>
             <span>{t('profile.personalInfo')}</span>
           </h2>
-          
+
           <div className="profile-picture-container">
             <input
               type="file"
@@ -329,7 +329,7 @@ const Profile = () => {
               style={{ display: 'none' }}
             />
             {(avatarPreview || user?.avatar_url) ? (
-              <div className="profile-picture" style={{ 
+              <div className="profile-picture" style={{
                 backgroundImage: `url(${avatarPreview || user.avatar_url})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center'
@@ -339,18 +339,18 @@ const Profile = () => {
               <div className="profile-picture">{getInitials()}</div>
             )}
             <div className="picture-actions">
-              <button 
-                type="button" 
-                className="btn btn-secondary btn-small" 
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
                 onClick={handleChangePhoto}
                 disabled={saving || uploadingAvatar}
               >
                 {t('profile.changePhoto')}
               </button>
               {user?.avatar_url && (
-                <button 
-                  type="button" 
-                  className="btn btn-secondary btn-small" 
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-small"
                   onClick={handleRemovePhoto}
                   disabled={saving || uploadingAvatar}
                 >
@@ -395,7 +395,7 @@ const Profile = () => {
                 <span>{t('profile.email')}</span>
                 <span className="verified-badge">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                    <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
                   <span>{t('profile.verified')}</span>
                 </span>
@@ -445,9 +445,9 @@ const Profile = () => {
             </div>
 
             {error && (
-              <div style={{ 
-                color: 'var(--accent-red)', 
-                padding: '10px', 
+              <div style={{
+                color: 'var(--accent-red)',
+                padding: '10px',
                 marginBottom: '15px',
                 backgroundColor: 'rgba(239, 68, 68, 0.1)',
                 borderRadius: '5px',
@@ -457,16 +457,16 @@ const Profile = () => {
               </div>
             )}
             <div className="action-buttons">
-              <button 
-                type="button" 
-                className="btn btn-secondary" 
+              <button
+                type="button"
+                className="btn btn-secondary"
                 onClick={handleChangePassword}
                 disabled={saving}
               >
                 {t('profile.changePassword')}
               </button>
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 className="btn btn-primary"
                 disabled={saving || uploadingAvatar}
               >
@@ -512,7 +512,7 @@ const Profile = () => {
           <div className="plan-card premium">
             <div className="plan-header">
               <h3 className="plan-name">{t('profile.premiumPlan')}</h3>
-              <span className="plan-badge" style={{background: 'var(--accent-orange)'}}>
+              <span className="plan-badge" style={{ background: 'var(--accent-orange)' }}>
                 {t('profile.recommended')}
               </span>
             </div>
@@ -526,16 +526,16 @@ const Profile = () => {
           </div>
 
           <div className="action-buttons">
-            <button 
-              type="button" 
-              className="btn btn-primary" 
+            <button
+              type="button"
+              className="btn btn-primary"
               onClick={handleUpgradePremium}
             >
               {t('profile.upgradePremium')}
             </button>
-            <button 
-              type="button" 
-              className="btn btn-secondary" 
+            <button
+              type="button"
+              className="btn btn-secondary"
               onClick={handleBuyCredits}
             >
               {t('profile.buyCredits')}
@@ -549,7 +549,7 @@ const Profile = () => {
             <span className="section-icon">📊</span>
             <span>{t('profile.statistics')}</span>
           </h2>
-          
+
           <div className="stats-grid">
             <div className="stat-item">
               <div className="stat-label">{t('profile.memberSince')}</div>
@@ -577,7 +577,7 @@ const Profile = () => {
             </div>
             <div className="stat-item">
               <div className="stat-label">{t('profile.favoriteDomain')}</div>
-              <div className="stat-value" style={{fontSize: '1.25rem'}}>
+              <div className="stat-value" style={{ fontSize: '1.25rem' }}>
                 {t('profile.domainTechnical')}
               </div>
             </div>
@@ -590,11 +590,11 @@ const Profile = () => {
             <span className="section-icon">⚙️</span>
             <span>{t('profile.preferences')}</span>
           </h2>
-          
+
           <form className="form-grid" onSubmit={handleSubmit}>
             <div className="form-group">
               <label className="form-label">{t('profile.defaultDomain')}</label>
-              <select 
+              <select
                 className="form-input"
                 name="defaultDomain"
                 value={formData.defaultDomain}
@@ -610,7 +610,7 @@ const Profile = () => {
 
             <div className="form-group">
               <label className="form-label">{t('profile.translationStyle')}</label>
-              <select 
+              <select
                 className="form-input"
                 name="translationStyle"
                 value={formData.translationStyle}
@@ -624,7 +624,7 @@ const Profile = () => {
 
             <div className="form-group">
               <label className="form-label">{t('profile.defaultVoice')}</label>
-              <select 
+              <select
                 className="form-input"
                 name="defaultVoice"
                 value={formData.defaultVoice}
@@ -688,9 +688,9 @@ const Profile = () => {
           <p className="danger-warning">
             {t('profile.deleteWarning')}
           </p>
-          <button 
-            type="button" 
-            className="btn btn-danger" 
+          <button
+            type="button"
+            className="btn btn-danger"
             onClick={handleDeleteAccount}
             disabled={saving}
           >

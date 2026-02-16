@@ -97,6 +97,7 @@ const TryItNowSection = () => {
                             <input
                                 type="file"
                                 ref={fileInputRef}
+                                aria-label="Upload Video"
                                 hidden
                                 accept="video/*,.mp4,.mov,.avi,.mkv"
                                 onChange={handleFileSelect}
