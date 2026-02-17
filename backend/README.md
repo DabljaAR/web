@@ -94,9 +94,10 @@ backend/
     uvicorn app.main:app --reload
     ```
     The application will be available at `http://127.0.0.1:8000`.
-## 6. MinIO Storage Setup
 
-### Run this ONLY ONCE (installation)
+6. MinIO Storage Setup
+
+- Installation (Once)
 
 ```bash
 wget https://dl.min.io/server/minio/release/linux-amd64/minio -O minio \
@@ -105,9 +106,7 @@ wget https://dl.min.io/server/minio/release/linux-amd64/minio -O minio \
 && mkdir -p ~/minio-data
 ```
 
----
-
-### Add this to your `.env` file
+- Add this to your `.env` file
 
 ```env
 MINIO_ROOT_USER=minioadmin
@@ -120,9 +119,7 @@ MINIO_BUCKET_NAME=dablajaar
 MINIO_SECURE=false
 ```
 
----
-
-### Start MinIO (every time before running backend)
+- Start MinIO (every time before running backend)
 
 ```bash
 export MINIO_ROOT_USER=minioadmin
@@ -130,13 +127,11 @@ export MINIO_ROOT_PASSWORD=minioadmin
 minio server ~/minio-data --console-address ":9001"
 ```
 
----
-
-### Open MinIO Dashboard
+- Open MinIO Dashboard
 
 http://localhost:9001
 
-Login with:
+- Login with:
 
 Username: minioadmin  
 Password: minioadmin
