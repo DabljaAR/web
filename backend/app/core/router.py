@@ -1,9 +1,8 @@
 from datetime import datetime, timezone
 from typing import List
-import os
-import uuid
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from app.media.storage import get_storage_service, StorageService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schema import (
@@ -27,18 +26,16 @@ from fastapi import Request
 
 router = APIRouter()
 
-# Create uploads directory if it doesn't exist
-UPLOAD_DIR = Path("uploads/avatars")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
 # Allowed image extensions
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
-MAX_FILE_SIZE = 500 * 1024 * 1024  # 5MB
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+
 
 
 def get_user_service(
     db: AsyncSession = Depends(get_db),
-    auth_service: AuthService = Depends(get_auth_service)
+    auth_service: AuthService = Depends(get_auth_service),
+    storage_service: StorageService = Depends(get_storage_service)
 ) -> UserService:
     """
     Dependency injection factory for UserService.
@@ -46,12 +43,13 @@ def get_user_service(
     Args:
         db: Database session (injected)
         auth_service: AuthService instance (injected)
+        storage_service: StorageService instance (injected)
         
     Returns:
         UserService instance with injected dependencies
     """
     user_repo = UserRepository(db, User)
-    return UserService(user_repo, auth_service)
+    return UserService(user_repo, auth_service, storage_service)
 
 def get_subscription_plan_service(
     db: AsyncSession = Depends(get_db)
@@ -260,7 +258,10 @@ async def delete_user(
 
 # @router.post("/upload/avatar", tags=["upload"], dependencies=[Depends(get_current_user)])
 @router.post("/upload/avatar", tags=["upload"])
-async def upload_avatar(file: UploadFile = File(...)):
+async def upload_avatar(
+    file: UploadFile = File(...),
+    storage: StorageService = Depends(get_storage_service)
+):
     """
     Upload an avatar image.
     
@@ -276,33 +277,34 @@ async def upload_avatar(file: UploadFile = File(...)):
             detail=f"Invalid file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
         )
     
-    # Read file content
+    # Read file content to check size
     contents = await file.read()
+    file_size = len(contents)
+    await file.seek(0)  # Reset file pointer for storage service
     
     # Validate file size
-    if len(contents) > MAX_FILE_SIZE:
+    if file_size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"File too large. Maximum size: {MAX_FILE_SIZE / 1024 / 1024}MB"
         )
     
-    # Generate unique filename
-    file_id = str(uuid.uuid4())
-    filename = f"{file_id}{file_ext}"
-    file_path = UPLOAD_DIR / filename
-    
-    # Save file
-    with open(file_path, "wb") as f:
-        f.write(contents)
-    
-    # Return URL (adjust based on your server setup)
-    # For development, use full URL with localhost
-    # For production, use full URL with your domain
-    import os
-    base_url = os.getenv("BASE_URL", "http://localhost:8000")
-    file_url = f"{base_url}/uploads/avatars/{filename}"
-    
-    return {"url": file_url, "filename": filename}
+    try:
+        # Save file using storage service
+        file_key = await storage.save(file, directory="avatars")
+        
+        # Get URL for the uploaded file
+        file_url = await storage.get_url(file_key)
+        
+        return {"url": file_url, "filename": Path(file_key).name}
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error uploading avatar: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error uploading file to storage server"
+        )
 
 
 @router.get("/health", tags=["health"])

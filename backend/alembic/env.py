@@ -17,7 +17,8 @@ sys.path.insert(0, str(backend_dir))
 
 from app.config import settings
 from app.core.db import Base
-from app.core.models import User, Role  # Import all models for autogenerate
+from app.core.models import User, Role, SubscriptionPlan, UserSubscription, Payment
+from app.media.models import Video
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
