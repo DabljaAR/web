@@ -56,7 +56,7 @@ class User(Base):
         default=datetime.utcnow,
     )
     preferred_language: Mapped[languageEnum] = mapped_column(SQLEnum(languageEnum, name="languages_enum"),nullable=False,default=languageEnum.ENGLISH)
-    avatar_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
     # Note: role_id column doesn't exist in current database schema
     role_id: Mapped[Optional[int]] = mapped_column(

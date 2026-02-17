@@ -43,7 +43,7 @@ class UserBase(BaseModel):
     )
     avatar_url: Optional[str] = Field(
         None,
-        max_length=500,
+        max_length=2048,
         description="URL to user's avatar image",
         examples=["https://example.com/avatars/user123.jpg"]
     )
@@ -161,7 +161,7 @@ class UserUpdate(BaseModel):
     )
     avatar_url: Optional[str] = Field(
         None,
-        max_length=500,
+        max_length=2048,
         description="Updated avatar URL",
         examples=["https://example.com/new-avatar.jpg"]
     )
@@ -202,7 +202,7 @@ class UserUpdate(BaseModel):
     @model_validator(mode='after')
     def check_at_least_one_field(self):
         """Ensure at least one field is provided for update."""
-        if all(value is None for value in self.model_dump().values()):
+        if not self.model_dump(exclude_unset=True):
             raise ValueError('At least one field must be provided for update')
         return self
 
