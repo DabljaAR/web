@@ -21,5 +21,8 @@ export const authService = {
   refreshToken: async (refreshToken) => {
     return api.post('/auth/refresh', { refresh_token: refreshToken });
   },
+  updateUser: async (userId, userData) => {
+    return api.put(`/users/${userId}`, userData);
+  },
 };
 

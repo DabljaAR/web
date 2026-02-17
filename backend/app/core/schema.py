@@ -38,6 +38,7 @@ class UserBase(BaseModel):
         examples=["magdy", "ibrahim"]
     )
     preferred_language: languageEnum = Field(
+        languageEnum.ENGLISH,
         description="User's preferred language code (e.g., 'en', 'ar')",
         examples=["en", "ar", "fr"]
     )

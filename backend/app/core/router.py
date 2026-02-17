@@ -75,7 +75,7 @@ def get_payment_service(
     return PaymentService(repo)
 
 
-@router.post("/signup", response_model=dict, status_code=status.HTTP_201_CREATED, tags=["auth"])
+@router.post("/signup", response_model=UserLoginResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
 @limiter.limit("5/minute")
 async def signup(
     request: Request,
@@ -83,7 +83,7 @@ async def signup(
     user_service: UserService = Depends(get_user_service)
 ):
     """
-    Register a new user.
+    Register a new user and return tokens.
     
     - **username**: Unique username (3-50 characters)
     - **email**: Valid email address
@@ -93,11 +93,10 @@ async def signup(
     - **preferred_language**: Optional language code
     - **avatar_url**: Optional avatar URL
     
-    Returns created user data.
+    Returns created user data and access tokens.
     """
     try:
-        user = await user_service.signup(user_data)
-        return {"message": "User created successfully", "user": user.model_dump()}
+        return await user_service.signup(user_data)
     except UserAlreadyExistsException as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
