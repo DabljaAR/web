@@ -3,6 +3,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
+import MediaPreviewModal from '../../components/common/MediaPreviewModal';
 import { mediaService } from '../../services/mediaService';
 import '../../styles/history.css';
 
@@ -29,6 +30,10 @@ const History = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [debouncedSearch, setDebouncedSearch] = useState(filters.search);
+
+  // Preview Modal State
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewJob, setPreviewJob] = useState(null);
 
   const formatDuration = (seconds) => {
     if (!seconds) return '00:00';
@@ -113,7 +118,10 @@ const History = () => {
           creditsUsed: 0, // Default
           error: video.error_message,
           progress: video.status === 'PROCESSING' ? 50 : (video.status === 'PENDING' ? 0 : 100), // Mock progress
-          estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : ''
+          estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : '',
+          url: video.url,
+          audioUrl: video.audio_url,
+          mediaType: video.media_type
         }));
 
 
@@ -171,11 +179,30 @@ const History = () => {
   };
 
   const handlePreview = (id) => {
-    alert(`Preview video ${id} (Demo)`);
+    const item = historyItems.find(i => i.id === id);
+    if (item && item.url) {
+      setPreviewJob({
+        ...item,
+        name: item.title
+      });
+      setPreviewModalOpen(true);
+    } else {
+      alert("No preview URL available.");
+    }
   };
 
   const handleDownload = (id) => {
-    alert(`Download video ${id} (Demo)`);
+    const item = historyItems.find(i => i.id === id);
+    if (item && item.url) {
+      const link = document.createElement('a');
+      link.href = item.url;
+      link.download = item.title || 'download';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      alert("No download URL available.");
+    }
   };
 
   const handleRedub = (id) => {
@@ -218,7 +245,10 @@ const History = () => {
           creditsUsed: 0,
           error: video.error_message,
           progress: video.status === 'PROCESSING' ? 50 : (video.status === 'PENDING' ? 0 : 100),
-          estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : ''
+          estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : '',
+          url: video.url,
+          audioUrl: video.audio_url,
+          mediaType: video.media_type
         }));
 
         setHistoryItems(mappedItems);
@@ -627,6 +657,15 @@ const History = () => {
         )}
       </div>
       <Footer />
+
+      {/* Preview Modal */}
+      <MediaPreviewModal
+        isOpen={previewModalOpen}
+        onClose={() => setPreviewModalOpen(false)}
+        url={previewJob?.url}
+        type={previewJob?.mediaType}
+        title={previewJob?.name}
+      />
     </div >
   );
 };

@@ -1,10 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+import { getStorage } from '../utils/authUtils';
 
-// Helper function to get storage based on remember me
-const getStorage = () => {
-  const rememberMe = localStorage.getItem('remember_me') === 'true';
-  return rememberMe ? localStorage : sessionStorage;
-};
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
 // Helper function to get auth token (checks both storages)
 const getAuthToken = () => {
