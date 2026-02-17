@@ -44,15 +44,15 @@ class UserService:
         self.auth_service = auth_service
         self.storage_service = storage_service
     
-    async def signup(self, user_data: UserCreate) -> UserResponse:
+    async def signup(self, user_data: UserCreate) -> UserLoginResponse:
         """
-        Register a new user.
+        Register a new user and automatically log them in.
         
         Args:
             user_data: User creation data
             
         Returns:
-            UserResponse with created user data
+            UserLoginResponse with created user data and tokens
             
         Raises:
             UserAlreadyExistsException: If username or email already exists
@@ -89,9 +89,10 @@ class UserService:
         await self.user_repo.db.commit()
         await self.user_repo.db.refresh(db_user)
         
-        logger.info(db_user)
-        # Return user response
-        return UserResponse.model_validate(db_user)
+        logger.info(f"User created: {db_user.username}")
+        # return UserResponse.model_validate(db_user)
+        # Automatically login to return tokens
+        return await self.login(user_data.username, user_data.password)
     
     async def login(self, username: str, password: str) -> UserLoginResponse:
         """

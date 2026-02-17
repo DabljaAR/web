@@ -13,7 +13,8 @@ const Register = () => {
   const { language, toggleLanguage } = useLanguage();
   const [formData, setFormData] = useState({
     username: '',
-    fullName: '',
+    firstName: '',
+    lastName: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -115,49 +116,22 @@ const Register = () => {
         return;
       }
 
-      // Upload avatar if file is selected
-      let avatarUrl = null;
-      if (avatarFile) {
-        setUploadingAvatar(true);
-        try {
-          avatarUrl = await uploadAvatar(avatarFile);
-        } catch (uploadError) {
-          setErrors(prev => ({ ...prev, avatar: uploadError.message || 'Failed to upload avatar' }));
-          setIsLoading(false);
-          setUploadingAvatar(false);
-          return;
-        }
-        setUploadingAvatar(false);
-      } else if (formData.avatarUrl && formData.avatarUrl.trim()) {
-        // Use manual URL if provided
-        avatarUrl = formData.avatarUrl.trim();
-      }
-
-      // Split fullName into first_name and last_name
-      const nameParts = formData.fullName.trim().split(/\s+/);
-      const first_name = nameParts[0] || null;
-      const last_name = nameParts.slice(1).join(' ') || null;
-
-      // Prepare registration data - ensure all required fields are present
-      // Build object explicitly to ensure password is always included
+      // Prepare registration data
       const registrationData = {
         username: formData.username.trim().toLowerCase(),
         email: formData.email.trim(),
-        password: formData.password.trim() // Ensure password is included and trimmed
+        password: formData.password.trim(),
+        first_name: formData.firstName?.trim() || null,
+        last_name: formData.lastName?.trim() || null
       };
 
-      // Add optional fields only if they have values
-      if (first_name) {
-        registrationData.first_name = first_name;
-      }
-      if (last_name) {
-        registrationData.last_name = last_name;
-      }
       if (language) {
         registrationData.preferred_language = language;
       }
-      if (avatarUrl) {
-        registrationData.avatar_url = avatarUrl;
+
+      // Use manual URL if provided
+      if (formData.avatarUrl && formData.avatarUrl.trim()) {
+        registrationData.avatar_url = formData.avatarUrl.trim();
       }
 
       // Verify password is present before sending
@@ -170,7 +144,33 @@ const Register = () => {
       // Debug: Log the data being sent (remove in production)
       console.log('Registration data:', { ...registrationData, password: '***' });
 
+      // 1. Create the user first (Backend now returns tokens on success)
       const response = await authService.register(registrationData);
+
+      // 2. If registration successful and we have an avatar file, upload it now
+      if (avatarFile) {
+        setUploadingAvatar(true);
+        try {
+          // Save tokens to storage so update request is authenticated
+          // if (response.access_token) {
+          //   localStorage.setItem('access_token', response.access_token);
+          //   localStorage.setItem('refresh_token', response.refresh_token);
+          // }
+
+          // Upload the file
+          const avatarUrl = await uploadAvatar(avatarFile);
+
+          // Update the user with the new avatar URL
+          const userId = response.user.user_id || response.user.id;
+          await authService.updateUser(userId, { avatar_url: avatarUrl });
+        } catch (uploadError) {
+          console.error('Optional avatar upload failed:', uploadError);
+          // We don't fail the whole registration if just the avatar upload fails
+          // but we could notify the user
+        } finally {
+          setUploadingAvatar(false);
+        }
+      }
 
       // Success - show message and redirect to login
       alert('Account created successfully! Please login with your credentials.');
@@ -365,16 +365,29 @@ const Register = () => {
                 )}
               </div>
 
-              <div className="form-group">
-                <label htmlFor="fullName">{t('register.nameLabel')}</label>
-                <input
-                  type="text"
-                  id="fullName"
-                  name="fullName"
-                  placeholder={t('register.namePlaceholder')}
-                  value={formData.fullName}
-                  onChange={handleChange}
-                />
+              <div className="form-row-auth" style={{ display: 'flex', gap: '15px' }}>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="firstName">First Name</label>
+                  <input
+                    type="text"
+                    id="firstName"
+                    name="firstName"
+                    placeholder="First"
+                    value={formData.firstName}
+                    onChange={handleChange}
+                  />
+                </div>
+                <div className="form-group" style={{ flex: 1 }}>
+                  <label htmlFor="lastName">Last Name</label>
+                  <input
+                    type="text"
+                    id="lastName"
+                    name="lastName"
+                    placeholder="Last"
+                    value={formData.lastName}
+                    onChange={handleChange}
+                  />
+                </div>
               </div>
 
               <div className="form-group">
