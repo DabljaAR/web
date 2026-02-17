@@ -26,8 +26,10 @@ const History = () => {
     totalFailed: 0
   });
 
+  // List & Loading State
   const [historyItems, setHistoryItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isPolling, setIsPolling] = useState(false);
   const [error, setError] = useState(null);
   const [debouncedSearch, setDebouncedSearch] = useState(filters.search);
 
@@ -83,9 +85,9 @@ const History = () => {
   }, [filters.search]);
 
   useEffect(() => {
-    const fetchHistory = async () => {
+    const fetchHistory = async (internal = false) => {
       try {
-        setLoading(true);
+        if (!internal) setLoading(true);
         const data = await mediaService.getVideos({
           page: pagination.page,
           limit: pagination.limit,
@@ -106,24 +108,24 @@ const History = () => {
           title: video.title || video.original_filename,
           thumbnail: video.thumbnail_url,
           status: video.status.toLowerCase(),
-          domain: 'General', // Default as backend doesn't store this yet
-          style: 'Neutral',  // Default
-          voice: 'Male Voice 1', // Default
+          domain: 'General',
+          style: 'Neutral',
+          voice: 'Male Voice 1',
           duration: formatDuration(video.duration),
           size: formatSize(video.size_bytes),
           processed: formatDate(video.updated_at),
           started: formatDate(video.created_at),
           attempted: formatDate(video.created_at),
-          rawDate: video.created_at, // Use created_at for sorting/filtering by date
-          creditsUsed: 0, // Default
+          rawDate: video.created_at,
+          creditsUsed: 0,
           error: video.error_message,
-          progress: video.status === 'PROCESSING' ? 50 : (video.status === 'PENDING' ? 0 : 100), // Mock progress
+
+          createdAt: video.created_at,
           estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : '',
           url: video.url,
           audioUrl: video.audio_url,
           mediaType: video.media_type
         }));
-
 
         setHistoryItems(mappedItems);
         setPagination(prev => ({
@@ -133,18 +135,80 @@ const History = () => {
           totalCompleted: totalCompleted,
           totalFailed: totalFailed
         }));
+
+        // Track if we need to continue polling
+        const hasActive = mappedItems.some(item =>
+          item.status === 'processing' || item.status === 'pending'
+        );
+        setIsPolling(hasActive);
+
         setError(null);
       } catch (err) {
         console.error("Failed to fetch history:", err);
-        setError('Failed to load history items.');
+        if (!internal) setError('Failed to load history items.');
+        setIsPolling(false);
       } finally {
-        setLoading(false);
+        if (!internal) setLoading(false);
       }
     };
 
     fetchHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status]);
+
+  // Polling Effect (Dashboard Style)
+  useEffect(() => {
+    let intervalId;
+    if (isPolling) {
+      intervalId = setInterval(() => {
+        const fetchHistoryInternal = async () => {
+          try {
+            const data = await mediaService.getVideos({
+              page: pagination.page,
+              limit: pagination.limit,
+              search: debouncedSearch,
+              sortBy: filters.sortBy,
+              dateRange: filters.dateRange,
+              status: filters.status
+            });
+
+            const videos = Array.isArray(data) ? data : data.items || [];
+            const mappedItems = videos.map(video => ({
+              id: video.id,
+              title: video.title || video.original_filename,
+              thumbnail: video.thumbnail_url,
+              status: video.status.toLowerCase(),
+              duration: formatDuration(video.duration),
+              size: formatSize(video.size_bytes),
+              processed: formatDate(video.updated_at),
+              started: formatDate(video.created_at),
+
+              createdAt: video.created_at,
+              url: video.url,
+              audioUrl: video.audio_url,
+              mediaType: video.media_type
+            }));
+
+            setHistoryItems(mappedItems);
+
+            const hasActive = mappedItems.some(item =>
+              item.status === 'processing' || item.status === 'pending'
+            );
+            if (!hasActive) setIsPolling(false);
+          } catch (e) {
+            console.error("Polling fetch failed", e);
+            setIsPolling(false);
+          }
+        };
+        fetchHistoryInternal();
+      }, 5000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isPolling, pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status]);
+
+
 
   const filteredItems = historyItems; // Backend handles filtering now
 
@@ -244,7 +308,7 @@ const History = () => {
           rawDate: video.created_at,
           creditsUsed: 0,
           error: video.error_message,
-          progress: video.status === 'PROCESSING' ? 50 : (video.status === 'PENDING' ? 0 : 100),
+
           estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : '',
           url: video.url,
           audioUrl: video.audio_url,
@@ -483,17 +547,7 @@ const History = () => {
                       </div>
                     )}
 
-                    {(item.status === 'processing' || item.status === 'pending') && (
-                      <>
-                        <div className="progress-bar">
-                          <div className="progress-fill" style={{ width: `${item.progress}%` }}></div>
-                        </div>
-                        <div className="progress-text">
-                          <span>{t('history.processing')} {item.progress}%</span> |{' '}
-                          <span>{t('history.estCompletion')}</span> {item.estCompletion}
-                        </div>
-                      </>
-                    )}
+
 
                     {item.status !== 'processing' && item.status !== 'pending' && item.status !== 'failed' && (
                       <div className="item-meta">
@@ -566,41 +620,14 @@ const History = () => {
                             <span>🔄</span>
                             <span>{t('history.redub')}</span>
                           </button>
-                          <button
-                            className="btn btn-danger btn-icon"
-                            onClick={() => handleDelete(item.id)}
-                          >
-                            🗑
-                          </button>
                         </>
                       )}
-                      {item.status === 'failed' && (
-                        <>
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => handleRetry(item.id)}
-                          >
-                            <span>🔄</span>
-                            <span>{t('history.retry')}</span>
-                          </button>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={() => handlePreview(item.id)}
-                          >
-                            <span>ℹ</span>
-                            <span>{t('history.details')}</span>
-                          </button>
-                        </>
-                      )}
-                      {item.status === 'processing' || item.status === 'pending' ? (
-                        <button
-                          className="btn btn-danger"
-                          onClick={() => handleCancelProcessing(item.id)}
-                        >
-                          <span>❌</span>
-                          <span>{t('history.cancelProcessing')}</span>
-                        </button>
-                      ) : null}
+                      <button
+                        className="btn btn-danger btn-icon"
+                        onClick={() => handleDelete(item.id)}
+                      >
+                        🗑
+                      </button>
                     </div>
                   </div>
                 </div>

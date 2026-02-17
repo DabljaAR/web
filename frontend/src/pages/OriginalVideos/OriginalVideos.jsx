@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
 import MediaPreviewModal from '../../components/common/MediaPreviewModal';
+import FileSelectorModal from '../../components/dashboard/FileSelectorModal';
 import { mediaService } from '../../services/mediaService';
 import '../../styles/history.css';
+import '../../styles/dashboard.css';
 
 const OriginalVideos = () => {
     const { t } = useTranslation();
@@ -26,14 +28,31 @@ const OriginalVideos = () => {
         totalFailed: 0
     });
 
+    // List & Loading State
     const [historyItems, setHistoryItems] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [isPolling, setIsPolling] = useState(false);
     const [error, setError] = useState(null);
     const [debouncedSearch, setDebouncedSearch] = useState(filters.search);
 
     // Preview Modal State
     const [previewModalOpen, setPreviewModalOpen] = useState(false);
     const [previewJob, setPreviewJob] = useState(null);
+
+    // Upload & Processing State
+    const [showUploadSection, setShowUploadSection] = useState(false);
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [uploadError, setUploadError] = useState(null);
+    const [isDragOver, setIsDragOver] = useState(false);
+    const fileInputRef = useRef(null);
+
+    const [formData, setFormData] = useState({
+        outputType: 'both',
+        domain: 'general',
+        voice: 'male1',
+        translation_style: 'neutral'
+    });
 
     const formatDuration = (seconds) => {
         if (!seconds) return '00:00';
@@ -72,9 +91,9 @@ const OriginalVideos = () => {
     }, [filters.search, debouncedSearch]);
 
     useEffect(() => {
-        const fetchHistory = async () => {
+        const fetchHistory = async (internal = false) => {
             try {
-                setLoading(true);
+                if (!internal) setLoading(true);
                 // Specifically filter for VIDEO media type
                 const data = await mediaService.getVideos({
                     page: pagination.page,
@@ -108,8 +127,8 @@ const OriginalVideos = () => {
                     rawDate: video.created_at,
                     creditsUsed: 0,
                     error: video.error_message,
-                    progress: video.status === 'PROCESSING' ? 50 : (video.status === 'PENDING' ? 0 : 100),
-                    estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : '',
+
+                    createdAt: video.created_at,
                     url: video.url,
                     audioUrl: video.audio_url,
                     mediaType: video.media_type
@@ -123,18 +142,82 @@ const OriginalVideos = () => {
                     totalCompleted: totalCompleted,
                     totalFailed: totalFailed
                 }));
+
+                // Track if we need to continue polling
+                const hasActive = mappedItems.some(item =>
+                    item.status === 'processing' || item.status === 'pending'
+                );
+                setIsPolling(hasActive);
+
                 setError(null);
             } catch (err) {
                 console.error("Failed to fetch original videos:", err);
-                setError('Failed to load original videos.');
+                if (!internal) setError('Failed to load original videos.');
+                setIsPolling(false);
             } finally {
-                setLoading(false);
+                if (!internal) setLoading(false);
             }
         };
 
         fetchHistory();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status]);
+
+    // Polling Effect (Dashboard Style)
+    useEffect(() => {
+        let intervalId;
+        if (isPolling) {
+            intervalId = setInterval(() => {
+                // Call fetch with internal flag to avoid showing loading spinner
+                const fetchHistoryInternal = async () => {
+                    try {
+                        const data = await mediaService.getVideos({
+                            page: pagination.page,
+                            limit: pagination.limit,
+                            search: debouncedSearch,
+                            sortBy: filters.sortBy,
+                            dateRange: filters.dateRange,
+                            status: filters.status,
+                            mediaType: 'VIDEO'
+                        });
+
+                        const videos = Array.isArray(data) ? data : data.items || [];
+                        const mappedItems = videos.map(video => ({
+                            id: video.id,
+                            title: video.title || video.original_filename,
+                            thumbnail: video.thumbnail_url,
+                            status: video.status.toLowerCase(),
+                            duration: formatDuration(video.duration),
+                            size: formatSize(video.size_bytes),
+                            processed: formatDate(video.updated_at),
+                            started: formatDate(video.created_at),
+
+                            createdAt: video.created_at,
+                            url: video.url,
+                            audioUrl: video.audio_url,
+                            mediaType: video.media_type
+                        }));
+
+                        setHistoryItems(mappedItems);
+
+                        const hasActive = mappedItems.some(item =>
+                            item.status === 'processing' || item.status === 'pending'
+                        );
+                        if (!hasActive) setIsPolling(false);
+                    } catch (e) {
+                        console.error("Polling fetch failed", e);
+                        setIsPolling(false);
+                    }
+                };
+                fetchHistoryInternal();
+            }, 5000);
+        }
+        return () => {
+            if (intervalId) clearInterval(intervalId);
+        };
+    }, [isPolling, pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status]);
+
+
 
     const handlePageChange = (newPage) => {
         if (newPage >= 1 && newPage <= pagination.pages) {
@@ -193,6 +276,76 @@ const OriginalVideos = () => {
         alert(`Re-dub video ${id} (Demo)`);
     };
 
+    const handleFileSelect = () => {
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = (e) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            setSelectedFile(file);
+        }
+    };
+
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        setIsDragOver(true);
+    };
+
+    const handleDragLeave = () => {
+        setIsDragOver(false);
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) {
+            setSelectedFile(file);
+        }
+    };
+
+    const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({
+            ...prev,
+            [name]: value
+        }));
+    };
+
+    const handleStartProcessing = async () => {
+        if (!selectedFile) {
+            alert("Please select or upload a video first.");
+            return;
+        }
+
+        setIsUploading(true);
+        setUploadError(null);
+
+        try {
+            const formDataToUpload = new FormData();
+            formDataToUpload.append('file', selectedFile);
+            formDataToUpload.append('output_type', formData.outputType);
+            formDataToUpload.append('domain', formData.domain);
+            formDataToUpload.append('voice', formData.voice);
+            formDataToUpload.append('translation_style', formData.translationStyle);
+
+            await mediaService.uploadVideo(formDataToUpload);
+
+            alert("Upload successful! Processing started.");
+            setSelectedFile(null);
+            setShowUploadSection(false);
+
+            // Refresh history
+            window.location.reload();
+        } catch (err) {
+            console.error("Upload failed:", err);
+            setUploadError(err.message || "Failed to start processing.");
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
     const handleDelete = async (id) => {
         if (window.confirm(t('originalVideos.deleteConfirm'))) {
             try {
@@ -216,7 +369,7 @@ const OriginalVideos = () => {
                     size: formatSize(video.size_bytes),
                     processed: formatDate(video.updated_at),
                     started: formatDate(video.created_at),
-                    progress: video.status === 'PROCESSING' ? 50 : (video.status === 'PENDING' ? 0 : 100),
+
                     url: video.url,
                     audioUrl: video.audio_url,
                     mediaType: video.media_type
@@ -285,9 +438,96 @@ const OriginalVideos = () => {
             <Navbar />
 
             <div className="main-container">
-                <div className="page-header">
+                <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <h1 className="page-title">{t('originalVideos.title')}</h1>
+                    <button
+                        className={`btn ${showUploadSection ? 'btn-secondary' : 'btn-primary'}`}
+                        onClick={() => setShowUploadSection(!showUploadSection)}
+                        style={{ width: 'auto', marginBottom: '16px' }}
+                    >
+                        {showUploadSection ? '✕ ' + t('common.cancel') : t('originalVideos.startUploading')}
+                    </button>
                 </div>
+
+                {showUploadSection && (
+                    <div className="card upload-section" style={{ marginBottom: '32px', animation: 'slideDown 0.3s ease-out' }}>
+                        <div className="upload-container">
+                            <div
+                                className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
+                                onDragOver={handleDragOver}
+                                onDragLeave={handleDragLeave}
+                                onDrop={handleDrop}
+                                onClick={handleFileSelect}
+                            >
+                                <input
+                                    type="file"
+                                    ref={fileInputRef}
+                                    onChange={handleFileChange}
+                                    accept="video/*"
+                                    style={{ display: 'none' }}
+                                />
+                                <div className="upload-icon">📤</div>
+                                <div className="upload-text">
+                                    <h3>{t('dashboard.uploadTitle')}</h3>
+                                    <p>{t('dashboard.uploadSubtitle')}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {selectedFile && (
+                            <div className="selected-file-info">
+                                <div className="selected-file-details">
+                                    <span className="selected-file-icon">🎬</span>
+                                    <span className="selected-file-name">
+                                        {selectedFile.name}
+                                    </span>
+                                </div>
+                                <button
+                                    className="selected-file-clear"
+                                    onClick={() => setSelectedFile(null)}
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        )}
+
+                        <div className="options-grid" style={{ marginTop: '24px' }}>
+                            <div className="option-group">
+                                <label className="option-label">{t('dashboard.domain')}</label>
+                                <select className="form-select" name="domain" value={formData.domain} onChange={handleInputChange}>
+                                    <option value="general">{t('dashboard.domainGeneral')}</option>
+                                    <option value="technical">{t('dashboard.domainTechnical')}</option>
+                                    <option value="medical">{t('dashboard.domainMedical')}</option>
+                                    <option value="legal">{t('dashboard.domainLegal')}</option>
+                                    <option value="education">{t('dashboard.domainEducation')}</option>
+                                </select>
+                            </div>
+                            <div className="option-group">
+                                <label className="option-label">{t('dashboard.voiceSelection')}</label>
+                                <select className="form-select" name="voice" value={formData.voice} onChange={handleInputChange}>
+                                    <option value="male1">{t('dashboard.voiceMale1')}</option>
+                                    <option value="male2">{t('dashboard.voiceMale2')}</option>
+                                    <option value="female1">{t('dashboard.voiceFemale1')}</option>
+                                    <option value="female2">{t('dashboard.voiceFemale2')}</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button
+                            className="btn btn-primary"
+                            onClick={handleStartProcessing}
+                            disabled={isUploading || !selectedFile}
+                        >
+                            {isUploading ? t('common.uploading') : t('originalVideos.startUploadingButton')}
+                        </button>
+
+                        {uploadError && (
+                            <div className="error-message" style={{ marginTop: '16px', color: 'var(--accent-red)' }}>
+                                {uploadError}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="filter-section">
                     <h3 className="filter-title">{t('originalVideos.filterSearch')}</h3>
@@ -399,11 +639,7 @@ const OriginalVideos = () => {
                                             </span>
                                         </div>
 
-                                        {(item.status === 'processing' || item.status === 'pending') && (
-                                            <div className="progress-bar">
-                                                <div className="progress-fill" style={{ width: `${item.progress}%` }}></div>
-                                            </div>
-                                        )}
+
 
                                         <div className="item-meta">
                                             <div className="meta-item">
@@ -421,12 +657,16 @@ const OriginalVideos = () => {
                                         </div>
 
                                         <div className="item-actions">
-                                            <button className="btn btn-secondary" onClick={() => handlePreview(item.id)}>
-                                                <span>👁</span> {t('originalVideos.preview')}
-                                            </button>
-                                            <button className="btn btn-secondary" onClick={() => handleDownload(item.id)}>
-                                                <span>⬇</span> {t('originalVideos.download')}
-                                            </button>
+                                            {item.status === 'completed' && (
+                                                <>
+                                                    <button className="btn btn-secondary" onClick={() => handlePreview(item.id)}>
+                                                        <span>👁</span> {t('originalVideos.preview')}
+                                                    </button>
+                                                    <button className="btn btn-secondary" onClick={() => handleDownload(item.id)}>
+                                                        <span>⬇</span> {t('originalVideos.download')}
+                                                    </button>
+                                                </>
+                                            )}
                                             <button className="btn btn-danger btn-icon" onClick={() => handleDelete(item.id)}>🗑</button>
                                         </div>
                                     </div>

@@ -341,7 +341,9 @@ export const translations = {
       deleteConfirm: "Are you sure you want to delete this item?",
       resetFilters: "Reset Filters",
       loadMore: "Load More...",
-      noItems: "No original videos found."
+      noItems: "No original videos found.",
+      startUploading: "+ Start Uploading",
+      startUploadingButton: "Start Uploading"
     },
     dashboard: {
       welcome: "Welcome Back",
@@ -399,6 +401,10 @@ export const translations = {
       details: "Details",
       viewFullHistory: "View Full History",
       delete: "Delete"
+    },
+    common: {
+      cancel: "Cancel",
+      uploading: "Uploading..."
     }
   },
   ar: {
@@ -743,7 +749,9 @@ export const translations = {
       deleteConfirm: "هل أنت متأكد من حذف هذا العنصر؟",
       resetFilters: "إعادة تعيين الفلاتر",
       loadMore: "تحميل المزيد...",
-      noItems: "لم يتم العثور على مقاطع فيديو أصلية."
+      noItems: "لم يتم العثور على مقاطع فيديو أصلية.",
+      startUploading: "+ ابدأ الرفع",
+      startUploadingButton: "ابدأ الرفع"
     },
     dashboard: {
       welcome: "مرحباً بعودتك",
@@ -801,6 +809,10 @@ export const translations = {
       details: "التفاصيل",
       viewFullHistory: "عرض السجل الكامل",
       delete: "حذف"
+    },
+    common: {
+      cancel: "إلغاء",
+      uploading: "جاري الرفع..."
     }
   }
 };
