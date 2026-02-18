@@ -101,6 +101,14 @@ const Register = () => {
       newErrors.terms = 'Please agree to the Terms of Service and Privacy Policy';
     }
 
+    // Validate first and last name
+    if (!formData.firstName.trim()) {
+      newErrors.firstName = 'First name is required';
+    }
+    if (!formData.lastName.trim()) {
+      newErrors.lastName = 'Last name is required';
+    }
+
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
@@ -350,12 +358,12 @@ const Register = () => {
               )}
 
               <div className="form-group">
-                <label htmlFor="username">Username</label>
+                <label htmlFor="username">{t('register.usernameLabel')}</label>
                 <input
                   type="text"
                   id="username"
                   name="username"
-                  placeholder="Choose a username"
+                  placeholder={t('register.usernamePlaceholder')}
                   value={formData.username}
                   onChange={handleChange}
                   required
@@ -365,28 +373,36 @@ const Register = () => {
                 )}
               </div>
 
-              <div className="form-row-auth" style={{ display: 'flex', gap: '15px' }}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label htmlFor="firstName">First Name</label>
+              <div className="form-row-auth">
+                <div className="form-group">
+                  <label htmlFor="firstName">{t('register.firstNameLabel')}</label>
                   <input
                     type="text"
                     id="firstName"
                     name="firstName"
-                    placeholder="First"
+                    placeholder={t('register.firstNamePlaceholder')}
                     value={formData.firstName}
                     onChange={handleChange}
+                    required
                   />
+                  {errors.firstName && (
+                    <small style={{ color: 'var(--accent-pink)' }}>{errors.firstName}</small>
+                  )}
                 </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label htmlFor="lastName">Last Name</label>
+                <div className="form-group">
+                  <label htmlFor="lastName">{t('register.lastNameLabel')}</label>
                   <input
                     type="text"
                     id="lastName"
                     name="lastName"
-                    placeholder="Last"
+                    placeholder={t('register.lastNamePlaceholder')}
                     value={formData.lastName}
                     onChange={handleChange}
+                    required
                   />
+                  {errors.lastName && (
+                    <small style={{ color: 'var(--accent-pink)' }}>{errors.lastName}</small>
+                  )}
                 </div>
               </div>
 
@@ -420,7 +436,7 @@ const Register = () => {
                 {errors.password ? (
                   <small style={{ color: 'var(--accent-pink)' }}>{errors.password}</small>
                 ) : (
-                  <small className="form-hint">Must be at least 8 characters with uppercase, lowercase, and a digit</small>
+                  <small className="form-hint">{t('register.passwordHint')}</small>
                 )}
               </div>
 
@@ -442,7 +458,7 @@ const Register = () => {
 
 
               <div className="form-group">
-                <label style={{ textAlign: 'center' }}>Profile Picture (Optional)</label>
+                <label style={{ textAlign: 'center' }}>{t('register.avatarLabel')}</label>
                 <div className="avatar-input-container">
                   <input
                     type="file"
@@ -464,7 +480,7 @@ const Register = () => {
                           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M12 4v16m-8-8h16" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
-                          <span className="overlay-text">Change</span>
+                          <span className="overlay-text">{t('register.changePhoto')}</span>
                         </div>
                       </div>
                     ) : (
@@ -472,7 +488,7 @@ const Register = () => {
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
-                        <span className="upload-text">Upload Photo</span>
+                        <span className="upload-text">{t('register.uploadPhoto')}</span>
                       </div>
                     )}
                   </label>
@@ -481,7 +497,7 @@ const Register = () => {
                   <small className="error-message-small">{errors.avatar}</small>
                 )}
                 <small className="form-hint" style={{ textAlign: 'center' }}>
-                  Supported formats: JPG, PNG, GIF, WEBP (Max 5MB)
+                  {t('register.avatarHint')}
                 </small>
               </div>
 

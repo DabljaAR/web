@@ -366,28 +366,30 @@ const Profile = () => {
           </div>
 
           <form className="form-grid" onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label className="form-label">First Name</label>
-              <input
-                type="text"
-                className="form-input"
-                name="firstName"
-                value={formData.firstName}
-                onChange={handleChange}
-                placeholder="Enter your first name"
-              />
-            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">{t('profile.firstName')}</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  name="firstName"
+                  value={formData.firstName}
+                  onChange={handleChange}
+                  placeholder={t('profile.firstNamePlaceholder')}
+                />
+              </div>
 
-            <div className="form-group">
-              <label className="form-label">Last Name</label>
-              <input
-                type="text"
-                className="form-input"
-                name="lastName"
-                value={formData.lastName}
-                onChange={handleChange}
-                placeholder="Enter your last name"
-              />
+              <div className="form-group">
+                <label className="form-label">{t('profile.lastName')}</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  name="lastName"
+                  value={formData.lastName}
+                  onChange={handleChange}
+                  placeholder={t('profile.lastNamePlaceholder')}
+                />
+              </div>
             </div>
 
             <div className="form-group">
