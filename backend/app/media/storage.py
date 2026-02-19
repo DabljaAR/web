@@ -31,6 +31,10 @@ class StorageService(Protocol):
         """Delete a file."""
         ...
 
+    async def delete_prefix(self, prefix: str) -> bool:
+        """Delete all files and directories matching a prefix."""
+        ...
+
     async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
         """Upload a local directory to storage."""
         ...
@@ -90,8 +94,34 @@ class LocalStorageService:
     async def delete(self, path: str) -> bool:
         full_path = self.base_dir / path
         if full_path.exists():
-            full_path.unlink()
+            if full_path.is_dir():
+                shutil.rmtree(full_path)
+            else:
+                full_path.unlink()
             return True
+        return False
+        
+    async def delete_prefix(self, prefix: str) -> bool:
+        """For local storage, we can use shutil.rmtree if it's a directory or glob delete."""
+        full_path = self.base_dir / prefix
+        if full_path.exists():
+            if full_path.is_dir():
+                shutil.rmtree(full_path)
+            else:
+                full_path.unlink()
+            return True
+        
+        # If prefix is not a dir but part of filenames (not common here but for completeness)
+        parent = full_path.parent
+        if parent.exists():
+            count = 0
+            for item in parent.glob(f"{full_path.name}*"):
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+                count += 1
+            return count > 0
         return False
         
     async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
@@ -214,6 +244,30 @@ class S3StorageService:
             return True
         except Exception as e:
             logger.error(f"Error deleting from S3: {e}")
+            return False
+            
+    async def delete_prefix(self, prefix: str) -> bool:
+        """Delete everything under a prefix in S3."""
+        try:
+            async with self.session.client("s3",
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key
+            ) as s3:
+                # 1. List all objects with prefix
+                paginator = s3.get_paginator('list_objects_v2')
+                async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+                    if 'Contents' in page:
+                        objects_to_delete = [{'Key': obj['Key']} for obj in page['Contents']]
+                        # 2. Delete them
+                        if objects_to_delete:
+                            await s3.delete_objects(
+                                Bucket=self.bucket_name,
+                                Delete={'Objects': objects_to_delete}
+                            )
+                return True
+        except Exception as e:
+            logger.error(f"Error deleting prefix from S3: {e}")
             return False
             
     async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:

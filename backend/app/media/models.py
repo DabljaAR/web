@@ -20,7 +20,7 @@ class Video(Base):
     __tablename__ = "videos"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True) # UUID
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -44,7 +44,7 @@ class Video(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    user = relationship("User", backref="videos")
+    user: Mapped["User"] = relationship("User", back_populates="videos")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

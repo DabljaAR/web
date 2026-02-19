@@ -1,5 +1,6 @@
 from datetime import datetime
-from sqlalchemy import true
+from sqlalchemy import true, select
+from app.media.models import Video
 from typing import Optional, List
 from fastapi import HTTPException, status
 from app.core.models import User
@@ -273,9 +274,47 @@ class UserService:
         
         return UserResponse.model_validate(user)
     
+    async def change_password(self, user_id: int, old_password: str, new_password: str) -> dict:
+        """
+        Change user password after verifying the old one.
+        
+        Args:
+            user_id: User ID
+            old_password: Current password
+            new_password: New password
+            
+        Returns:
+            Success message
+            
+        Raises:
+            HTTPException: If user not found (404) or old password incorrect (401)
+        """
+        user = await self.user_repo.get_by_id(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+            
+        # Verify old password
+        if not self.auth_service.verify_password(old_password, user.password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect current password"
+            )
+            
+        # Update password
+        user.password = self.auth_service.get_password_hash(new_password)
+        user.updated_at = datetime.utcnow()
+        
+        self.user_repo.db.add(user)
+        await self.user_repo.db.commit()
+        
+        return {"message": "Password changed successfully"}
+
     async def delete_user(self, user_id: int) -> bool:
         """
-        Delete a user by ID.
+        Delete a user by ID and all associated data including files in storage.
         
         Args:
             user_id: User ID to delete
@@ -296,26 +335,39 @@ class UserService:
         
         avatar_url = user.avatar_url
         
+        # 1. Cleanup all media files from storage
+        # We delete by prefix for user-specific directories which is efficient
+        if self.storage_service:
+            try:
+                logger.info(f"Cleaning up storage for user {user_id} before account deletion")
+                # Delete user-specific directories
+                await self.storage_service.delete_prefix(f"videos/{user_id}")
+                await self.storage_service.delete_prefix(f"audio/{user_id}")
+                await self.storage_service.delete_prefix(f"thumbnails/{user_id}")
+                await self.storage_service.delete_prefix(f"text/{user_id}")
+                
+                # Cleanup avatar (individual file since avatars dir is shared)
+                if avatar_url:
+                    key = None
+                    if 'avatars/' in avatar_url:
+                        key = avatar_url.split('avatars/')[-1].split('?')[0]
+                        key = f"avatars/{key}"
+                    else:
+                        key = avatar_url.split('?')[0].split('/')[-1]
+                        if 'avatars' not in key:
+                             key = f"avatars/{key}"
+                    
+                    if key:
+                        logger.info(f"Deleting user avatar: {key}")
+                        await self.storage_service.delete(key)
+            except Exception as e:
+                logger.error(f"Failed to cleanup storage for user {user_id}: {e}")
+
+        # 2. Delete from DB (will cascade to videos, subscriptions, payments due to DB constraints)
         await self.user_repo.db.delete(user)
         await self.user_repo.db.commit()
-
-        # Cleanup avatar from storage
-        if self.storage_service and avatar_url:
-            try:
-                key = None
-                if 'avatars/' in avatar_url:
-                    key = avatar_url.split('avatars/')[-1].split('?')[0]
-                    key = f"avatars/{key}"
-                else:
-                    key = avatar_url.split('?')[0].split('/')[-1]
-                    if 'avatars' not in key:
-                         key = f"avatars/{key}"
-                
-                if key:
-                    await self.storage_service.delete(key)
-            except Exception as e:
-                logger.error(f"Failed to delete avatar during user deletion: {e}")
         
+        logger.info(f"User {user_id} and all associated data deleted successfully")
         return True
 
 class SubscriptionPlanService:

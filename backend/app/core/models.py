@@ -58,6 +58,16 @@ class User(Base):
     preferred_language: Mapped[languageEnum] = mapped_column(SQLEnum(languageEnum, name="languages_enum"),nullable=False,default=languageEnum.ENGLISH)
     avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # Preferences
+    default_domain: Mapped[str] = mapped_column(String(50), nullable=False, default="general")
+    translation_style: Mapped[str] = mapped_column(String(50), nullable=False, default="neutral")
+    default_voice: Mapped[str] = mapped_column(String(50), nullable=False, default="male1")
+    
+    # Notifications
+    notif_completed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notif_credits: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notif_marketing: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    
     # Note: role_id column doesn't exist in current database schema
     role_id: Mapped[Optional[int]] = mapped_column(
         Integer, 
@@ -68,9 +78,9 @@ class User(Base):
     
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False) #online
     role: Mapped[Optional["Role"]] = relationship("Role", back_populates="users")
-    subscriptions: Mapped[List["UserSubscription"]] = relationship("UserSubscription", back_populates="user")
+    subscriptions: Mapped[List["UserSubscription"]] = relationship("UserSubscription", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    videos: Mapped[List["Video"]] = relationship("Video", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
 
- 
     def __repr__(self):
         return f"<User {self.username} (id={self.user_id})>"
 
@@ -100,8 +110,8 @@ class UserSubscription(Base):
     __tablename__ = "user_subscriptions"
 
     subscription_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
-    plan_id: Mapped[int] = mapped_column(Integer, ForeignKey("subscription_plans.plan_id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    plan_id: Mapped[int] = mapped_column(Integer, ForeignKey("subscription_plans.plan_id", ondelete="CASCADE"), nullable=False, index=True)
     start_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     end_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -115,7 +125,7 @@ class UserSubscription(Base):
 
     user: Mapped["User"] = relationship("User", back_populates="subscriptions")
     plan: Mapped["SubscriptionPlan"] = relationship("SubscriptionPlan", back_populates="subscriptions")
-    payments: Mapped[List["Payment"]] = relationship("Payment", back_populates="subscription")
+    payments: Mapped[List["Payment"]] = relationship("Payment", back_populates="subscription", cascade="all, delete-orphan", passive_deletes=True)
 
     def __repr__(self):
         return f"<UserSubscription user_id={self.user_id} plan_id={self.plan_id}>"
@@ -125,7 +135,7 @@ class Payment(Base):
     __tablename__ = "payments"
 
     payment_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    subscription_id: Mapped[int] = mapped_column(Integer, ForeignKey("user_subscriptions.subscription_id"),nullable=False,index=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, ForeignKey("user_subscriptions.subscription_id", ondelete="CASCADE"),nullable=False,index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     currency: Mapped[CurrencyEnum] = mapped_column(SQLEnum(CurrencyEnum, name="currency_enum"),nullable=False,default=CurrencyEnum.USD)
     payment_method: Mapped[PaymentMethodEnum] = mapped_column(SQLEnum(PaymentMethodEnum, name="payment_method_enum"),nullable=False)

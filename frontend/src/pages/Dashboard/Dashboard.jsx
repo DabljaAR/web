@@ -176,6 +176,9 @@ const Dashboard = () => {
   const [isLibraryModalOpen, setIsLibraryModalOpen] = useState(false);
   const [selectedLibraryFile, setSelectedLibraryFile] = useState(null);
 
+  // Track deleting items to prevent flickering during polling
+  const deletingIds = useRef(new Set());
+
   // Fetch jobs
   const fetchJobs = async () => {
     try {
@@ -202,8 +205,12 @@ const Dashboard = () => {
         type: v.status === 'COMPLETED' ? 'success' : 'failed'
       }));
 
-      setProcessingJobs(pending);
-      setRecentJobs(completed);
+      // Filter out items that are currently marked for deletion
+      const safePending = pending.filter(job => !deletingIds.current.has(job.id));
+      const safeCompleted = completed.filter(job => !deletingIds.current.has(job.id));
+
+      setProcessingJobs(safePending);
+      setRecentJobs(safeCompleted);
 
       // Poll only if there are pending jobs
       setIsPolling(pending.length > 0);
@@ -281,7 +288,7 @@ const Dashboard = () => {
     }
 
     if ((activeTab === 'video' || activeTab === 'audio') && !selectedFile && !selectedLibraryFile) {
-      alert("Please select or upload a file first.");
+      alert(t('dashboard.selectFileError') || "Please select or upload a file first.");
       return;
     }
 
@@ -343,24 +350,24 @@ const Dashboard = () => {
         setProcessingJobs(prev => [newJob, ...prev]);
         setIsPolling(true);
 
-        alert('Upload successful! Processing started.');
+        alert(t('dashboard.uploadSuccess') || 'Upload successful! Processing started.');
         setSelectedFile(null); // Clear selected file
         if (fileInputRef.current) fileInputRef.current.value = '';
 
       } catch (error) {
         console.error("Upload failed", error);
         setUploadError("Upload failed: " + (error.message || "Unknown error"));
-        alert("Upload failed. Please try again.");
+        alert(t('dashboard.uploadError') || "Upload failed. Please try again.");
       } finally {
         setIsUploading(false);
       }
     } else if (activeTab === 'text' && formData.textInput) {
       // Handle direct text input (demo for now, or use a text upload endpoint with blob)
-      alert('Direct text processing started! (Demo)');
+      alert(t('dashboard.textDirectSuccess') || 'Direct text processing started! (Demo)');
     } else {
       // Fallback
       if (!selectedFile && activeTab !== 'text') {
-        alert("Please select a file.");
+        alert(t('dashboard.selectFileError') || "Please select a file.");
       }
     }
   };
@@ -371,7 +378,7 @@ const Dashboard = () => {
       setPreviewJob(job);
       setPreviewModalOpen(true);
     } else {
-      alert("No preview URL available.");
+      alert(t('dashboard.noPreviewError') || "No preview URL available.");
     }
   };
 
@@ -385,7 +392,7 @@ const Dashboard = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      alert("No download URL available.");
+      alert(t('dashboard.noDownloadError') || "No download URL available.");
     }
   };
 
@@ -401,7 +408,7 @@ const Dashboard = () => {
       });
       setPreviewModalOpen(true);
     } else {
-      alert("No audio URL available for this job.");
+      alert(t('dashboard.noAudioError') || "No audio URL available for this job.");
     }
   };
 
@@ -415,31 +422,54 @@ const Dashboard = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      alert("No audio URL available.");
+      alert(t('dashboard.noAudioError') || "No audio URL available.");
     }
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm("Are you sure you want to delete this job?")) {
+    if (window.confirm(t('dashboard.deleteConfirm') || "Are you sure you want to delete this job?")) {
       try {
-        await mediaService.deleteVideo(id);
+        // Mark as deleting
+        deletingIds.current.add(id);
+
         // Optimistically remove from UI
         setRecentJobs(prev => prev.filter(job => job.id !== id));
         setProcessingJobs(prev => prev.filter(job => job.id !== id));
-        alert("Deleted successfully.");
+
+        await mediaService.deleteVideo(id);
+        alert(t('dashboard.deleteSuccess') || "Deleted successfully.");
       } catch (error) {
         console.error("Delete failed", error);
-        alert("Failed to delete job.");
+
+        // Only show alert if it wasn't a strict "already deleted" case or similar
+        alert(t('dashboard.deleteError') || "Failed to delete job.");
+
+        // If failed, remove from deleting set so it can reappear/be retried
+        deletingIds.current.delete(id);
+
+        // Revert by fetching again
+        fetchJobs();
+      } finally {
+        // We keep it in deletingIds if success, so next polls don't show it 
+        // regardless of race conditions, until it's truly gone from backend.
+        // Actually, if we successfully deleted, we don't need to remove it from the set immediately.
+        // But eventually we should to avoid memory leaks if ids are reused (unlikely UUIDs).
+        // Let's remove it after a delay just to be safe, or assume backend is consistent now.
+        // Better: Remove from set only on error. On success, it's gone forever.
+        // To be safe against memory leaks:
+        setTimeout(() => {
+          deletingIds.current.delete(id);
+        }, 10000);
       }
     }
   };
 
   const handleRetry = (id) => {
-    alert(`Retry job ${id} (Demo)`);
+    alert(`${t('dashboard.retryDemo')} ${id} (Demo)`);
   };
 
   const handleDetails = (id) => {
-    alert(`Details for job ${id} (Demo)`);
+    alert(`${t('dashboard.detailsDemo')} ${id} (Demo)`);
   };
 
   const handleViewFullHistory = () => {
@@ -447,7 +477,7 @@ const Dashboard = () => {
   };
 
   const handleUpgradePremium = () => {
-    alert('Upgrade to Premium (Demo)');
+    alert(t('dashboard.upgradePremiumDemo') || 'Upgrade to Premium (Demo)');
   };
 
   return (
@@ -717,7 +747,7 @@ const Dashboard = () => {
             disabled={isUploading}
             style={{ opacity: isUploading ? 0.7 : 1, cursor: isUploading ? 'not-allowed' : 'pointer' }}
           >
-            <span>{isUploading ? t('dashboard.processing') : t('dashboard.startProcessing')}</span>
+            <span>{isUploading ? (t('dashboard.processing') || 'Processing...') : t('dashboard.startProcessing')}</span>
             {!isUploading && (
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                 <path d="M6 4l8 6-8 6V4z" fill="currentColor" />
@@ -739,12 +769,12 @@ const Dashboard = () => {
               style={{ padding: '8px 16px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}
             >
               <span>↻</span>
-              <span>Refresh</span>
+              <span>{t('dashboard.refresh')}</span>
             </button>
           </div>
 
           {isLoading ? (
-            <p style={{ textAlign: 'center', padding: '20px', color: 'var(--text-light)' }}>Loading...</p>
+            <p style={{ textAlign: 'center', padding: '20px', color: 'var(--text-light)' }}>{t('common.loading') || 'Loading...'}</p>
           ) : processingJobs.length > 0 ? (
             processingJobs.map((job) => (
               <div key={job.id} className="job-item">

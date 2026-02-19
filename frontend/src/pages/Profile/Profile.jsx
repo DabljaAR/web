@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../services/api';
+import ChangePasswordModal from '../../components/profile/ChangePasswordModal';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
@@ -19,6 +20,7 @@ const Profile = () => {
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const fileInputRef = useRef(null);
   const [formData, setFormData] = useState({
     firstName: '',
@@ -53,7 +55,13 @@ const Profile = () => {
           firstName: userData.first_name || '',
           lastName: userData.last_name || '',
           email: userData.email || '',
-          preferredLanguage: userData.preferred_language || ''
+          preferredLanguage: userData.preferred_language || '',
+          defaultDomain: userData.default_domain || 'general',
+          translationStyle: userData.translation_style || 'neutral',
+          defaultVoice: userData.default_voice || 'male1',
+          notifCompleted: userData.notif_completed ?? true,
+          notifCredits: userData.notif_credits ?? true,
+          notifMarketing: userData.notif_marketing ?? false
         }));
       } catch (err) {
         setError(err.message || 'Failed to load user data');
@@ -172,29 +180,19 @@ const Profile = () => {
       }
 
       // Prepare update data
-      const updateData = {};
-      const first_name = formData.firstName.trim() || null;
-      const last_name = formData.lastName.trim() || null;
-
-      if (first_name !== (user.first_name || '')) {
-        updateData.first_name = first_name;
-      }
-      if (last_name !== (user.last_name || '')) {
-        updateData.last_name = last_name;
-      }
-      if (formData.preferredLanguage !== (user.preferred_language || '')) {
-        updateData.preferred_language = formData.preferredLanguage || null;
-      }
-      if (avatarUrl !== user.avatar_url) {
-        updateData.avatar_url = avatarUrl;
-      }
-
-      // Only update if there are changes
-      if (Object.keys(updateData).length === 0) {
-        alert('No changes to save');
-        setSaving(false);
-        return;
-      }
+      const updateData = {
+        first_name: formData.firstName.trim() || null,
+        last_name: formData.lastName.trim() || null,
+        email: formData.email, // Email is disabled, but included for completeness if backend expects it
+        preferred_language: formData.preferredLanguage || null,
+        default_domain: formData.defaultDomain,
+        translation_style: formData.translationStyle,
+        default_voice: formData.defaultVoice,
+        notif_completed: formData.notifCompleted,
+        notif_credits: formData.notifCredits,
+        notif_marketing: formData.notifMarketing,
+        avatar_url: avatarUrl // Include the (potentially new) avatar URL
+      };
 
       const updatedUser = await api.put(`/users/${user.user_id}`, updateData);
 
@@ -215,7 +213,7 @@ const Profile = () => {
   };
 
   const handleChangePassword = () => {
-    alert('Change password functionality coming soon!');
+    setIsPasswordModalOpen(true);
   };
 
   const handleUpgradePremium = () => {
@@ -280,7 +278,7 @@ const Profile = () => {
         <Navbar />
         <div className="main-container">
           <div style={{ textAlign: 'center', padding: '50px' }}>
-            <p>Loading profile...</p>
+            <p>{t('profile.loading') || 'Loading profile...'}</p>
           </div>
         </div>
       </div>
@@ -411,7 +409,7 @@ const Profile = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Username</label>
+              <label className="form-label">{t('profile.username') || 'Username'}</label>
               <input
                 type="text"
                 className="form-input"
@@ -421,14 +419,14 @@ const Profile = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Preferred Language</label>
+              <label className="form-label">{t('profile.preferredLanguage') || 'Preferred Language'}</label>
               <select
                 className="form-input"
                 name="preferredLanguage"
                 value={formData.preferredLanguage}
                 onChange={handleChange}
               >
-                <option value="">Not set</option>
+                <option value="">{t('dashboard.noFilesFound') ? 'Not set' : 'Not set'}</option>
                 <option value="en">English</option>
                 <option value="ar">Arabic</option>
                 <option value="fr">French</option>
@@ -472,7 +470,7 @@ const Profile = () => {
                 className="btn btn-primary"
                 disabled={saving || uploadingAvatar}
               >
-                {uploadingAvatar ? 'Uploading image...' : saving ? 'Saving...' : t('profile.saveChanges')}
+                {uploadingAvatar ? (t('profile.uploadingImage') || 'Uploading image...') : saving ? (t('profile.saving') || 'Saving...') : t('profile.saveChanges')}
               </button>
             </div>
           </form>
@@ -560,13 +558,13 @@ const Profile = () => {
               </div>
             </div>
             <div className="stat-item">
-              <div className="stat-label">Last Login</div>
+              <div className="stat-label">{t('profile.lastLogin') || 'Last Login'}</div>
               <div className="stat-value">
-                {user?.last_login ? formatDate(user.last_login) : 'Never'}
+                {user?.last_login ? formatDate(user.last_login) : (t('profile.never') || 'Never')}
               </div>
             </div>
             <div className="stat-item">
-              <div className="stat-label">User ID</div>
+              <div className="stat-label">{t('profile.userID') || 'User ID'}</div>
               <div className="stat-value">{user?.user_id || 'N/A'}</div>
             </div>
             <div className="stat-item">
@@ -696,11 +694,16 @@ const Profile = () => {
             onClick={handleDeleteAccount}
             disabled={saving}
           >
-            {saving ? 'Deleting...' : t('profile.deleteAccount')}
+            {saving ? (t('profile.deleting') || 'Deleting...') : t('profile.deleteAccount')}
           </button>
         </section>
       </div>
       <Footer />
+      <ChangePasswordModal
+        isOpen={isPasswordModalOpen}
+        onClose={() => setIsPasswordModalOpen(false)}
+        userId={user?.user_id}
+      />
     </div>
   );
 };

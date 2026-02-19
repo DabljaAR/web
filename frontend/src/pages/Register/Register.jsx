@@ -46,29 +46,29 @@ const Register = () => {
   const validatePassword = (password) => {
     const errors = [];
     if (password.length < 8) {
-      errors.push('Password must be at least 8 characters long');
+      errors.push(t('register.passwordHint'));
     }
     if (!/[A-Z]/.test(password)) {
-      errors.push('Password must contain at least one uppercase letter');
+      errors.push(t('register.passwordHint'));
     }
     if (!/[a-z]/.test(password)) {
-      errors.push('Password must contain at least one lowercase letter');
+      errors.push(t('register.passwordHint'));
     }
     if (!/\d/.test(password)) {
-      errors.push('Password must contain at least one digit');
+      errors.push(t('register.passwordHint'));
     }
     return errors;
   };
 
   const validateUsername = (username) => {
     if (username.length < 3) {
-      return 'Username must be at least 3 characters long';
+      return t('register.usernameMin');
     }
     if (username.length > 50) {
-      return 'Username must be less than 50 characters';
+      return t('register.usernameMax');
     }
     if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
-      return 'Username must contain only letters, numbers, underscores, and hyphens';
+      return t('register.usernameInvalid');
     }
     return null;
   };
@@ -94,19 +94,19 @@ const Register = () => {
     }
 
     if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match';
+      newErrors.confirmPassword = t('register.passwordsDoNotMatch');
     }
 
     if (!formData.terms) {
-      newErrors.terms = 'Please agree to the Terms of Service and Privacy Policy';
+      newErrors.terms = t('register.termsRequired');
     }
 
     // Validate first and last name
     if (!formData.firstName.trim()) {
-      newErrors.firstName = 'First name is required';
+      newErrors.firstName = t('register.firstNameRequired');
     }
     if (!formData.lastName.trim()) {
-      newErrors.lastName = 'Last name is required';
+      newErrors.lastName = t('register.lastNameRequired');
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -119,7 +119,7 @@ const Register = () => {
     try {
       // Ensure password is not empty
       if (!formData.password || formData.password.trim() === '') {
-        setErrors(prev => ({ ...prev, password: 'Password is required' }));
+        setErrors(prev => ({ ...prev, password: t('register.passwordRequired') }));
         setIsLoading(false);
         return;
       }
@@ -181,11 +181,11 @@ const Register = () => {
       }
 
       // Success - show message and redirect to login
-      alert('Account created successfully! Please login with your credentials.');
+      alert(t('register.accountCreated') || 'Account created successfully! Please login with your credentials.');
       navigate('/login');
     } catch (error) {
       // Handle error response
-      let errorMessage = error.message || 'Registration failed. Please try again.';
+      let errorMessage = error.message || t('register.registrationFailed') || 'Registration failed. Please try again.';
       const fieldErrors = {};
 
       // Handle FastAPI validation errors
@@ -234,13 +234,13 @@ const Register = () => {
       // Validate file type
       const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
       if (!validTypes.includes(file.type)) {
-        setErrors(prev => ({ ...prev, avatar: 'Please select a valid image file (jpg, png, gif, webp)' }));
+        setErrors(prev => ({ ...prev, avatar: t('register.invalidImage') }));
         return;
       }
 
       // Validate file size (5MB)
       if (file.size > 5 * 1024 * 1024) {
-        setErrors(prev => ({ ...prev, avatar: 'File size must be less than 5MB' }));
+        setErrors(prev => ({ ...prev, avatar: t('register.imageSizeError') }));
         return;
       }
 
@@ -269,7 +269,7 @@ const Register = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to upload avatar');
+        throw new Error(errorData.detail || t('register.avatarUploadFailed'));
       }
 
       const data = await response.json();
@@ -280,7 +280,7 @@ const Register = () => {
   };
 
   const handleGoogleSignUp = () => {
-    alert('Google sign up (Demo)');
+    alert(t('register.googleSignUpDemo') || 'Google sign up (Demo)');
   };
 
   return (
@@ -524,7 +524,7 @@ const Register = () => {
 
               <button type="submit" className="btn-submit" disabled={isLoading || uploadingAvatar}>
                 <span>
-                  {uploadingAvatar ? 'Uploading image...' : isLoading ? 'Creating Account...' : t('register.createAccount')}
+                  {uploadingAvatar ? t('register.uploadingImage') : isLoading ? t('register.creatingAccount') : t('register.createAccount')}
                 </span>
                 {!isLoading && (
                   <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
