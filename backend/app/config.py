@@ -38,9 +38,12 @@ class Settings(BaseSettings):
     MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "False").lower() == "true"
 
-    
+    # Celery / Redis
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+    WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", 2))
 
-        # Logging Configuration
+    # Logging Configuration
     LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     LOG_DIR: str = "logs"  # Directory for log files
     LOG_FILE: str = "app.log"  # Main log file name

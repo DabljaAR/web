@@ -72,3 +72,7 @@ watchfiles==1.1.1
 websockets==15.0.1
 requests==2.31.0
 aioboto3==12.3.0
+celery[redis]==5.4.0
+flower==2.0.1
+redis==5.0.8
+aiosqlite==0.20.0
