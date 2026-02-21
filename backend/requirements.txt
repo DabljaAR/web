@@ -71,3 +71,5 @@ uvloop==0.22.1
 watchfiles==1.1.1
 websockets==15.0.1
 requests==2.31.0
+torch==2.10.0
+faster-whisper==1.2.1

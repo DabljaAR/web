@@ -4,7 +4,7 @@ from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from pydantic import model_validator
 from decimal import Decimal
 from pydantic import BaseModel, Field
-from app.core.enums import (
+from app.shared.enums import (
     CurrencyEnum,
     PaymentMethodEnum,
     PaymentGatewayEnum,

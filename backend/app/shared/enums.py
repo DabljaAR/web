@@ -34,7 +34,21 @@ class SubscriptionStatusEnum(str, Enum):
 
 class languageEnum(str, Enum):
     ENGLISH = "en"
-    ARABIC = "ar"
-    
+    SPANISH = "es"
+    FRENCH = "fr"
+    GERMAN = "de"
+    PORTUGUESE = "pt"
+    ITALIAN = "it"
+    RUSSIAN = "ru"
+    CHINESE = "zh"
+    JAPANESE = "ja"
+    KOREAN = "ko"
+    AUTO = None  # Auto-detect
 
     
+class modelSize(str, Enum):
+    """Available Whisper model sizes."""
+    TINY = "tiny"
+    SMALL = "small"
+    MEDIUM = "medium"
+    LARGE = "large-v3"

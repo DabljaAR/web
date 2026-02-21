@@ -6,7 +6,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
 from sqlalchemy import Enum as SQLEnum
-from app.core.enums import (
+from app.shared.enums import (
     CurrencyEnum,
     PaymentMethodEnum,
     PaymentGatewayEnum,
