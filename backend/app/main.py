@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
         logger.info("🎤 Initializing Speech-to-Text service...")
         
         model_manager = WhisperModelManager(
-            model_size=modelSize.MEDIUM.value
+            model_size=modelSize.SMALL.value
         )
         transcription_service = TranscriptionService(model_manager)
         set_service(transcription_service)  # Pass service to router

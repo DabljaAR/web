@@ -9,6 +9,21 @@ from faster_whisper import WhisperModel
 
 logger = logging.getLogger(__name__)
 
+
+def clean_text(text: str) -> str:
+    """
+    Clean transcribed text by removing extra whitespace.
+    
+    Args:
+        text: Raw transcribed text
+        
+    Returns:
+        Cleaned text
+    """
+    # Strip leading/trailing whitespace and collapse multiple spaces
+    return " ".join(text.split())
+
+
 # Constants
 MAX_AUDIO_DURATION = 3600  # 1 hour max (adjust to your needs)
 MAX_RETRIES = 3
@@ -26,7 +41,7 @@ class WhisperModelManager:
     - Performance metrics
     """
 
-    def __init__(self, model_size: str = "medium"):
+    def __init__(self, model_size: str = "small"):
         self.model_size = model_size
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.compute_type = "float16" if self.device == "cuda" else "int8"
