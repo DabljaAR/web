@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, Boolean, Enum as SQLEnum, Float, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
@@ -44,7 +44,9 @@ class Video(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
     user: Mapped["User"] = relationship("User", back_populates="videos")
+    translations: Mapped[List["Translation"]] = relationship("Translation", back_populates="video", cascade="all, delete-orphan")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

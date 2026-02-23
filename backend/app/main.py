@@ -44,8 +44,15 @@ async def lifespan(app: FastAPI):
         await connect_to_db()
         await init_db()
         logger.info("Database connected and initialized")
+        
+        # Warm up NMT model
+        from app.nmt.service import init_nmt
+        logger.info("Warming up NMT model...")
+        await init_nmt()
+        logger.info("NMT model warmed up successfully")
+        
     except Exception as e:
-        logger.error("Failed to connect to database during startup", exc_info=True)
+        logger.error("Failed to connect to database or initialize NMT during startup", exc_info=True)
         raise
     
     try:
@@ -100,9 +107,11 @@ async def read_root():
 
 
 from app.api.media_routers import router as media_router
+from app.nmt.router import router as nmt_router
 
 app.include_router(core_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
+app.include_router(nmt_router, prefix="/api")
 
 
 # Mount static files for uploaded avatars

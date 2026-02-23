@@ -136,6 +136,23 @@ http://localhost:9001
 Username: minioadmin  
 Password: minioadmin
 
+
+ /home/eslam/Desktop/dablaja2/dablaja/web/.venv/bin/python /home/eslam/Desktop/dablaja2/dablaja/web/nmt/demo_translation.py
+
+
+
+<!-- 
+/home/eslam/Desktop/dablaja2/dablaja/web/.venv/bin/python /home/eslam/Desktop/dablaja2/dablaja/web/nmt/demo_translation.py
+
+
+
+
+
+/home/eslam/Desktop/dablaja2/dablaja/web/.venv/bin/python /home/eslam/Desktop/dablaja2/dablaja/web/nmt/demo_finetuned.py
+
+
+
+ -->
 ## API Endpoints
 
 ### User Endpoints (`/api/users`)
