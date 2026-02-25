@@ -34,6 +34,7 @@ class SubscriptionStatusEnum(str, Enum):
 
 class languageEnum(str, Enum):
     ENGLISH = "en"
+    ARABIC = "ar"
     SPANISH = "es"
     FRENCH = "fr"
     GERMAN = "de"

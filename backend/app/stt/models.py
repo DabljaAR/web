@@ -7,6 +7,8 @@ from threading import Lock
 from typing import Optional
 from faster_whisper import WhisperModel
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,11 +26,11 @@ def clean_text(text: str) -> str:
     return " ".join(text.split())
 
 
-# Constants
-MAX_AUDIO_DURATION = 3600  # 1 hour max (adjust to your needs)
-MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
-GPU_MEMORY_THRESHOLD = 0.9  # 90% GPU memory = cancel new requests
+# Constants - now from settings
+MAX_AUDIO_DURATION = settings.STT_MAX_AUDIO_DURATION
+MAX_RETRIES = settings.STT_RETRY_ATTEMPTS
+RETRY_DELAY = settings.STT_RETRY_DELAY
+GPU_MEMORY_THRESHOLD = settings.STT_GPU_MEMORY_THRESHOLD
 
 
 class WhisperModelManager:
@@ -39,12 +41,25 @@ class WhisperModelManager:
     - GPU memory monitoring and cleanup
     - Input validation and timeout protection
     - Performance metrics
+    - Environment-based configuration
     """
 
-    def __init__(self, model_size: str = "small"):
-        self.model_size = model_size
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.compute_type = "float16" if self.device == "cuda" else "int8"
+    def __init__(self, model_size: str = None, device: str = None, compute_type: str = None):
+        """
+        Initialize Whisper model manager.
+        
+        Args:
+            model_size: Model size (tiny, base, small, medium, large). 
+                       Defaults to STT_MODEL_SIZE from config
+            device: Device to use (cuda, cpu). 
+                   Defaults to STT_DEVICE from config
+            compute_type: Compute type (float32, float16, int8, etc). 
+                         Defaults to STT_COMPUTE_TYPE from config
+        """
+        # Use config defaults if not provided
+        self.model_size = model_size or settings.STT_MODEL_SIZE
+        self.device = device or settings.STT_DEVICE
+        self.compute_type = compute_type or settings.STT_COMPUTE_TYPE
 
         # Thread safety for concurrent requests
         self._lock = Lock()
@@ -60,8 +75,10 @@ class WhisperModelManager:
         }
 
         logger.info(
-            f"Initializing Whisper model | size={self.model_size} "
-            f"device={self.device} compute_type={self.compute_type}"
+            f"Initializing Whisper model | "
+            f"size={self.model_size} | "
+            f"device={self.device} | "
+            f"compute_type={self.compute_type}"
         )
 
         try:
@@ -93,11 +110,12 @@ class WhisperModelManager:
         if not os.access(audio_path, os.R_OK):
             raise PermissionError(f"Cannot read audio file: {audio_path}")
 
-        # Check file size (max 5GB)
+        # Check file size
+        max_size_gb = settings.STT_MAX_FILE_SIZE_GB
         file_size_gb = path.stat().st_size / (1024 ** 3)
-        if file_size_gb > 5:
+        if file_size_gb > max_size_gb:
             raise ValueError(
-                f"File too large: {file_size_gb:.2f}GB (max 5GB)"
+                f"File too large: {file_size_gb:.2f}GB (max {max_size_gb}GB)"
             )
 
         # Valid audio extensions
@@ -122,10 +140,12 @@ class WhisperModelManager:
 
         try:
             allocated = torch.cuda.memory_allocated() / torch.cuda.get_device_properties(0).total_memory
-            if allocated > GPU_MEMORY_THRESHOLD:
+            threshold = settings.STT_GPU_MEMORY_THRESHOLD
+            
+            if allocated > threshold:
                 logger.warning(
                     f"GPU memory usage high: {allocated*100:.1f}% "
-                    "(rejecting new requests)"
+                    f"(threshold: {threshold*100:.0f}%, rejecting new requests)"
                 )
                 return False
             return True
@@ -136,9 +156,12 @@ class WhisperModelManager:
     def _cleanup_gpu_memory(self) -> None:
         """Force GPU memory cleanup after transcription."""
         if self.device == "cuda":
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
-            logger.debug("GPU memory cleaned up")
+            try:
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                logger.debug("GPU memory cleaned up")
+            except Exception as e:
+                logger.debug(f"Could not cleanup GPU memory: {e}")
 
     def transcribe(
         self,
@@ -218,10 +241,11 @@ class WhisperModelManager:
                 )
 
                 # Check duration limit
-                if info.duration > MAX_AUDIO_DURATION:
+                max_duration = settings.STT_MAX_AUDIO_DURATION
+                if info.duration > max_duration:
                     raise ValueError(
                         f"Audio too long: {info.duration:.0f}s "
-                        f"(max {MAX_AUDIO_DURATION}s)"
+                        f"(max {max_duration}s)"
                     )
 
                 # Convert generator to list ONCE
@@ -260,6 +284,7 @@ class WhisperModelManager:
                         "duration": round(info.duration, 2),
                         "model_size": self.model_size,
                         "device": self.device,
+                        "compute_type": self.compute_type,
                         "processing_time": round(processing_time, 2),
                         "segment_count": len(structured_segments),
                     }
@@ -269,7 +294,7 @@ class WhisperModelManager:
                     f"✅ Transcription completed | "
                     f"duration={info.duration:.1f}s | "
                     f"processing_time={processing_time:.1f}s | "
-                    f"speed_ratio={processing_time/info.duration:.2f}x"
+                    f"speed_ratio={info.duration/processing_time:.2f}x"
                 )
 
                 return result
@@ -305,6 +330,7 @@ class WhisperModelManager:
             **self.metrics,
             "device": self.device,
             "model_size": self.model_size,
+            "compute_type": self.compute_type,
             "is_transcribing": self._is_transcribing,
         }
 

@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
+import gc
 
 from app.dependencies import connect_to_db, disconnect_from_db
 from app.core.router import router as core_router
@@ -13,7 +14,6 @@ from app.core.rate_limiter import limiter
 from slowapi.errors import RateLimitExceeded
 from app.shared.logging import setup_logging
 from app.shared.middleware import ExceptionLoggingMiddleware
-from app.shared.enums import modelSize
 from app.config import settings
 
 # Import SST router and service
@@ -23,6 +23,9 @@ from app.stt.models import WhisperModelManager
 
 
 logger = logging.getLogger(__name__)
+
+# Global service reference for cleanup
+_transcription_service: TranscriptionService = None
 
 
 async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
@@ -38,6 +41,8 @@ async def lifespan(app: FastAPI):
     Application lifespan manager.
     Handles startup and shutdown logic for the application.
     """
+    global _transcription_service
+    
     # Initialize logging system
     setup_logging(
         log_level=settings.LOG_LEVEL,
@@ -53,6 +58,8 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 80)
     logger.info("🚀 Application starting up...")
     logger.info("=" * 80)
+    logger.info(f"Environment: {settings.ENVIRONMENT}")
+    logger.info(f"Debug: {settings.DEBUG}")
     
     # Startup logic
     try:
@@ -64,11 +71,17 @@ async def lifespan(app: FastAPI):
         
         # Initialize Speech-to-Text service
         logger.info("🎤 Initializing Speech-to-Text service...")
+        logger.info(f"   Model: {settings.STT_MODEL_SIZE}")
+        logger.info(f"   Device: {settings.STT_DEVICE}")
+        logger.info(f"   Compute Type: {settings.STT_COMPUTE_TYPE}")
         
         model_manager = WhisperModelManager(
-            model_size=modelSize.SMALL.value
+            model_size=settings.STT_MODEL_SIZE,
+            device=settings.STT_DEVICE,
+            compute_type=settings.STT_COMPUTE_TYPE
         )
         transcription_service = TranscriptionService(model_manager)
+        _transcription_service = transcription_service  # Store globally
         set_service(transcription_service)  # Pass service to router
         logger.info("✅ Speech-to-Text service initialized")
         
@@ -89,17 +102,26 @@ async def lifespan(app: FastAPI):
         logger.info("=" * 80)
         
         try:
+            # Clean up Speech-to-Text service
+            if _transcription_service:
+                logger.info("🧹 Cleaning up Speech-to-Text service...")
+                _transcription_service.cleanup()
+                logger.info("✅ Speech-to-Text service cleaned up")
+        except Exception as e:
+            logger.error("❌ Error during service cleanup", exc_info=True)
+        
+        try:
             await disconnect_from_db()
             logger.info("✅ Database disconnected")
         except Exception as e:
             logger.error("❌ Error during database disconnection", exc_info=True)
         
+        # Force garbage collection to clean up remaining resources
         try:
-            # Clean up Speech-to-Text service if needed
-            logger.info("🧹 Cleaning up Speech-to-Text service...")
-            logger.info("✅ Speech-to-Text service cleaned up")
+            gc.collect()
+            logger.info("✅ Garbage collection completed")
         except Exception as e:
-            logger.error("❌ Error during service cleanup", exc_info=True)
+            logger.error("❌ Error during garbage collection", exc_info=True)
         
         logger.info("=" * 80)
 
@@ -140,12 +162,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",      # Vite default port
-        "http://localhost:3000",      # Alternative frontend port
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -199,4 +216,11 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app,
+        host=settings.HOST,
+        port=settings.PORT,
+        workers=settings.WORKERS if settings.ENVIRONMENT == "production" else 1,
+        reload=settings.ENVIRONMENT == "development",
+        log_level=settings.LOG_LEVEL.lower()
+    )

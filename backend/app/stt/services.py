@@ -24,7 +24,7 @@ UPLOAD_DIR = Path("/tmp/transcriptions")
 class TranscriptionService:
     """
     Service for handling transcription operations.
-    Abstracts business logic from routes.
+    Abstracts business logic from outes.
     """
 
     def __init__(self, model_manager: WhisperModelManager):

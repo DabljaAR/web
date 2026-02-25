@@ -6,63 +6,105 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
+    # ========== DATABASE ==========
     DATABASE_URL: str = os.getenv(
-            "DATABASE_URL", 
-            "postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar"
-        )
+        "DATABASE_URL", 
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar"
+    )
     
+    # ========== AUTHENTICATION ==========
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    
-    # Note: os.getenv returns strings, so we must cast to int
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
     
-
-        # Logging Configuration
-    LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    LOG_DIR: str = "logs"  # Directory for log files
-    LOG_FILE: str = "app.log"  # Main log file name
-    LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10MB - max size before rotation
-    LOG_BACKUP_COUNT: int = 5  # Number of backup log files to keep
-    LOG_ENABLE_CONSOLE: bool = True  # Enable console logging
-    LOG_ENABLE_FILE: bool = True  # Enable file logging
-    LOG_JSON_FORMAT: bool = False  # Use JSON format for logs
-    LOG_ENABLE_SUCCESS: bool = True  # Enable success request logging (2xx status codes)
-   
-
-
-   
+    # ========== LOGGING CONFIGURATION ==========
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    LOG_DIR: str = os.getenv("LOG_DIR", "logs")  # Directory for log files
+    LOG_FILE: str = os.getenv("LOG_FILE", "app.log")  # Main log file name
+    LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))  # 10MB
+    LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))  # Backup log files to keep
+    LOG_ENABLE_CONSOLE: bool = os.getenv("LOG_ENABLE_CONSOLE", "True").lower() == "true"
+    LOG_ENABLE_FILE: bool = os.getenv("LOG_ENABLE_FILE", "True").lower() == "true"
+    LOG_JSON_FORMAT: bool = os.getenv("LOG_JSON_FORMAT", "False").lower() == "true"
+    LOG_ENABLE_SUCCESS: bool = os.getenv("LOG_ENABLE_SUCCESS", "True").lower() == "true"
+    
+    # ========== SPEECH-TO-TEXT (STT) ==========
+    # Model size: tiny, base, small, medium, large
+    STT_MODEL_SIZE: str = os.getenv("STT_MODEL_SIZE", "small")
+    
+    # Device: cuda (GPU) or cpu
+    STT_DEVICE: str = os.getenv("STT_DEVICE", "auto")
+    
+    # Compute type: float32, float16, int8, int8_float32, int8_float16
+    STT_COMPUTE_TYPE: str = os.getenv("STT_COMPUTE_TYPE", "auto")
+    
+    # Max concurrent transcriptions
+    STT_MAX_CONCURRENT: int = int(os.getenv("STT_MAX_CONCURRENT", "1"))
+    
+    # Max audio duration in seconds (3600 = 1 hour)
+    STT_MAX_AUDIO_DURATION: int = int(os.getenv("STT_MAX_AUDIO_DURATION", "3600"))
+    
+    # Max file size in GB
+    STT_MAX_FILE_SIZE_GB: float = float(os.getenv("STT_MAX_FILE_SIZE_GB", "5"))
+    
+    # GPU memory threshold (0.9 = 90%)
+    STT_GPU_MEMORY_THRESHOLD: float = float(os.getenv("STT_GPU_MEMORY_THRESHOLD", "0.9"))
+    
+    # Retry settings
+    STT_RETRY_ATTEMPTS: int = int(os.getenv("STT_RETRY_ATTEMPTS", "3"))
+    STT_RETRY_DELAY: int = int(os.getenv("STT_RETRY_DELAY", "2"))
+    
+    # ========== SERVER ==========
+    HOST: str = os.getenv("HOST", "0.0.0.0")
+    PORT: int = int(os.getenv("PORT", "8000"))
+    WORKERS: int = int(os.getenv("WORKERS", "1"))
+    
+    # ========== CORS ==========
+    CORS_ORIGINS: list = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
+    
+    # ========== ENVIRONMENT ==========
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
+    
+    def get_device(self) -> str:
+        """Get the device (auto-detect if set to 'auto')."""
+        if self.STT_DEVICE == "auto":
+            try:
+                import torch
+                return "cuda" if torch.cuda.is_available() else "cpu"
+            except:
+                return "cpu"
+        return self.STT_DEVICE
+    
+    def get_compute_type(self) -> str:
+        """Get compute type (auto-select based on device)."""
+        if self.STT_COMPUTE_TYPE == "auto":
+            device = self.get_device()
+            return "float16" if device == "cuda" else "int8"
+        return self.STT_COMPUTE_TYPE
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production."""
+        return self.ENVIRONMENT == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development."""
+        return self.ENVIRONMENT == "development"
 
 
 settings = Settings()
-
-# Note: Required environment variables:
-# - DATABASE_URL: PostgreSQL connection string
-# - SECRET_KEY or JWT_SECRET: Secret key for JWT token signing (should be a strong random string)
-# Optional:
-# - ALGORITHM: JWT algorithm (default: HS256)
-# - ACCESS_TOKEN_EXPIRE_MINUTES: Access token expiration in minutes (default: 15)
-# - REFRESH_TOKEN_EXPIRE_DAYS: Refresh token expiration in days (default: 7)
-
-
-
-
-
-# Note: Required environment variables:
-# - DATABASE_URL: PostgreSQL connection string
-# - SECRET_KEY or JWT_SECRET: Secret key for JWT token signing (should be a strong random string)
-# Optional:
-# - ALGORITHM: JWT algorithm (default: HS256)
-# - ACCESS_TOKEN_EXPIRE_MINUTES: Access token expiration in minutes (default: 15)
-# - REFRESH_TOKEN_EXPIRE_DAYS: Refresh token expiration in days (default: 7)
-
-
-
