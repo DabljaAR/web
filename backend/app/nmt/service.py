@@ -1,3 +1,4 @@
+import re
 import os
 import uuid
 import logging
@@ -9,27 +10,61 @@ from typing import List, Optional
 from datetime import datetime
 
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-from langdetect import detect
+from langdetect import detect, DetectorFactory
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.nmt.models import Translation, TranslationStatus
 from app.media.models import Video, MediaType
 from app.media.storage import get_storage_service
 from app.core.db import AsyncSessionLocal
 
+# Seed for consistent langdetect results
+DetectorFactory.seed = 0
+
 logger = logging.getLogger(__name__)
+
+# v4 model path - Priority for finetuned model
+# Since we are using FUSE (s3fs), the MinIO bucket is mounted to a local folder.
+# We mount the 'dablajaar' bucket into '~/minio-model'.
+MODEL_MOUNT_V4 = os.path.expanduser("~/minio-model/model")
+
+DEFAULT_MODEL = "facebook/nllb-200-distilled-600M"
+
+def resolve_default_model():
+    """
+    Decide which model to use based on available paths.
+    """
+    global DEFAULT_MODEL
+    if os.path.exists(MODEL_MOUNT_V4):
+        DEFAULT_MODEL = MODEL_MOUNT_V4
+        logger.info(f"Using model from mounted drive: {DEFAULT_MODEL}")
+    elif os.path.exists("nllb-edu-en-ar-finetuned-v3"):
+        DEFAULT_MODEL = "nllb-edu-en-ar-finetuned-v3"
+    else:
+        DEFAULT_MODEL = "facebook/nllb-200-distilled-600M"
+    return DEFAULT_MODEL
+
 
 class NLLBTranslatorWrapper:
     """
     Wrapper for NLLB model, adapted from demo_translation.py
     """
-    def __init__(self, model_name="facebook/nllb-200-distilled-600M"):
+    def __init__(self, model_name=DEFAULT_MODEL):
         self.model_name = model_name
         self.device = self._get_device()
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(self.device)
-
+        logger.info(f"Loading tokenizer and model from '{model_name}' on {self.device}...")
+        local_files_only = os.path.isdir(model_name)
+        
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            model_name, 
+            local_files_only=local_files_only
+        )
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name, 
+            local_files_only=local_files_only
+        ).to(self.device)
+        
     def _get_device(self):
         if torch.cuda.is_available():
             try:
@@ -41,44 +76,87 @@ class NLLBTranslatorWrapper:
                 pass
         return "cpu"
 
-    def translate(self, text, src_lang="eng_Latn", tgt_lang="arb_Arab", max_length=512):
+    LANG_MAP = {
+        "en": "eng_Latn",
+        "ar": "arb_Arab",
+        "fr": "fra_Latn",
+        "es": "spa_Latn",
+        "de": "deu_Latn",
+        "it": "ita_Latn",
+        "pt": "por_Latn",
+        "ru": "rus_Cyrl",
+        "zh": "zho_Hans",
+        "ja": "jpn_Jpan",
+        "ko": "kor_Hang",
+    }
+
+    def translate(self, text: str, src_lang: Optional[str] = None, tgt_lang: str = "arb_Arab", max_length: int = 512):
+        """
+        Translates text by detecting language per line. 
+        This is CRITICAL for finetuned models that fail on mixed-language input.
+        """
         if not text:
             return ""
         
-        lines = [line for line in text.splitlines() if line.strip()]
-        if not lines:
-            return text
-            
-        self.tokenizer.src_lang = src_lang
+        lines = text.splitlines()
+        results = [None] * len(lines)
+        to_translate_groups = {}
         
-        # Batch size of 4-8 is usually good for CPU/Memory
-        batch_size = 4 
-        translated_results = []
-        
-        for i in range(0, len(lines), batch_size):
-            batch = lines[i:i + batch_size]
+        for idx, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                results[idx] = line # Preserve empty lines
+                continue
             
-            # Check if any line in batch is too long (NLLB prefers chunking for > 512 tokens)
-            processed_batch = []
-            for line in batch:
-                inputs = self.tokenizer(line, return_tensors="pt").to(self.device)
-                if inputs.input_ids.shape[1] > max_length:
-                    # If one line is massive, translate it separately with special chunking
-                    processed_batch.append(self._translate_long_text(line, tgt_lang, max_length))
-                else:
-                    processed_batch.append(line)
-            
-            # Translate the batch together
-            # Skip actual inference for lines already translated by _translate_long_text
-            lines_to_translate = [l for l in processed_batch if l not in translated_results]
-            
-            if lines_to_translate:
-                batch_outputs = self._run_inference_batch(batch, tgt_lang, max_length)
-                translated_results.extend(batch_outputs)
-            else:
-                translated_results.extend(processed_batch)
+            # 1. Detect language for this specific line
+            try:
+                detected_code = detect(stripped)
+                line_src_lang = self.LANG_MAP.get(detected_code)
                 
-        return "\n".join(translated_results)
+                # Check for Latin characters to prevent misdetecting English as Arabic
+                has_latin = bool(re.search(r'[a-zA-Z]', stripped))
+                if has_latin and line_src_lang == "arb_Arab":
+                    line_src_lang = "eng_Latn"
+                
+                if not line_src_lang:
+                    line_src_lang = src_lang or "eng_Latn"
+            except Exception:
+                line_src_lang = src_lang or "eng_Latn"
+                
+            # 2. If the line is already in the target language, don't translate it
+            # This is vital for finetuned models to avoid "original word" issues and confusion
+            if line_src_lang == tgt_lang:
+                results[idx] = line
+                continue
+                
+            # 3. Check for long line chunking
+            # NLLB models, especially finetuned ones, can fail (return original text) 
+            # or lose quality on longer paragraphs. We chunk if token count > 100.
+            tokens = self.tokenizer(stripped, return_tensors="pt")
+            if tokens.input_ids.shape[1] > 100:
+                results[idx] = self._translate_long_text(stripped, line_src_lang, tgt_lang, max_length)
+                continue
+
+            # 4. Group by source language for batching
+            if line_src_lang not in to_translate_groups:
+                to_translate_groups[line_src_lang] = []
+            to_translate_groups[line_src_lang].append((idx, stripped))
+
+        # Process each language group in batches
+        for lang_code, items in to_translate_groups.items():
+            self.tokenizer.src_lang = lang_code
+            indices = [item[0] for item in items]
+            texts = [item[1] for item in items]
+            
+            batch_size = 4
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                batch_indices = indices[i:i + batch_size]
+                translated_batch = self._run_inference_batch(batch_texts, tgt_lang, max_length)
+                for local_idx, translated_text in enumerate(translated_batch):
+                    results[batch_indices[local_idx]] = translated_text
+                    
+        return "\n".join([res if res is not None else lines[i] for i, res in enumerate(results)])
 
     def _run_inference_batch(self, texts, tgt_lang, max_length):
         """Internal method to perform batch model inference."""
@@ -87,37 +165,43 @@ class NLLBTranslatorWrapper:
             **inputs,
             forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(tgt_lang),
             max_length=max_length,
-            num_beams=2,  # Reduced from 5 to 2 for 2-3x faster CPU performance with 90% same quality
+            num_beams=2,  # Faster on CPU
             early_stopping=True
         )
         return self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
-    def _translate_long_text(self, text, tgt_lang, max_length):
-        # Simplified chunking logic based on demo_translation.py
-        words = text.replace('\n', ' \n ').split(' ')
+    def _translate_long_text(self, text, src_lang, tgt_lang, max_length):
+        """Chunking logic to handle very long single lines."""
+        self.tokenizer.src_lang = src_lang
+        words = text.split(' ')
         chunks = []
         current_words = []
+        
+        # Safe threshold for finetuned models is around 80-100 tokens
+        chunk_threshold = 100
         
         for word in words:
             if not word: continue
             test_words = current_words + [word]
-            test_str = " ".join(test_words).replace(' \n ', '\n')
+            test_str = " ".join(test_words)
             token_count = self.tokenizer(test_str, return_tensors="pt").input_ids.shape[1]
             
-            if token_count > max_length - 10:
+            if token_count > chunk_threshold:
                 if current_words:
-                    chunk_str = " ".join(current_words).replace(' \n ', '\n')
-                    chunks.append(self._run_inference(chunk_str, tgt_lang, max_length))
+                    chunk_str = " ".join(current_words)
+                    # Use batch method for single chunk
+                    chunks.append(self._run_inference_batch([chunk_str], tgt_lang, max_length)[0])
                     current_words = [word]
                 else:
-                    chunks.append(self._run_inference(word, tgt_lang, max_length))
+                    # Single word is too long (rare but possible)
+                    chunks.append(self._run_inference_batch([word], tgt_lang, max_length)[0])
                     current_words = []
             else:
                 current_words = test_words
         
         if current_words:
-            chunk_str = " ".join(current_words).replace(' \n ', '\n')
-            chunks.append(self._run_inference(chunk_str, tgt_lang, max_length))
+            chunk_str = " ".join(current_words)
+            chunks.append(self._run_inference_batch([chunk_str], tgt_lang, max_length)[0])
             
         return " ".join(chunks)
 
@@ -128,14 +212,18 @@ _translation_lock = asyncio.Lock()
 def get_translator():
     global _translator
     if _translator is None:
-        logger.info("Initializing NLLBTranslatorWrapper (this may take a while)...")
-        _translator = NLLBTranslatorWrapper()
+        model_name = resolve_default_model()
+        logger.info(f"Initializing NLLBTranslatorWrapper with model '{model_name}' (this may take a while)...")
+        _translator = NLLBTranslatorWrapper(model_name=model_name)
     return _translator
 
 async def init_nmt():
     """
     Pre-load the translator during startup.
     """
+    # Simply decide which model to use based on mounted path
+    resolve_default_model()
+    
     await asyncio.to_thread(get_translator)
 
 async def process_translation_task(translation_id: str):
@@ -212,25 +300,9 @@ class TranslationService:
         self.storage = get_storage_service()
 
     def detect_language(self, text: str) -> str:
-        """
-        Detect language and return NLLB language code.
-        """
         try:
             lang = detect(text)
-            # Map common ISO codes to NLLB codes
-            lang_map = {
-                "en": "eng_Latn",
-                "ar": "arb_Arab",
-                "fr": "fra_Latn",
-                "es": "spa_Latn",
-                "de": "deu_Latn",
-                "ru": "rus_Cyrl",
-                "zh-cn": "zho_Hans",
-                "zh-tw": "zho_Hant",
-                "it": "ita_Latn",
-                "pt": "por_Latn",
-            }
-            return lang_map.get(lang, "eng_Latn") # Default to English if unknown
+            return NLLBTranslatorWrapper.LANG_MAP.get(lang, "eng_Latn")
         except Exception:
             return "eng_Latn"
 
