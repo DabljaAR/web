@@ -90,25 +90,26 @@ class NLLBTranslatorWrapper:
         "ko": "kor_Hang",
     }
 
-    def translate(self, text: str, src_lang: Optional[str] = None, tgt_lang: str = "arb_Arab", max_length: int = 512):
+    def _translate_list(self, texts: List[str], src_lang: Optional[str] = None, tgt_lang: str = "arb_Arab", max_length: int = 512) -> List[str]:
         """
-        Translates text by detecting language per line. 
-        This is CRITICAL for finetuned models that fail on mixed-language input.
+        Translates a list of strings efficiently by:
+        1. Detecting language per item.
+        2. Chunking items that exceed 100 tokens.
+        3. Batching short items by source language for model inference.
         """
-        if not text:
-            return ""
+        if not texts:
+            return []
         
-        lines = text.splitlines()
-        results = [None] * len(lines)
+        results = [None] * len(texts)
         to_translate_groups = {}
         
-        for idx, line in enumerate(lines):
-            stripped = line.strip()
+        for idx, text in enumerate(texts):
+            stripped = text.strip()
             if not stripped:
-                results[idx] = line # Preserve empty lines
+                results[idx] = text # Preserve empty strings
                 continue
             
-            # 1. Detect language for this specific line
+            # 1. Detect language for this specific text
             try:
                 detected_code = detect(stripped)
                 line_src_lang = self.LANG_MAP.get(detected_code)
@@ -123,15 +124,12 @@ class NLLBTranslatorWrapper:
             except Exception:
                 line_src_lang = src_lang or "eng_Latn"
                 
-            # 2. If the line is already in the target language, don't translate it
-            # This is vital for finetuned models to avoid "original word" issues and confusion
+            # 2. If already in target language, don't translate
             if line_src_lang == tgt_lang:
-                results[idx] = line
+                results[idx] = text
                 continue
                 
-            # 3. Check for long line chunking
-            # NLLB models, especially finetuned ones, can fail (return original text) 
-            # or lose quality on longer paragraphs. We chunk if token count > 100.
+            # 3. Check for long text chunking (token count > 100)
             tokens = self.tokenizer(stripped, return_tensors="pt")
             if tokens.input_ids.shape[1] > 100:
                 results[idx] = self._translate_long_text(stripped, line_src_lang, tgt_lang, max_length)
@@ -146,17 +144,29 @@ class NLLBTranslatorWrapper:
         for lang_code, items in to_translate_groups.items():
             self.tokenizer.src_lang = lang_code
             indices = [item[0] for item in items]
-            texts = [item[1] for item in items]
+            texts_to_batch = [item[1] for item in items]
             
             batch_size = 4
-            for i in range(0, len(texts), batch_size):
-                batch_texts = texts[i:i + batch_size]
+            for i in range(0, len(texts_to_batch), batch_size):
+                batch_texts = texts_to_batch[i:i + batch_size]
                 batch_indices = indices[i:i + batch_size]
                 translated_batch = self._run_inference_batch(batch_texts, tgt_lang, max_length)
                 for local_idx, translated_text in enumerate(translated_batch):
                     results[batch_indices[local_idx]] = translated_text
                     
-        return "\n".join([res if res is not None else lines[i] for i, res in enumerate(results)])
+        return [res if res is not None else texts[i] for i, res in enumerate(results)]
+
+    def translate(self, text: str, src_lang: Optional[str] = None, tgt_lang: str = "arb_Arab", max_length: int = 512):
+        """
+        Translates text by detecting language per line. 
+        This is CRITICAL for finetuned models that fail on mixed-language input.
+        """
+        if not text:
+            return ""
+        
+        lines = text.splitlines()
+        translated_lines = self._translate_list(lines, src_lang=src_lang, tgt_lang=tgt_lang, max_length=max_length)
+        return "\n".join(translated_lines)
 
     def _run_inference_batch(self, texts, tgt_lang, max_length):
         """Internal method to perform batch model inference."""
@@ -204,6 +214,67 @@ class NLLBTranslatorWrapper:
             chunks.append(self._run_inference_batch([chunk_str], tgt_lang, max_length)[0])
             
         return " ".join(chunks)
+
+    def _translate_segments(self, segments: List[dict], src_lang: Optional[str] = None, tgt_lang: str = "arb_Arab", max_length: int = 512):
+        """Translates STT segments efficiently using batching and chunking."""
+        if not segments:
+            return
+            
+        texts = [s.get("text", "") for s in segments]
+        translated_texts = self._translate_list(texts, src_lang=src_lang, tgt_lang=tgt_lang, max_length=max_length)
+        
+        for i, segment in enumerate(segments):
+            if i < len(translated_texts):
+                segment["text"] = translated_texts[i]
+
+    def translate_stt_result(self, stt_result: dict, src_lang: Optional[str] = None, tgt_lang: str = "arb_Arab", max_length: int = 512):
+        """
+        Translates a full STT result (transcript and segments) while maintaining structure.
+        Ensures perfect alignment by translating segments first and reconstructing transcript.
+        """
+        if not stt_result:
+            return stt_result
+
+        # Map short target/source lang code to long NLLB format if needed (e.g., 'ar' -> 'arb_Arab')
+        full_tgt_lang = self.LANG_MAP.get(tgt_lang, tgt_lang)
+        if not full_tgt_lang and len(tgt_lang) == 2:
+             full_tgt_lang = tgt_lang
+             
+        full_src_lang = None
+        if src_lang:
+            full_src_lang = self.LANG_MAP.get(src_lang, src_lang)
+
+        # 1. Process Segments
+        segments = stt_result.get("segments", [])
+        if segments:
+            # Efficiently translate all segments at once (batching + chunking)
+            self._translate_segments(
+                segments, 
+                src_lang=full_src_lang, 
+                tgt_lang=full_tgt_lang, 
+                max_length=max_length
+            )
+            
+            # 2. RECONSTRUCT Transcript (Higher quality, perfect alignment)
+            stt_result["transcript"] = " ".join([s.get("text", "") for s in segments]).strip()
+        
+        else:
+            # 3. FALLBACK: Translate Transcript if segments are missing
+            transcript = stt_result.get("transcript", "")
+            if transcript:
+                stt_result["transcript"] = self.translate(
+                    transcript, 
+                    src_lang=full_src_lang, 
+                    tgt_lang=full_tgt_lang, 
+                    max_length=max_length
+                )
+        
+        # 4. Update metadata language if present
+        if "metadata" in stt_result and isinstance(stt_result["metadata"], dict):
+            stt_result["metadata"]["language"] = tgt_lang
+            
+        return stt_result
+
 
 # Singleton for translator to avoid reloading model on every request
 _translator = None
@@ -408,3 +479,16 @@ class TranslationService:
             "is_busy": processing_count > 0,
             "total_queued": pending_count + processing_count
         }
+
+    async def translate_stt_result(self, stt_data: dict, target_lang: str, source_lang: Optional[str] = None):
+        """
+        Fast path for translating STT results without background jobs.
+        """
+        translator = await asyncio.to_thread(get_translator)
+        return await asyncio.to_thread(
+            translator.translate_stt_result,
+            stt_data,
+            src_lang=source_lang,
+            tgt_lang=target_lang
+        )
+
