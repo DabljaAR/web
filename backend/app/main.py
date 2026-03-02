@@ -162,13 +162,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-        "*" 
-    ],
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
@@ -193,8 +186,11 @@ async def read_root():
     }
 
 
-from app.api.media_routers import router as media_router
-
+try:
+    from app.api.media_routers import router as media_router
+    has_media_router = True
+except ImportError:
+    has_media_router = False
 # ============================================================================
 # Router Registration
 # ============================================================================
@@ -202,7 +198,6 @@ from app.api.media_routers import router as media_router
 # Include Core Router (User Management, Auth, Subscriptions, Payments)
 logger.info("📋 Registering core router...")
 app.include_router(core_router, prefix="/api")
-app.include_router(media_router, prefix="/api")
 
 
 # Include SST Router (Speech-to-Text API)
@@ -211,15 +206,10 @@ logger.info("📋 Registering SST (Speech-to-Text) router...")
 app.include_router(sst_router)
 
 
-# ============================================================================
-# Static Files
-# ============================================================================
-
-# Include SST Router (Speech-to-Text API)
-# Already has prefix="/api/transcription" defined in sst/router.py
-logger.info("📋 Registering SST (Speech-to-Text) router...")
-app.include_router(sst_router)
-
+# Include Media Router if available
+if has_media_router:
+    logger.info("📋 Registering media router...")
+    app.include_router(media_router, prefix="/api")
 
 # ============================================================================
 # Static Files
