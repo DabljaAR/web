@@ -215,6 +215,16 @@ app.include_router(sst_router)
 # Static Files
 # ============================================================================
 
+# Include SST Router (Speech-to-Text API)
+# Already has prefix="/api/transcription" defined in sst/router.py
+logger.info("📋 Registering SST (Speech-to-Text) router...")
+app.include_router(sst_router)
+
+
+# ============================================================================
+# Static Files
+# ============================================================================
+
 # Mount static files for uploaded avatars
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
