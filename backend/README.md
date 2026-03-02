@@ -44,10 +44,7 @@ backend/
 │       ├── security.py             # Auth utilities (JWT, hashing)
 │       ├── middleware.py           # Custom middleware
 │       └── utils.py                # Common helper functions
-│
-├── db/
-│   └── migrations/                 # dbmate migration files
-│
+├── alembic/                      # Alembic database migrations
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py                 # Pytest fixtures
@@ -67,7 +64,7 @@ backend/
 **Installation**
 1. Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/dabljaAR.git
+    git clone https://github.com/DabljaAR/web/
     cd dabljaAR/web/backend
     ```
 2. Create a virtual environment and activate it:
