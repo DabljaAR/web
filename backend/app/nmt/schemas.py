@@ -1,25 +1,7 @@
-from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict
-from app.nmt.models import TranslationStatus
+from pydantic import BaseModel
 
-class TranslationBase(BaseModel):
-    video_id: Optional[str] = None
-    target_lang: str # e.g. "arb_Arab"
-    source_lang: Optional[str] = None # e.g. "eng_Latn", if None, will auto-detect
-
-class TranslationResponse(TranslationBase):
-    id: str
-    user_id: int
-    source_text_path: str
-    translated_text_path: Optional[str] = None
-    status: TranslationStatus
-    error_message: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    
-    # URLs for the files (populated in service/router)
-    source_url: Optional[str] = None
-    translated_url: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
+class STTData(BaseModel):
+    # Depending on what stt_data looks like, we could define it more strictly.
+    # But for now, since router uses dict, we can leave it or define a basic one.
+    pass

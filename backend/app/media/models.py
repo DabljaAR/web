@@ -46,7 +46,6 @@ class Video(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     user: Mapped["User"] = relationship("User", back_populates="videos")
-    translations: Mapped[List["Translation"]] = relationship("Translation", back_populates="video", cascade="all, delete-orphan")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
