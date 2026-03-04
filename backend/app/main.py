@@ -45,11 +45,6 @@ async def lifespan(app: FastAPI):
         await init_db()
         logger.info("Database connected and initialized")
         
-        # Warm up NMT model
-        from app.nmt.service import init_nmt
-        logger.info("Warming up NMT model...")
-        await init_nmt()
-        logger.info("NMT model warmed up successfully")
         
     except Exception as e:
         logger.error("Failed to connect to database or initialize NMT during startup", exc_info=True)
