@@ -203,9 +203,8 @@ app.include_router(sst_router)
 
 
 # Include Media Router if available
-if has_media_router:
-    logger.info("📋 Registering media router...")
-    app.include_router(media_router, prefix="/api")
+logger.info("📋 Registering media router...")
+app.include_router(media_router, prefix="/api")
 
 # ============================================================================
 # Static Files

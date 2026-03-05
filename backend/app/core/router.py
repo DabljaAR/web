@@ -49,7 +49,7 @@ def get_user_service(
         UserService instance with injected dependencies
     """
     user_repo = UserRepository(db, User)
-    return UserService(user_repo, auth_service, storage_service)
+    return UserService(user_repo, auth_service)
 
 def get_subscription_plan_service(
     db: AsyncSession = Depends(get_db)
@@ -121,7 +121,7 @@ def get_payment_service(
     return PaymentService(repo)
 
 
-@router.post("/signup", response_model=UserLoginResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
+@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
 @limiter.limit("5/minute")
 async def signup(
     request: Request,

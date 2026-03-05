@@ -39,7 +39,7 @@ class UserBase(BaseModel):
     )
     preferred_language: languageEnum = Field(
         description="User's preferred language code (e.g., 'en', 'ar')",
-        examples=["en", "ar", "fr"]
+        examples=["ENGLISH", "ARABIC", "FRENCH"]
     )
     avatar_url: Optional[str] = Field(
         None,
