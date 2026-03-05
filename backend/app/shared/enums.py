@@ -53,3 +53,18 @@ class modelSize(str, Enum):
     SMALL = "small"
     MEDIUM = "medium"
     LARGE = "large-v3"
+
+
+
+class AudioVideoExtension(str, Enum):
+    MP3  = ".mp3"
+    MP4  = ".mp4"
+    WAV  = ".wav"
+    M4A  = ".m4a"
+    FLAC = ".flac"
+    OGG  = ".ogg"
+    WMA  = ".wma"
+    AAC  = ".aac"
+    MOV  = ".mov"
+    MKV  = ".mkv"
+    WEBM = ".webm"

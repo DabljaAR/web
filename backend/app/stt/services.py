@@ -1,358 +1,224 @@
 """
-Service layer for STT business logic.
-Location: sst/services.py
+TranscriptionService — updated to use MinIO + Celery job queue.
+
+Sync transcription (transcribe_file) is unchanged — still runs in-process.
+Async transcription (submit_async_transcription) now:
+  1. Looks up the Video record for the supplied video_id
+  2. Creates a Job row (JobType.STT_TRANSCRIBE)
+  3. Dispatches transcribe_task to the ai_stt Celery queue
+  4. Returns the job_id for polling
 """
 
 import logging
-from pathlib import Path
-from typing import Optional, Dict, Any
-from fastapi import UploadFile
 import uuid
-import json
-import os
+import tempfile
+import shutil
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
+from fastapi import UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.jobs.models import Job, JobType, JobStatus
+from app.jobs.schemas import JobCreate
+from app.media.models import Video
+from app.media.storage import get_storage_service
 from app.stt.models import WhisperModelManager
-from app.stt.schema import TranscriptionResponse, TranscriptionSegment, TranscriptionMetadata
+from app.stt.schema import TranscriptionResponse, TranscriptionMetadata, TranscriptionSegment
 
 logger = logging.getLogger(__name__)
 
-# In-memory job storage (replace with Redis/DB in production)
-JOB_STORAGE: Dict[str, Dict[str, Any]] = {}
-UPLOAD_DIR = Path("/tmp/transcriptions")
+# Temp dir for sync uploads
+UPLOAD_DIR = Path(tempfile.gettempdir()) / "stt_uploads"
 
 
 class TranscriptionService:
     """
-    Service for handling transcription operations.
-    Abstracts business logic from outes.
+    STT service.
+
+    - Direct (sync) transcription: used by the blocking /transcribe endpoint.
+    - Async transcription: creates a Job + dispatches a Celery task.
     """
 
-    def __init__(self, model_manager: WhisperModelManager):
-        """
-        Initialize service with model manager.
-        
-        Args:
-            model_manager: WhisperModelManager instance
-        """
-        self.model_manager = model_manager
-        self._ensure_upload_dir()
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.storage = get_storage_service()
+        self._model_manager: Optional[WhisperModelManager] = None  # lazy
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_model(self) -> WhisperModelManager:
+        """Lazy-load the Whisper model (only for sync path)."""
+        if self._model_manager is None:
+            self._model_manager = WhisperModelManager()
+        return self._model_manager
 
     @staticmethod
-    def _ensure_upload_dir() -> None:
-        """Ensure upload directory exists."""
+    def _save_upload_locally(file: UploadFile) -> Path:
+        """Save UploadFile to a local temp path for in-process transcription."""
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        file_id = str(uuid.uuid4())
+        tmp_path = UPLOAD_DIR / f"{file_id}_{file.filename}"
+        content = file.file.read()
+        with open(tmp_path, "wb") as f:
+            f.write(content)
+        return tmp_path
+
+    @staticmethod
+    def _build_response(raw: dict) -> TranscriptionResponse:
+        """Convert raw WhisperModelManager result → Pydantic response."""
+        meta = raw["metadata"]
+        return TranscriptionResponse(
+            transcript=raw["transcript"],
+            segments=[TranscriptionSegment(**s) for s in raw["segments"]],
+            metadata=TranscriptionMetadata(**meta),
+        )
+
+    # ------------------------------------------------------------------
+    # Sync transcription (unchanged behaviour)
+    # ------------------------------------------------------------------
 
     async def transcribe_file(
         self,
         file: UploadFile,
-        language: Optional[str] = None
+        language: Optional[str] = None,
     ) -> TranscriptionResponse:
         """
-        Transcribe an uploaded file synchronously.
-        
-        Args:
-            file: Uploaded audio file
-            language: Optional language code
-            
-        Returns:
-            TranscriptionResponse with results
-            
-        Raises:
-            FileNotFoundError: If file not found
-            ValueError: If file invalid
-            RuntimeError: If transcription fails
+        Blocking transcription — runs Whisper in-process.
+        Best for short files where an immediate response is acceptable.
         """
-        temp_path = None
-        
+        tmp_path = self._save_upload_locally(file)
         try:
-            # Save uploaded file
-            temp_path = self._save_upload(file)
-            
-            logger.info(f"📥 Processing file: {file.filename}")
-            
-            # Transcribe
-            result = self.model_manager.transcribe(
-                str(temp_path),
-                language=language
-            )
-            
-            # Convert to response model
-            response = TranscriptionResponse(
-                transcript=result["transcript"],
-                segments=[
-                    TranscriptionSegment(
-                        start=seg["start"],
-                        end=seg["end"],
-                        text=seg["text"]
-                    )
-                    for seg in result["segments"]
-                ],
-                metadata=TranscriptionMetadata(
-                    language=result["metadata"]["language"],
-                    duration=result["metadata"]["duration"],
-                    model_size=result["metadata"]["model_size"],
-                    device=result["metadata"]["device"],
-                    processing_time=result["metadata"]["processing_time"],
-                    segment_count=result["metadata"]["segment_count"]
-                )
-            )
-            
-            logger.info(f"✅ Transcription complete: {file.filename}")
-            return response
-            
+            raw = self._get_model().transcribe(str(tmp_path), language=language)
+            return self._build_response(raw)
         finally:
-            # Cleanup temp file
-            if temp_path and temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup temp file: {e}")
+            tmp_path.unlink(missing_ok=True)
+
+    # ------------------------------------------------------------------
+    # Async transcription — Celery-backed
+    # ------------------------------------------------------------------
 
     async def submit_async_transcription(
         self,
-        file: UploadFile,
-        language: Optional[str] = None
-    ) -> Dict[str, str]:
+        file_key: str,
+        user_id: int,
+        language: Optional[str] = None,
+        video_id: Optional[str] = None,
+    ) -> Job:
         """
-        Submit file for async transcription.
-        
+        Create a Job record and dispatch the Celery STT task.
+
         Args:
-            file: Uploaded audio file
-            language: Optional language code
-            
+            file_key:  MinIO object key of the audio/video file,
+                       e.g. "audio/42/uuid.mp3".  The file must already
+                       exist in MinIO — no upload happens here.
+            user_id:   ID of the requesting user.
+            language:  Optional ISO-639-1 language code; None = auto-detect.
+            video_id:  Optional — link the job to a Video DB record.
+                       Pass it when the file came from the media upload flow.
+                       Omit it when referencing a MinIO key directly.
+
         Returns:
-            Dict with task_id and status
+            The newly created Job ORM instance.
         """
-        task_id = str(uuid.uuid4())
-        
-        try:
-            # Save file
-            temp_path = self._save_upload(file)
-            
-            # Store job info
-            JOB_STORAGE[task_id] = {
-                "status": "queued",
-                "filename": file.filename,
-                "file_path": str(temp_path),
+        # If a video_id is provided, verify it exists and belongs to this user
+        if video_id:
+            from sqlalchemy import select
+            result = await self.db.execute(select(Video).where(Video.id == video_id))
+            video: Optional[Video] = result.scalar_one_or_none()
+            if not video:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail=f"Video {video_id} not found.")
+            if video.user_id != user_id:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=403, detail="Access denied.")
+            # Prefer extracted audio track if available
+            file_key = video.audio_path or video.file_path
+
+        # 1. Create Job record
+        # video_id is nullable on the Job model — fine to pass None
+        job = Job(
+            id=str(uuid.uuid4()),
+            video_id=video_id or file_key,  # use file_key as fallback reference
+            user_id=user_id,
+            job_type=JobType.STT_TRANSCRIBE,
+            status=JobStatus.QUEUED,
+            progress=0.0,
+            input_data={
+                "file_key": file_key,
                 "language": language,
-                "result": None,
-                "error": None
-            }
-            
-            logger.info(f"📋 Async job queued: {task_id}")
-            
-            return {
-                "task_id": task_id,
-                "status": "queued",
-                "message": f"Job submitted. Check status at /status/{task_id}"
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to queue async job: {e}")
-            raise
+            },
+            retry_count=0,
+            max_retries=3,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        self.db.add(job)
+        await self.db.commit()
+        await self.db.refresh(job)
 
-    def get_job_status(self, task_id: str) -> Dict[str, Any]:
-        """
-        Get status of an async transcription job.
-        
-        Args:
-            task_id: Task ID to check
-            
-        Returns:
-            Dict with job status and result (if ready)
-            
-        Raises:
-            KeyError: If task not found
-        """
-        if task_id not in JOB_STORAGE:
-            raise KeyError(f"Task not found: {task_id}")
-        
-        job = JOB_STORAGE[task_id]
-        
-        return {
-            "task_id": task_id,
-            "status": job["status"],
-            "result": job["result"],
-            "error": job["error"]
-        }
+        # 2. Dispatch Celery task
+        from app.stt.models import transcribe_task  # task lives in stt/models.py
+        celery_result = transcribe_task.apply_async(
+            kwargs={
+                "job_id": job.id,
+                "file_key": file_key,
+                "language": language,
+            },
+            task_id=job.id,
+        )
 
-    def process_async_transcription(self, task_id: str) -> None:
-        """
-        Process an async transcription job.
-        Call this from a background task or worker.
-        
-        Args:
-            task_id: Task to process
-        """
-        if task_id not in JOB_STORAGE:
-            logger.error(f"Task not found: {task_id}")
-            return
-        
-        job = JOB_STORAGE[task_id]
-        file_path = job["file_path"]
-        
-        try:
-            # Update status
-            job["status"] = "processing"
-            
-            logger.info(f"⏳ Processing async job: {task_id}")
-            
-            # Transcribe
-            result = self.model_manager.transcribe(
-                file_path,
-                language=job["language"]
-            )
-            
-            # Store result
-            job["result"] = {
-                "transcript": result["transcript"],
-                "segments": result["segments"],
-                "metadata": result["metadata"]
-            }
-            job["status"] = "success"
-            
-            logger.info(f"✅ Async job complete: {task_id}")
-            
-        except Exception as e:
-            logger.error(f"❌ Async job failed: {task_id} | {e}")
-            job["status"] = "failed"
-            job["error"] = str(e)
-            
-        finally:
-            # Cleanup file
-            try:
-                Path(file_path).unlink()
-            except:
-                pass
+        # 3. Persist Celery task id
+        job.celery_task_id = celery_result.id
+        await self.db.commit()
+        await self.db.refresh(job)
 
-    def get_metrics(self) -> Dict[str, Any]:
-        """
-        Get API metrics.
-        
-        Returns:
-            Dict with performance metrics
-        """
-        metrics = self.model_manager.get_metrics()
-        
-        # Add success rate
-        total = metrics.get("total_requests", 0)
-        successful = metrics.get("successful_transcriptions", 0)
-        
-        if total > 0:
-            metrics["success_rate"] = (successful / total) * 100
-        else:
-            metrics["success_rate"] = 0.0
-        
-        return metrics
+        logger.info(
+            f"[STT] Queued job {job.id} | file_key={file_key} | language={language}"
+        )
+        return job
 
-    def get_health(self) -> Dict[str, Any]:
-        """
-        Get health check info.
-        
-        Returns:
-            Dict with health status
-        """
+    # ------------------------------------------------------------------
+    # Job status (reads from DB, not in-memory storage)
+    # ------------------------------------------------------------------
+
+    async def get_job(self, job_id: str) -> Optional[Job]:
+        """Fetch a Job row by id."""
+        return await self.db.get(Job, job_id)
+
+    # ------------------------------------------------------------------
+    # Health / metrics (proxy to model manager if loaded)
+    # ------------------------------------------------------------------
+
+    def get_health(self) -> dict:
+        manager = self._model_manager
         return {
             "status": "healthy",
-            "model_loaded": True,
-            "device": self.model_manager.device,
-            "model_size": self.model_manager.model_size,
-            "version": "1.0.0"
+            "model_loaded": manager is not None,
+            "device": manager.device if manager else "unloaded",
+            "model_size": manager.model_size if manager else "unloaded",
+            "version": "2.0.0",
         }
 
+    def get_metrics(self) -> dict:
+        manager = self._model_manager
+        if not manager:
+            return {
+                "total_requests": 0,
+                "successful_transcriptions": 0,
+                "failed_transcriptions": 0,
+                "avg_processing_time": 0.0,
+                "device": "unloaded",
+                "model_size": "unloaded",
+                "compute_type": "unloaded",
+                "is_transcribing": False,
+            }
+        return manager.get_metrics()
+
     def cleanup(self) -> None:
-        """Cleanup resources on shutdown."""
-        self.model_manager.cleanup()
-        logger.info("TranscriptionService cleanup completed")
-
-    @staticmethod
-    def _save_upload(file: UploadFile) -> Path:
-        """
-        Save uploaded file to temp directory.
-        
-        Args:
-            file: UploadFile to save
-            
-        Returns:
-            Path to saved file
-        """
-        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        
-        file_id = str(uuid.uuid4())
-        temp_path = UPLOAD_DIR / f"{file_id}_{file.filename}"
-        
-        # Read and save
-        content = file.file.read()
-        with open(temp_path, "wb") as f:
-            f.write(content)
-        
-        logger.debug(f"Saved upload to: {temp_path}")
-        
-        return temp_path
-
-    @staticmethod
-    def cleanup_old_jobs(max_age_hours: int = 24) -> None:
-        """
-        Cleanup old job entries (not implemented in in-memory storage).
-        Use with Redis/DB in production.
-        
-        Args:
-            max_age_hours: Remove jobs older than this
-        """
-        # TODO: Implement with actual storage backend
-        pass
-
-
-class AsyncTranscriptionWorker:
-    """
-    Worker for processing async transcription jobs.
-    Can be run in a separate process/thread.
-    """
-
-    def __init__(self, service: TranscriptionService):
-        """
-        Initialize worker.
-        
-        Args:
-            service: TranscriptionService instance
-        """
-        self.service = service
-
-    def process_queue(self, max_workers: int = 1) -> None:
-        """
-        Process queued jobs.
-        
-        Args:
-            max_workers: Max concurrent workers (low traffic = 1)
-        """
-        import time
-        
-        processed = 0
-        
-        while True:
-            # Find queued jobs
-            queued_jobs = [
-                task_id for task_id, job in JOB_STORAGE.items()
-                if job["status"] == "queued"
-            ]
-            
-            if not queued_jobs:
-                # No jobs, sleep and retry
-                time.sleep(5)
-                continue
-            
-            # Process job
-            task_id = queued_jobs[0]
-            self.service.process_async_transcription(task_id)
-            processed += 1
-            
-            logger.info(f"Processed {processed} jobs")
-
-    def process_job(self, task_id: str) -> None:
-        """
-        Process a single job.
-        
-        Args:
-            task_id: Task to process
-        """
-        self.service.process_async_transcription(task_id)
+        if self._model_manager:
+            self._model_manager.cleanup()
+        logger.info("TranscriptionService cleanup completed.")

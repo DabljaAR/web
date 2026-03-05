@@ -16,18 +16,12 @@ from app.shared.logging import setup_logging
 from app.shared.middleware import ExceptionLoggingMiddleware
 from app.config import settings
 
-# Import SST router and service
-from app.stt.router import router as sst_router, set_service
-from app.stt.services import TranscriptionService
-from app.stt.models import WhisperModelManager
+# Routers
+from app.stt.router import router as stt_router
 from app.api.media_routers import router as media_router
 from app.api.job_router import router as job_router
 
-
 logger = logging.getLogger(__name__)
-
-# Global service reference for cleanup
-_transcription_service: TranscriptionService = None
 
 
 async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
@@ -39,13 +33,7 @@ async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager.
-    Handles startup and shutdown logic for the application.
-    """
-    global _transcription_service
-    
-    # Initialize logging system
+    # Initialize logging
     setup_logging(
         log_level=settings.LOG_LEVEL,
         log_dir=settings.LOG_DIR,
@@ -56,81 +44,52 @@ async def lifespan(app: FastAPI):
         enable_file=settings.LOG_ENABLE_FILE,
         json_format=settings.LOG_JSON_FORMAT
     )
-    
+
     logger.info("=" * 80)
     logger.info("🚀 Application starting up...")
+    logger.info(f"Environment: {settings.ENVIRONMENT} | Debug: {settings.DEBUG}")
     logger.info("=" * 80)
-    logger.info(f"Environment: {settings.ENVIRONMENT}")
-    logger.info(f"Debug: {settings.DEBUG}")
-    
-    # Startup logic
+
     try:
-        # Initialize database
         logger.info("🔌 Connecting to database...")
         await connect_to_db()
         await init_db()
         logger.info("✅ Database connected and initialized")
-        
-        # Initialize Speech-to-Text service
-        logger.info("🎤 Initializing Speech-to-Text service...")
-        logger.info(f"   Model: {settings.STT_MODEL_SIZE}")
-        logger.info(f"   Device: {settings.STT_DEVICE}")
-        logger.info(f"   Compute Type: {settings.STT_COMPUTE_TYPE}")
-        
-        model_manager = WhisperModelManager(
-            model_size=settings.STT_MODEL_SIZE,
-            device=settings.STT_DEVICE,
-            compute_type=settings.STT_COMPUTE_TYPE
-        )
-        transcription_service = TranscriptionService(model_manager)
-        _transcription_service = transcription_service  # Store globally
-        set_service(transcription_service)  # Pass service to router
-        logger.info("✅ Speech-to-Text service initialized")
-        
-        logger.info("=" * 80)
+
+        # STT service is now request-scoped via Depends(get_stt_service).
+        # The Whisper model is lazy-loaded inside WhisperModelManager on first
+        # call to .transcribe() — either in the FastAPI process (sync endpoint)
+        # or in the Celery worker (async endpoint). No startup init needed here.
         logger.info("✅ Application ready!")
         logger.info("=" * 80)
-        
-    except Exception as e:
-        logger.error("❌ Failed to initialize application during startup", exc_info=True)
+
+    except Exception:
+        logger.error("❌ Failed to initialize application", exc_info=True)
         raise
-    
+
     try:
         yield
     finally:
-        # Shutdown logic
-        logger.info("=" * 80)
         logger.info("🛑 Application shutting down...")
-        logger.info("=" * 80)
-        
-        try:
-            # Clean up Speech-to-Text service
-            if _transcription_service:
-                logger.info("🧹 Cleaning up Speech-to-Text service...")
-                _transcription_service.cleanup()
-                logger.info("✅ Speech-to-Text service cleaned up")
-        except Exception as e:
-            logger.error("❌ Error during service cleanup", exc_info=True)
-        
+
         try:
             await disconnect_from_db()
             logger.info("✅ Database disconnected")
-        except Exception as e:
+        except Exception:
             logger.error("❌ Error during database disconnection", exc_info=True)
-        
-        # Force garbage collection to clean up remaining resources
+
         try:
             gc.collect()
             logger.info("✅ Garbage collection completed")
-        except Exception as e:
+        except Exception:
             logger.error("❌ Error during garbage collection", exc_info=True)
-        
+
         logger.info("=" * 80)
 
 
-# ============================================================================
-# FastAPI App Initialization
-# ============================================================================
+# ===========================================================================
+# App
+# ===========================================================================
 
 app = FastAPI(
     title="DabljaAR Backend",
@@ -139,20 +98,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# ============================================================================
-# Middleware & Exception Handling
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Middleware & exception handlers
+# ---------------------------------------------------------------------------
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
-
-# Add exception logging middleware
 app.add_middleware(ExceptionLoggingMiddleware)
 
-# Global exception handler for unhandled exceptions
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler to return error response for unhandled exceptions."""
     return JSONResponse(
         status_code=500,
         content={
@@ -161,7 +116,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
-# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -170,55 +124,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============================================================================
-# API Root Endpoint
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Routers  (each registered exactly once)
+# ---------------------------------------------------------------------------
+
+app.include_router(core_router,  prefix="/api")
+app.include_router(media_router, prefix="/api")
+app.include_router(job_router,   prefix="/api")
+app.include_router(stt_router)          # already has prefix="/api/transcription"
+
+# ---------------------------------------------------------------------------
+# Root endpoint
+# ---------------------------------------------------------------------------
 
 @app.get("/api")
 async def read_root():
-    """Root API endpoint."""
     return {
         "message": "Welcome to DabljaAR Backend",
         "available_services": {
             "user_management": "/api/users, /api/signup, /api/login, /api/subscriptions, /api/payments",
-            "speech_to_text": "/api/transcription",
-            "documentation": "/docs",
-            "openapi": "/openapi.json"
+            "media":           "/api/videos",
+            "jobs":            "/api/jobs",
+            "speech_to_text":  "/api/transcription",
+            "documentation":   "/docs",
         }
     }
 
+# ---------------------------------------------------------------------------
+# Static files
+# ---------------------------------------------------------------------------
 
-
-# Include Core Router (User Management, Auth, Subscriptions, Payments)
-logger.info("📋 Registering core router...")
-app.include_router(core_router, prefix="/api")
-app.include_router(media_router, prefix="/api")
-app.include_router(job_router, prefix="/api")
-
-
-# Include SST Router (Speech-to-Text API)
-# Already has prefix="/api/transcription" defined in sst/router.py
-logger.info("📋 Registering SST (Speech-to-Text) router...")
-app.include_router(sst_router)
-
-
-# Include Media Router if available
-logger.info("📋 Registering media router...")
-app.include_router(media_router, prefix="/api")
-
-# ============================================================================
-# Static Files
-# ============================================================================
-
-# Mount static files for uploaded avatars
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-
-# ============================================================================
-# Main Entry Point
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Dev entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn
