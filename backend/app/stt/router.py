@@ -24,7 +24,9 @@ from app.stt.schema import (
     MetricsResponse,
     TranscriptionResponse,
 )
+from app.shared.enums import AudioVideoExtension
 from app.stt.services import TranscriptionService
+
 
 logger = logging.getLogger(__name__)
 
@@ -49,16 +51,17 @@ def get_stt_service(db: AsyncSession = Depends(get_db)) -> TranscriptionService:
 # Helpers
 # ---------------------------------------------------------------------------
 
-_VALID_EXTENSIONS = {
-    ".mp3", ".mp4", ".wav", ".m4a", ".flac",
-    ".ogg", ".wma", ".aac", ".mov", ".mkv", ".webm",
-}
-
-
 def _assert_valid_audio(file: UploadFile) -> None:
-    ext = "." + (file.filename or "").lower().rsplit(".", 1)[-1]
-    if ext not in _VALID_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unsupported format: {ext}")
+    filename = file.filename or ""
+    # Extract extension: "track.MP3" -> ".mp3"
+    ext = f".{filename.lower().rsplit('.', 1)[-1]}"
+    
+    if not AudioVideoExtension.has_value(ext):
+        allowed = ", ".join([e.value for e in AudioVideoExtension])
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Unsupported format: {ext}. Supported formats are: {allowed}"
+        )
 
 
 def _job_to_response(job: Job) -> JobStatusResponse:
@@ -98,6 +101,7 @@ Upload an audio/video file and receive the transcript immediately.
 async def transcribe_sync(
     file: UploadFile = File(..., description="Audio/video file"),
     language: Optional[str] = Query(default=None, description="ISO-639-1 code, e.g. 'en'"),
+    current_user=Depends(get_current_user),
     svc: TranscriptionService = Depends(get_stt_service),
 ):
     _assert_valid_audio(file)
@@ -229,8 +233,8 @@ async def cancel_job(
 # HEALTH & METRICS
 # ===========================================================================
 
-@router.get("/health", response_model=HealthCheckResponse, summary="Health check")
-async def health_check(svc: TranscriptionService = Depends(get_stt_service)):
+@router.get("/health", response_model=HealthCheckResponse, summary="Health check" )
+async def health_check(svc: TranscriptionService = Depends(get_stt_service) , current_user=Depends(get_current_user),):
     return svc.get_health()
 
 
@@ -247,7 +251,7 @@ async def get_metrics(
 # ===========================================================================
 
 @router.get("/info", summary="API information")
-async def api_info():
+async def api_info(current_user=Depends(get_current_user),):
     return {
         "name": "Speech-to-Text API",
         "version": "2.0.0",

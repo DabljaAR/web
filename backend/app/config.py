@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     AUTH0_AUDIENCE: str = os.getenv("AUTH0_AUDIENCE", "")
 
     # MinIO / S3 Configuration
-    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "dablaja-minio:9000")
-
+    # MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "dablaja-minio:9000")
+    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
     MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
     MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
