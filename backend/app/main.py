@@ -20,6 +20,8 @@ from app.config import settings
 from app.stt.router import router as sst_router, set_service
 from app.stt.services import TranscriptionService
 from app.stt.models import WhisperModelManager
+from app.api.media_routers import router as media_router
+from app.api.job_router import router as job_router
 
 
 logger = logging.getLogger(__name__)
@@ -186,18 +188,12 @@ async def read_root():
     }
 
 
-try:
-    from app.api.media_routers import router as media_router
-    has_media_router = True
-except ImportError:
-    has_media_router = False
-# ============================================================================
-# Router Registration
-# ============================================================================
 
 # Include Core Router (User Management, Auth, Subscriptions, Payments)
 logger.info("📋 Registering core router...")
 app.include_router(core_router, prefix="/api")
+app.include_router(media_router, prefix="/api")
+app.include_router(job_router, prefix="/api")
 
 
 # Include SST Router (Speech-to-Text API)
