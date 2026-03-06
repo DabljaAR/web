@@ -52,42 +52,8 @@ def stt_transcribe(self, job_id: str, video_id: str, language: str = "auto") -> 
 # Neural Machine Translation
 # ---------------------------------------------------------------------------
 
-@celery_app.task(
-    bind=True,
-    base=BaseJobTask,
-    name="app.jobs.tasks.pipeline.nmt_translate",
-    max_retries=3,
-    default_retry_delay=60,
-    queue="ai_nmt",
-)
-def nmt_translate(
-    self,
-    job_id: str,
-    video_id: str,
-    transcript_key: str,
-    source_lang: str = "auto",
-    target_lang: str = "en",
-) -> dict:
-    """
-    Stub: translate the transcript produced by ``stt_transcribe``.
+from app.jobs.tasks.nmt import nmt_translate
 
-    Returns:
-        ``{"job_id": job_id, "video_id": video_id, "translation_key": "<storage_key>"}``
-    """
-    self._run_sync(
-        self._patch_job(
-            job_id,
-            JobStatus.PROCESSING,
-            celery_task_id=self.request.id,
-            started_at=datetime.utcnow(),
-        )
-    )
-    # TODO: call NMT service
-    logger.info(
-        "[STUB] nmt_translate job=%s video=%s %s→%s",
-        job_id, video_id, source_lang, target_lang,
-    )
-    return {"job_id": job_id, "video_id": video_id, "translation_key": None}
 
 
 # ---------------------------------------------------------------------------

@@ -155,7 +155,9 @@ export const translations = {
       featureListItem2: "Custom React hooks",
       featureListItem3: "Service layer for API calls",
       featureListItem4: "State management setup",
-      featureListItem5: "Utility functions and constants"
+      featureListItem5: "Utility functions and constants",
+            backHome: "← Back to Home"
+
     },
     register: {
       leftTitle: "Start Your Journey Today",
@@ -171,6 +173,9 @@ export const translations = {
       firstNamePlaceholder: "First",
       lastNameLabel: "Last Name",
       lastNamePlaceholder: "Last",
+
+      nameLabel: "Full Name",
+      namePlaceholder: "John Doe",
       emailLabel: "Email Address",
       emailPlaceholder: "you@example.com",
       passwordLabel: "Password",
@@ -182,6 +187,9 @@ export const translations = {
       avatarHint: "Max size 5MB. Formats: JPG, PNG, GIF, WebP",
       uploadPhoto: "Upload Photo",
       changePhoto: "Change",
+      passwordHint: "At least 8 characters with letters and numbers",
+      confirmLabel: "Confirm Password",
+      confirmPlaceholder: "Confirm your password",
       agree: "I agree to the",
       terms: "Terms of Service",
       and: "and",
@@ -251,6 +259,12 @@ export const translations = {
       email: "Email Address",
       verified: "Verified",
       password: "Password",
+      fullName: "Full Name",
+      fullNamePlaceholder: "Enter your full name",
+      email: "Email Address",
+      verified: "Verified",
+      password: "Password",
+      changePassword: "Change Password",
       saveChanges: "Save Changes",
       subscription: "Subscription & Credits",
       credits: "Credits",
@@ -668,7 +682,11 @@ export const translations = {
       featureListItem2: "خطافات React مخصصة",
       featureListItem3: "طبقة خدمة لاتصالات API",
       featureListItem4: "إعداد إدارة الحالة",
-      featureListItem5: "وظائف وثوابت مساعدة"
+      featureListItem5: "وظائف وثوابت مساعدة",
+      signInGoogle: "تسجيل الدخول بواسطة جوجل",
+      noAccount: "ليس لديك حساب؟",
+      signUp: "سجل الآن",
+      backHome: "← العودة للرئيسية"
     },
     register: {
       leftTitle: "ابدأ رحلتك اليوم",
@@ -684,6 +702,8 @@ export const translations = {
       firstNamePlaceholder: "الأول",
       lastNameLabel: "اسم العائلة",
       lastNamePlaceholder: "الأخير",
+      nameLabel: "الاسم الكامل",
+      namePlaceholder: "أحمد محمد",
       emailLabel: "البريد الإلكتروني",
       emailPlaceholder: "you@example.com",
       passwordLabel: "كلمة المرور",
@@ -695,6 +715,9 @@ export const translations = {
       avatarHint: "الحد الأقصى 5 ميجابايت. الصيغ: JPG, PNG, GIF, WebP",
       uploadPhoto: "رفع صورة",
       changePhoto: "تغيير",
+      passwordHint: "8 أحرف على الأقل مع حروف وأرقام",
+      confirmLabel: "تأكيد كلمة المرور",
+      confirmPlaceholder: "أكد كلمة المرور",
       agree: "أوافق على",
       terms: "شروط الخدمة",
       and: "و",
@@ -721,7 +744,13 @@ export const translations = {
       googleSignUpDemo: "الاشتراك بواسطة جوجل هو عرض تجريبي حالياً.",
       usernameMin: "اسم المستخدم يجب أن يكون 3 أحرف على الأقل",
       usernameMax: "اسم المستخدم يجب أن يكون أقل من 50 حرفاً",
-      usernameInvalid: "اسم المستخدم يجب أن يحتوي فقط على حروف وأرقام وشرطة سفلية وشرطة"
+      usernameInvalid: "اسم المستخدم يجب أن يحتوي فقط على حروف وأرقام وشرطة سفلية وشرطة",
+
+      orSignUp: "أو سجل مع",
+      signUpGoogle: "التسجيل بواسطة جوجل",
+      haveAccount: "لديك حساب بالفعل؟",
+      signIn: "تسجيل الدخول",
+      backHome: "← العودة للرئيسية"
     },
     footer: {
       description: "كسر حواجز اللغة، فيديو واحد في كل مرة. دبلجة احترافية مدعومة بالذكاء الاصطناعي للمبدع الحديث.",
@@ -763,6 +792,12 @@ export const translations = {
       passwordMatchError: 'كلمات المرور غير متطابقة',
       passwordChangeSuccess: 'تم تغيير كلمة المرور بنجاح',
       passwordChangeError: 'فشل تغيير كلمة المرور',
+      fullName: "الاسم الكامل",
+      fullNamePlaceholder: "أدخل اسمك الكامل",
+      email: "البريد الإلكتروني",
+      verified: "موثق",
+      password: "كلمة المرور",
+      changePassword: "تغيير كلمة المرور",
       saveChanges: "حفظ التغييرات",
       subscription: "الاشتراك والرصيد",
       credits: "رصيد",

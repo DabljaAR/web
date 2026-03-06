@@ -39,5 +39,6 @@ celery_app.conf.update(
     imports=[
         "app.jobs.tasks.media",
         "app.jobs.tasks.pipeline",
+        "app.jobs.tasks.nmt",
     ],
 )
