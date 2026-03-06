@@ -103,10 +103,13 @@ async def read_root():
 
 from app.api.media_routers import router as media_router
 from app.nmt.router import router as nmt_router
+from app.api.job_router import router as job_router
 
 app.include_router(core_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 app.include_router(nmt_router, prefix="/api")
+app.include_router(job_router, prefix="/api")
+
 
 
 # Mount static files for uploaded avatars

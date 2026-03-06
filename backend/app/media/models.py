@@ -1,6 +1,7 @@
 import enum
 from datetime import datetime
 from typing import List, Optional
+
 from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, Boolean, Enum as SQLEnum, Float, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
@@ -21,6 +22,7 @@ class Video(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True) # UUID
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+
     
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -44,8 +46,8 @@ class Video(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
     user: Mapped["User"] = relationship("User", back_populates="videos")
+
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

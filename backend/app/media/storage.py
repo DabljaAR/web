@@ -35,6 +35,7 @@ class StorageService(Protocol):
         """Delete all files and directories matching a prefix."""
         ...
 
+
     async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
         """Upload a local directory to storage."""
         ...
@@ -42,6 +43,7 @@ class StorageService(Protocol):
     async def download(self, path: str, local_path: str) -> bool:
         """Download a file from storage to a local path."""
         ...
+
 
 class LocalStorageService:
     def __init__(self, base_dir: str = "uploads", base_url: str = "/uploads"):
@@ -128,6 +130,7 @@ class LocalStorageService:
             return count > 0
         return False
         
+
     async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
         """For local storage, we just copy contents to the target dir."""
         target_dir = self.base_dir / remote_prefix
@@ -167,6 +170,7 @@ class LocalStorageService:
             logger.error(f"Error downloading local file: {e}")
             return False
 
+
 class S3StorageService:
     def __init__(self):
         self.endpoint_url = settings.MINIO_ENDPOINT
@@ -189,12 +193,13 @@ class S3StorageService:
             logger.info(f"S3Storage: bucket {self.bucket_name} exists.")
         except Exception:
             # Try to create bucket if it doesn't exist (only if permissions allow)
-            logger.warn(f"S3Storage: bucket {self.bucket_name} not found or inaccessible, attempting to create...")
+            logger.warning(f"S3Storage: bucket {self.bucket_name} not found or inaccessible, attempting to create...")
             try:
                 await s3_client.create_bucket(Bucket=self.bucket_name)
                 logger.info(f"S3Storage: bucket {self.bucket_name} created successfully.")
             except Exception as e:
                 logger.warning(f"S3Storage: could not check/create bucket {self.bucket_name}: {e}")
+
 
     async def save(self, file: UploadFile, directory: str = "") -> str:
         file_ext = Path(file.filename).suffix if file.filename else ""
@@ -228,6 +233,7 @@ class S3StorageService:
             logger.info(f"S3Storage: uploading file {file_path} to key {key}...")
             await s3.upload_file(str(file_path), self.bucket_name, key)
             logger.info(f"S3Storage: upload complete.")
+
             
         return key
 
@@ -295,6 +301,7 @@ class S3StorageService:
             logger.error(f"Error deleting prefix from S3: {e}")
             return False
             
+
     async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
         """Upload recursively to S3."""
         local_path = Path(local_dir)
@@ -331,6 +338,7 @@ class S3StorageService:
         except Exception as e:
             logger.error(f"Error downloading from S3: {e}")
             return False
+
 
 def get_storage_service() -> StorageService:
     # Prefer S3/MinIO if configured, otherwise fallback to Local

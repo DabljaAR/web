@@ -364,8 +364,26 @@ class UserService:
                 logger.error(f"Failed to cleanup storage for user {user_id}: {e}")
 
         # 2. Delete from DB (will cascade to videos, subscriptions, payments due to DB constraints)
+
         await self.user_repo.db.delete(user)
         await self.user_repo.db.commit()
+
+        # Cleanup avatar from storage
+        if self.storage_service and avatar_url:
+            try:
+                key = None
+                if 'avatars/' in avatar_url:
+                    key = avatar_url.split('avatars/')[-1].split('?')[0]
+                    key = f"avatars/{key}"
+                else:
+                    key = avatar_url.split('?')[0].split('/')[-1]
+                    if 'avatars' not in key:
+                         key = f"avatars/{key}"
+                
+                if key:
+                    await self.storage_service.delete(key)
+            except Exception as e:
+                logger.error(f"Failed to delete avatar during user deletion: {e}")
         
         logger.info(f"User {user_id} and all associated data deleted successfully")
         return True

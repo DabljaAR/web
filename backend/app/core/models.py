@@ -57,7 +57,6 @@ class User(Base):
     )
     preferred_language: Mapped[languageEnum] = mapped_column(SQLEnum(languageEnum, name="languages_enum"),nullable=False,default=languageEnum.ENGLISH)
     avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
     # Preferences
     default_domain: Mapped[str] = mapped_column(String(50), nullable=False, default="general")
     translation_style: Mapped[str] = mapped_column(String(50), nullable=False, default="neutral")
@@ -67,6 +66,7 @@ class User(Base):
     notif_completed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notif_credits: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notif_marketing: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     
     # Note: role_id column doesn't exist in current database schema
     role_id: Mapped[Optional[int]] = mapped_column(

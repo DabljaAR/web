@@ -633,6 +633,8 @@ class VideoService:
             await self.db.rollback()
             return False
 
+            return False
+
         # 4. Cleanup Files after successful DB delete
         storage = self.storage
         
@@ -690,3 +692,4 @@ class VideoService:
         
         # Note: DB records will be deleted by cascade when user is deleted
         logger.info(f"Successfully cleaned up media files for user {user_id}")
+

@@ -29,7 +29,6 @@ class Settings(BaseSettings):
     AUTH0_CLIENT_ID: str = os.getenv("AUTH0_CLIENT_ID", "")
     AUTH0_CLIENT_SECRET: str = os.getenv("AUTH0_CLIENT_SECRET", "")
     AUTH0_AUDIENCE: str = os.getenv("AUTH0_AUDIENCE", "")
-
     # MinIO / S3 Configuration
     MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "dablaja-minio:9000")
 
@@ -38,9 +37,14 @@ class Settings(BaseSettings):
     MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "False").lower() == "true"
 
-    
 
-        # Logging Configuration
+    # Celery / Redis
+    CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+    WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", 2))
+
+
+    # Logging Configuration
     LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     LOG_DIR: str = "logs"  # Directory for log files
     LOG_FILE: str = "app.log"  # Main log file name
