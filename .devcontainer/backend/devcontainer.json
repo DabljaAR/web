@@ -18,6 +18,12 @@
     "ghcr.io/devcontainers/features/git:1": {}
   },
 
+  // Mount host git identity and SSH credentials so commits/pushes work
+  "mounts": [
+    "source=${localEnv:HOME}/.gitconfig,target=/home/appuser/.gitconfig,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.ssh,target=/home/appuser/.ssh,type=bind,readonly,consistency=cached"
+  ],
+
   // Mark the workspace as safe so git doesn't reject the mounted volume
   "postCreateCommand": "git config --global --add safe.directory /workspace",
 

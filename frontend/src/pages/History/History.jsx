@@ -37,6 +37,9 @@ const History = () => {
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewJob, setPreviewJob] = useState(null);
 
+  // Track deleting items
+  const deletingIds = React.useRef(new Set());
+
   const formatDuration = (seconds) => {
     if (!seconds) return '00:00';
     const mins = Math.floor(seconds / 60);
@@ -108,9 +111,9 @@ const History = () => {
           title: video.title || video.original_filename,
           thumbnail: video.thumbnail_url,
           status: video.status.toLowerCase(),
-          domain: 'General',
-          style: 'Neutral',
-          voice: 'Male Voice 1',
+          domain: video.domain || t('history.domainGeneral') || 'General',
+          style: video.style || 'Neutral',
+          voice: video.voice || 'Male Voice 1',
           duration: formatDuration(video.duration),
           size: formatSize(video.size_bytes),
           processed: formatDate(video.updated_at),
@@ -121,13 +124,13 @@ const History = () => {
           error: video.error_message,
 
           createdAt: video.created_at,
-          estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : '',
+          estCompletion: video.status === 'PROCESSING' ? (t('history.processing') || 'Calculating...') : '',
           url: video.url,
           audioUrl: video.audio_url,
           mediaType: video.media_type
         }));
 
-        setHistoryItems(mappedItems);
+        setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
         setPagination(prev => ({
           ...prev,
           total: total,
@@ -145,7 +148,7 @@ const History = () => {
         setError(null);
       } catch (err) {
         console.error("Failed to fetch history:", err);
-        if (!internal) setError('Failed to load history items.');
+        if (!internal) setError(t('history.loadError') || 'Failed to load history items.');
         setIsPolling(false);
       } finally {
         if (!internal) setLoading(false);
@@ -189,7 +192,7 @@ const History = () => {
               mediaType: video.media_type
             }));
 
-            setHistoryItems(mappedItems);
+            setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
 
             const hasActive = mappedItems.some(item =>
               item.status === 'processing' || item.status === 'pending'
@@ -251,7 +254,7 @@ const History = () => {
       });
       setPreviewModalOpen(true);
     } else {
-      alert("No preview URL available.");
+      alert(t('dashboard.noPreviewError') || "No preview URL available.");
     }
   };
 
@@ -265,19 +268,30 @@ const History = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      alert("No download URL available.");
+      alert(t('dashboard.noPreviewError') || "No download URL available.");
     }
   };
 
   const handleRedub = (id) => {
-    alert(`Re-dub video ${id} (Demo)`);
+    alert(`${t('history.redub')} ${id} (Demo)`);
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm(t('history.deleteConfirm'))) {
+    if (window.confirm(t('history.deleteConfirm') || "Are you sure you want to delete this item?")) {
       try {
+        // Mark as deleting
+        deletingIds.current.add(id);
+
+        // Optimistically remove from UI
+        setHistoryItems(prev => prev.filter(item => item.id !== id));
+        setPagination(prev => ({
+          ...prev,
+          total: Math.max(0, prev.total - 1)
+        }));
+
         await mediaService.deleteVideo(id);
-        // Refresh the list to keep pagination correct
+
+        // Refresh the list in the background
         const data = await mediaService.getVideos({
           page: pagination.page,
           limit: pagination.limit,
@@ -297,9 +311,9 @@ const History = () => {
           title: video.title || video.original_filename,
           thumbnail: video.thumbnail_url,
           status: video.status.toLowerCase(),
-          domain: 'General',
-          style: 'Neutral',
-          voice: 'Male Voice 1',
+          domain: video.domain || t('history.domainGeneral') || 'General',
+          style: video.style || 'Neutral',
+          voice: video.voice || 'Male Voice 1',
           duration: formatDuration(video.duration),
           size: formatSize(video.size_bytes),
           processed: formatDate(video.updated_at),
@@ -315,11 +329,21 @@ const History = () => {
           mediaType: video.media_type
         }));
 
-        setHistoryItems(mappedItems);
+        setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
         setPagination(prev => ({ ...prev, total, pages, totalCompleted, totalFailed }));
+
+        alert(t('dashboard.deleteSuccess') || "Deleted successfully.");
       } catch (err) {
         console.error("Failed to delete video:", err);
-        alert("Failed to delete video");
+        alert(t('dashboard.deleteError') || "Failed to delete video");
+
+        deletingIds.current.delete(id);
+        // Revert UI if needed by reloading
+        window.location.reload();
+      } finally {
+        setTimeout(() => {
+          if (deletingIds.current) deletingIds.current.delete(id);
+        }, 10000);
       }
     }
   };
@@ -388,7 +412,7 @@ const History = () => {
         <BackgroundDecorations />
         <Navbar />
         <div className="main-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-          <div className="loading-spinner" style={{ color: 'white' }}>Loading history...</div>
+          <div className="loading-spinner" style={{ color: 'white' }}>{t('common.loading') || 'Loading history...'}</div>
         </div>
         <Footer />
       </div>

@@ -9,7 +9,9 @@ from app.core.schema import UserCreate, UserUpdate, UserResponse
 from app.core.services import UserService
 from app.core.repository import UserRepository
 from app.core.auth import AuthService
+from app.core.enums import languageEnum
 from app.core.exceptions import UserAlreadyExistsException
+import app.media.models  # Register Video model for SQLAlchemy mappers
 
 
 @pytest.fixture
@@ -21,11 +23,12 @@ def mock_user_repo():
 
 
 @pytest.fixture
-def mock_auth_service():
+def mock_auth_service(sample_user):
     """Create a mock AuthService."""
     auth_service = Mock(spec=AuthService)
     auth_service.get_password_hash = Mock(return_value="hashed_password")
     auth_service.verify_password = Mock(return_value=True)
+    auth_service.authenticate_user = AsyncMock(return_value=sample_user)
     auth_service.create_token_pair = Mock(return_value={
         "access_token": "test_access_token",
         "refresh_token": "test_refresh_token",
@@ -50,13 +53,19 @@ def sample_user():
         password="hashed_password",
         first_name="Test",
         last_name="User",
-        preferred_language="en",
+        preferred_language=languageEnum.ENGLISH,
         avatar_url=None,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
         last_login=datetime.utcnow(),
         is_active = True,
-        role_id=None
+        role_id=None,
+        default_domain="general",
+        translation_style="neutral",
+        default_voice="male1",
+        notif_completed=True,
+        notif_credits=True,
+        notif_marketing=False
     )
 
 
@@ -272,10 +281,11 @@ class TestSignup:
         with patch('app.core.services.User', return_value=sample_user):
             result = await user_service.signup(sample_user_create)
         
-        assert isinstance(result, UserResponse)
+        from app.core.schema import UserLoginResponse
+        assert isinstance(result, UserLoginResponse)
         mock_user_repo.username_exists.assert_called_once()
         mock_user_repo.email_exists.assert_called_once()
-        mock_user_repo.db.commit.assert_called_once()
+        mock_user_repo.db.commit.assert_called()
     
     async def test_signup_username_exists(self, user_service, mock_user_repo, sample_user_create):
         """Test signup with existing username."""

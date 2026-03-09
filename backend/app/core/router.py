@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schema import (
     UserCreate, UserLogin, TokenRefresh, UserLoginResponse, TokenResponse, 
-    UserResponse, UserUpdate, SubscriptionPlanCreate, SubscriptionPlanResponse,
+    UserResponse, UserUpdate, PasswordChangeRequest, SubscriptionPlanCreate, SubscriptionPlanResponse,
     SubscriptionPlanUpdate, UserSubscriptionCreate, UserSubscriptionResponse,
     UserSubscriptionUpdate, PaymentCreate, PaymentResponse, PaymentUpdate
 )
@@ -281,6 +281,31 @@ async def update_user(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e.detail)
         )
+
+
+@router.post("/users/{user_id}/change-password", tags=["users"])
+async def change_password(
+    user_id: int,
+    password_data: PasswordChangeRequest,
+    user_service: UserService = Depends(get_user_service),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Change a user's password.
+    
+    - **user_id**: User ID to update
+    - **password_data**: Old and new password
+    
+    Requires JWT authentication.
+    """
+    # Permission check: users can only change their own password
+    if current_user.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only change your own password"
+        )
+        
+    return await user_service.change_password(user_id, password_data.old_password, password_data.new_password)
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["users"])

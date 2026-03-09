@@ -84,9 +84,9 @@ const FileSelectorModal = ({ isOpen, onClose, onSelect, activeTab }) => {
 
                 <div className="file-selector-body">
                     {loading ? (
-                        <div className="loading-state">Loading library...</div>
+                        <div className="loading-state">{t('dashboard.loadingLibrary')}</div>
                     ) : files.length === 0 ? (
-                        <div className="empty-state">No files found in library.</div>
+                        <div className="empty-state">{t('dashboard.noFilesFound')}</div>
                     ) : (
                         <div className="file-grid">
                             {files.map(file => (

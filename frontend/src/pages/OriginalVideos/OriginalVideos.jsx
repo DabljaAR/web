@@ -47,6 +47,9 @@ const OriginalVideos = () => {
     const [isDragOver, setIsDragOver] = useState(false);
     const fileInputRef = useRef(null);
 
+    // Track deleting items
+    const deletingIds = useRef(new Set());
+
     const [formData, setFormData] = useState({
         outputType: 'both',
         domain: 'general',
@@ -116,9 +119,9 @@ const OriginalVideos = () => {
                     title: video.title || video.original_filename,
                     thumbnail: video.thumbnail_url,
                     status: video.status.toLowerCase(),
-                    domain: 'General',
-                    style: 'Neutral',
-                    voice: 'Male Voice 1',
+                    domain: video.domain || t('originalVideos.domainGeneral') || 'General',
+                    style: video.style || 'Neutral',
+                    voice: video.voice || 'Male Voice 1',
                     duration: formatDuration(video.duration),
                     size: formatSize(video.size_bytes),
                     processed: formatDate(video.updated_at),
@@ -134,7 +137,7 @@ const OriginalVideos = () => {
                     mediaType: video.media_type
                 }));
 
-                setHistoryItems(mappedItems);
+                setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
                 setPagination(prev => ({
                     ...prev,
                     total: total,
@@ -152,7 +155,7 @@ const OriginalVideos = () => {
                 setError(null);
             } catch (err) {
                 console.error("Failed to fetch original videos:", err);
-                if (!internal) setError('Failed to load original videos.');
+                if (!internal) setError(t('originalVideos.loadError') || 'Failed to load original videos.');
                 setIsPolling(false);
             } finally {
                 if (!internal) setLoading(false);
@@ -198,7 +201,7 @@ const OriginalVideos = () => {
                             mediaType: video.media_type
                         }));
 
-                        setHistoryItems(mappedItems);
+                        setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
 
                         const hasActive = mappedItems.some(item =>
                             item.status === 'processing' || item.status === 'pending'
@@ -254,7 +257,7 @@ const OriginalVideos = () => {
             });
             setPreviewModalOpen(true);
         } else {
-            alert("No preview URL available.");
+            alert(t('dashboard.noPreviewError') || "No preview URL available.");
         }
     };
 
@@ -268,12 +271,12 @@ const OriginalVideos = () => {
             link.click();
             document.body.removeChild(link);
         } else {
-            alert("No download URL available.");
+            alert(t('dashboard.noPreviewError') || "No download URL available.");
         }
     };
 
     const handleRedub = (id) => {
-        alert(`Re-dub video ${id} (Demo)`);
+        alert(`${t('originalVideos.redub')} ${id} (Demo)`);
     };
 
     const handleFileSelect = () => {
@@ -315,7 +318,7 @@ const OriginalVideos = () => {
 
     const handleStartProcessing = async () => {
         if (!selectedFile) {
-            alert("Please select or upload a video first.");
+            alert(t('dashboard.selectFileError') || "Please select or upload a video first.");
             return;
         }
 
@@ -332,7 +335,7 @@ const OriginalVideos = () => {
 
             await mediaService.uploadVideo(formDataToUpload);
 
-            alert("Upload successful! Processing started.");
+            alert(t('dashboard.uploadSuccess') || "Upload successful! Processing started.");
             setSelectedFile(null);
             setShowUploadSection(false);
 
@@ -347,9 +350,20 @@ const OriginalVideos = () => {
     };
 
     const handleDelete = async (id) => {
-        if (window.confirm(t('originalVideos.deleteConfirm'))) {
+        if (window.confirm(t('originalVideos.deleteConfirm') || "Are you sure you want to delete this item?")) {
             try {
+                // Mark as deleting
+                deletingIds.current.add(id);
+
+                // Optimistically remove from UI
+                setHistoryItems(prev => prev.filter(item => item.id !== id));
+                setPagination(prev => ({
+                    ...prev,
+                    total: Math.max(0, prev.total - 1)
+                }));
+
                 await mediaService.deleteVideo(id);
+
                 const data = await mediaService.getVideos({
                     page: pagination.page,
                     limit: pagination.limit,
@@ -365,16 +379,24 @@ const OriginalVideos = () => {
                     title: video.title || video.original_filename,
                     thumbnail: video.thumbnail_url,
                     status: video.status.toLowerCase(),
+                    domain: video.domain || t('originalVideos.domainGeneral') || 'General',
+                    style: video.style || 'Neutral',
+                    voice: video.voice || 'Male Voice 1',
                     duration: formatDuration(video.duration),
                     size: formatSize(video.size_bytes),
                     processed: formatDate(video.updated_at),
                     started: formatDate(video.created_at),
+                    attempted: formatDate(video.created_at),
+                    rawDate: video.created_at,
+                    creditsUsed: 0,
+                    error: video.error_message,
 
+                    createdAt: video.created_at,
                     url: video.url,
                     audioUrl: video.audio_url,
                     mediaType: video.media_type
                 }));
-                setHistoryItems(mappedItems);
+                setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
                 setPagination(prev => ({
                     ...prev,
                     total: data.total || 0,
@@ -382,9 +404,18 @@ const OriginalVideos = () => {
                     totalCompleted: data.total_completed || 0,
                     totalFailed: data.total_failed || 0
                 }));
+                alert(t('dashboard.deleteSuccess') || "Deleted successfully.");
             } catch (err) {
                 console.error("Failed to delete video:", err);
-                alert("Failed to delete video");
+                alert(t('dashboard.deleteError') || "Failed to delete video");
+
+                deletingIds.current.delete(id);
+                // Refresh to restore state
+                window.location.reload();
+            } finally {
+                setTimeout(() => {
+                    if (deletingIds.current) deletingIds.current.delete(id);
+                }, 10000);
             }
         }
     };
@@ -425,7 +456,7 @@ const OriginalVideos = () => {
                 <BackgroundDecorations />
                 <Navbar />
                 <div className="main-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-                    <div className="loading-spinner" style={{ color: 'white' }}>Loading original videos...</div>
+                    <div className="loading-spinner" style={{ color: 'white' }}>{t('common.loading') || 'Loading original videos...'}</div>
                 </div>
                 <Footer />
             </div>

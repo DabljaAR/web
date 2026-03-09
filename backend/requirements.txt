@@ -82,6 +82,10 @@ httpx==0.28.1
 requests==2.31.0
 torch==2.10.0
 faster-whisper==1.2.1
+torch
+transformers
+langdetect
+sentencepiece
 celery[redis]==5.4.0
 flower==2.0.1
 redis==5.0.8

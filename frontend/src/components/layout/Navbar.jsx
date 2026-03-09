@@ -106,6 +106,7 @@ const Navbar = () => {
                   <li><Link to="/history" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/history' ? 'active' : ''}>{t('nav.history')}</Link></li>
                   <li><Link to="/original-videos" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/original-videos' ? 'active' : ''}>{t('nav.originalVideos')}</Link></li>
                   <li><Link to="/profile" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/profile' ? 'active' : ''}>{t('nav.profile')}</Link></li>
+                  <li><Link to="/about" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/about' ? 'active' : ''}>{t('nav.about')}</Link></li>
                   <li>
                     <div className="credits-badge">
                       <span>🪙</span>
@@ -117,7 +118,7 @@ const Navbar = () => {
               ) : (
                 <>
                   <li><Link to="/" onClick={() => setIsMenuOpen(false)}>{t('nav.home')}</Link></li>
-                  <li><Link to="/about" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/about' ? 'active' : ''}>{t('nav.about') || 'About'}</Link></li>
+                  <li><Link to="/about" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/about' ? 'active' : ''}>{t('nav.about')}</Link></li>
                 </>
               )}
             </ul>
@@ -161,7 +162,7 @@ const Navbar = () => {
                       transition: 'all 0.2s ease'
                     }}
                   >
-                    <span>{user?.username || user?.email || 'User'}</span>
+                    <span>{user?.username || user?.email || (t('nav.user') || 'User')}</span>
                     <svg
                       width="16"
                       height="16"
@@ -196,7 +197,7 @@ const Navbar = () => {
                         <div style={{ fontWeight: '600', fontSize: '14px', color: 'var(--text-dark)' }}>
                           {user?.first_name && user?.last_name
                             ? `${user.first_name} ${user.last_name}`
-                            : user?.username || user?.email || 'User'}
+                            : user?.username || user?.email || (t('nav.user') || 'User')}
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-light)', marginTop: '4px' }}>
                           {user?.email}
@@ -224,7 +225,7 @@ const Navbar = () => {
                           e.target.style.backgroundColor = location.pathname === '/dashboard' ? 'rgba(102, 126, 234, 0.1)' : 'transparent';
                         }}
                       >
-                        {t('nav.dashboard') || 'Dashboard'}
+                        {t('nav.dashboard')}
                       </Link>
 
                       <Link
@@ -248,7 +249,7 @@ const Navbar = () => {
                           e.target.style.backgroundColor = location.pathname === '/history' ? 'rgba(102, 126, 234, 0.1)' : 'transparent';
                         }}
                       >
-                        {t('nav.history') || 'History'}
+                        {t('nav.history')}
                       </Link>
 
                       <Link
@@ -272,7 +273,7 @@ const Navbar = () => {
                           e.target.style.backgroundColor = location.pathname === '/original-videos' ? 'rgba(102, 126, 234, 0.1)' : 'transparent';
                         }}
                       >
-                        {t('nav.originalVideos') || 'Original Videos'}
+                        {t('nav.originalVideos')}
                       </Link>
 
                       <Link
@@ -296,7 +297,7 @@ const Navbar = () => {
                           e.target.style.backgroundColor = location.pathname === '/profile' ? 'rgba(102, 126, 234, 0.1)' : 'transparent';
                         }}
                       >
-                        {t('nav.profile') || 'Profile'}
+                        {t('nav.profile')}
                       </Link>
 
                       <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', marginTop: '4px' }}></div>
@@ -317,7 +318,7 @@ const Navbar = () => {
                         onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(239, 68, 68, 0.1)'}
                         onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                       >
-                        {t('nav.logout') || 'Logout'}
+                        {t('nav.logout')}
                       </button>
                     </div>
                   )}

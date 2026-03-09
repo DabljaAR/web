@@ -42,3 +42,4 @@ def downgrade() -> None:
     """Downgrade schema."""
     op.drop_column('videos', 'media_type')
     op.execute('DROP TYPE IF EXISTS mediatype')
+

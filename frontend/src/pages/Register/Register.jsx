@@ -46,29 +46,29 @@ const Register = () => {
   const validatePassword = (password) => {
     const errors = [];
     if (password.length < 8) {
-      errors.push('Password must be at least 8 characters long');
+      errors.push(t('register.passwordHint'));
     }
     if (!/[A-Z]/.test(password)) {
-      errors.push('Password must contain at least one uppercase letter');
+      errors.push(t('register.passwordHint'));
     }
     if (!/[a-z]/.test(password)) {
-      errors.push('Password must contain at least one lowercase letter');
+      errors.push(t('register.passwordHint'));
     }
     if (!/\d/.test(password)) {
-      errors.push('Password must contain at least one digit');
+      errors.push(t('register.passwordHint'));
     }
     return errors;
   };
 
   const validateUsername = (username) => {
     if (username.length < 3) {
-      return 'Username must be at least 3 characters long';
+      return t('register.usernameMin');
     }
     if (username.length > 50) {
-      return 'Username must be less than 50 characters';
+      return t('register.usernameMax');
     }
     if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
-      return 'Username must contain only letters, numbers, underscores, and hyphens';
+      return t('register.usernameInvalid');
     }
     return null;
   };
@@ -94,11 +94,19 @@ const Register = () => {
     }
 
     if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match';
+      newErrors.confirmPassword = t('register.passwordsDoNotMatch');
     }
 
     if (!formData.terms) {
-      newErrors.terms = 'Please agree to the Terms of Service and Privacy Policy';
+      newErrors.terms = t('register.termsRequired');
+    }
+
+    // Validate first and last name
+    if (!formData.firstName.trim()) {
+      newErrors.firstName = t('register.firstNameRequired');
+    }
+    if (!formData.lastName.trim()) {
+      newErrors.lastName = t('register.lastNameRequired');
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -111,7 +119,7 @@ const Register = () => {
     try {
       // Ensure password is not empty
       if (!formData.password || formData.password.trim() === '') {
-        setErrors(prev => ({ ...prev, password: 'Password is required' }));
+        setErrors(prev => ({ ...prev, password: t('register.passwordRequired') }));
         setIsLoading(false);
         return;
       }
@@ -173,11 +181,11 @@ const Register = () => {
       }
 
       // Success - show message and redirect to login
-      alert('Account created successfully! Please login with your credentials.');
+      alert(t('register.accountCreated') || 'Account created successfully! Please login with your credentials.');
       navigate('/login');
     } catch (error) {
       // Handle error response
-      let errorMessage = error.message || 'Registration failed. Please try again.';
+      let errorMessage = error.message || t('register.registrationFailed') || 'Registration failed. Please try again.';
       const fieldErrors = {};
 
       // Handle FastAPI validation errors
@@ -226,13 +234,13 @@ const Register = () => {
       // Validate file type
       const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
       if (!validTypes.includes(file.type)) {
-        setErrors(prev => ({ ...prev, avatar: 'Please select a valid image file (jpg, png, gif, webp)' }));
+        setErrors(prev => ({ ...prev, avatar: t('register.invalidImage') }));
         return;
       }
 
       // Validate file size (5MB)
       if (file.size > 5 * 1024 * 1024) {
-        setErrors(prev => ({ ...prev, avatar: 'File size must be less than 5MB' }));
+        setErrors(prev => ({ ...prev, avatar: t('register.imageSizeError') }));
         return;
       }
 
@@ -261,7 +269,7 @@ const Register = () => {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to upload avatar');
+        throw new Error(errorData.detail || t('register.avatarUploadFailed'));
       }
 
       const data = await response.json();
@@ -272,7 +280,7 @@ const Register = () => {
   };
 
   const handleGoogleSignUp = () => {
-    alert('Google sign up (Demo)');
+    alert(t('register.googleSignUpDemo') || 'Google sign up (Demo)');
   };
 
   return (
@@ -350,12 +358,12 @@ const Register = () => {
               )}
 
               <div className="form-group">
-                <label htmlFor="username">Username</label>
+                <label htmlFor="username">{t('register.usernameLabel')}</label>
                 <input
                   type="text"
                   id="username"
                   name="username"
-                  placeholder="Choose a username"
+                  placeholder={t('register.usernamePlaceholder')}
                   value={formData.username}
                   onChange={handleChange}
                   required
@@ -365,28 +373,36 @@ const Register = () => {
                 )}
               </div>
 
-              <div className="form-row-auth" style={{ display: 'flex', gap: '15px' }}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label htmlFor="firstName">First Name</label>
+              <div className="form-row-auth">
+                <div className="form-group">
+                  <label htmlFor="firstName">{t('register.firstNameLabel')}</label>
                   <input
                     type="text"
                     id="firstName"
                     name="firstName"
-                    placeholder="First"
+                    placeholder={t('register.firstNamePlaceholder')}
                     value={formData.firstName}
                     onChange={handleChange}
+                    required
                   />
+                  {errors.firstName && (
+                    <small style={{ color: 'var(--accent-pink)' }}>{errors.firstName}</small>
+                  )}
                 </div>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label htmlFor="lastName">Last Name</label>
+                <div className="form-group">
+                  <label htmlFor="lastName">{t('register.lastNameLabel')}</label>
                   <input
                     type="text"
                     id="lastName"
                     name="lastName"
-                    placeholder="Last"
+                    placeholder={t('register.lastNamePlaceholder')}
                     value={formData.lastName}
                     onChange={handleChange}
+                    required
                   />
+                  {errors.lastName && (
+                    <small style={{ color: 'var(--accent-pink)' }}>{errors.lastName}</small>
+                  )}
                 </div>
               </div>
 
@@ -420,7 +436,7 @@ const Register = () => {
                 {errors.password ? (
                   <small style={{ color: 'var(--accent-pink)' }}>{errors.password}</small>
                 ) : (
-                  <small className="form-hint">Must be at least 8 characters with uppercase, lowercase, and a digit</small>
+                  <small className="form-hint">{t('register.passwordHint')}</small>
                 )}
               </div>
 
@@ -442,7 +458,7 @@ const Register = () => {
 
 
               <div className="form-group">
-                <label style={{ textAlign: 'center' }}>Profile Picture (Optional)</label>
+                <label style={{ textAlign: 'center' }}>{t('register.avatarLabel')}</label>
                 <div className="avatar-input-container">
                   <input
                     type="file"
@@ -464,7 +480,7 @@ const Register = () => {
                           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M12 4v16m-8-8h16" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
-                          <span className="overlay-text">Change</span>
+                          <span className="overlay-text">{t('register.changePhoto')}</span>
                         </div>
                       </div>
                     ) : (
@@ -472,7 +488,7 @@ const Register = () => {
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
-                        <span className="upload-text">Upload Photo</span>
+                        <span className="upload-text">{t('register.uploadPhoto')}</span>
                       </div>
                     )}
                   </label>
@@ -481,7 +497,7 @@ const Register = () => {
                   <small className="error-message-small">{errors.avatar}</small>
                 )}
                 <small className="form-hint" style={{ textAlign: 'center' }}>
-                  Supported formats: JPG, PNG, GIF, WEBP (Max 5MB)
+                  {t('register.avatarHint')}
                 </small>
               </div>
 
@@ -508,7 +524,7 @@ const Register = () => {
 
               <button type="submit" className="btn-submit" disabled={isLoading || uploadingAvatar}>
                 <span>
-                  {uploadingAvatar ? 'Uploading image...' : isLoading ? 'Creating Account...' : t('register.createAccount')}
+                  {uploadingAvatar ? t('register.uploadingImage') : isLoading ? t('register.creatingAccount') : t('register.createAccount')}
                 </span>
                 {!isLoading && (
                   <svg width="20" height="20" viewBox="0 0 20 20" fill="none">

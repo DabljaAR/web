@@ -31,9 +31,19 @@ class StorageService(Protocol):
         """Delete a file."""
         ...
 
+    async def delete_prefix(self, prefix: str) -> bool:
+        """Delete all files and directories matching a prefix."""
+        ...
+
+
     async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
         """Upload a local directory to storage."""
         ...
+
+    async def download(self, path: str, local_path: str) -> bool:
+        """Download a file from storage to a local path."""
+        ...
+
 
 class LocalStorageService:
     def __init__(self, base_dir: str = "uploads", base_url: str = "/uploads"):
@@ -90,10 +100,37 @@ class LocalStorageService:
     async def delete(self, path: str) -> bool:
         full_path = self.base_dir / path
         if full_path.exists():
-            full_path.unlink()
+            if full_path.is_dir():
+                shutil.rmtree(full_path)
+            else:
+                full_path.unlink()
             return True
         return False
         
+    async def delete_prefix(self, prefix: str) -> bool:
+        """For local storage, we can use shutil.rmtree if it's a directory or glob delete."""
+        full_path = self.base_dir / prefix
+        if full_path.exists():
+            if full_path.is_dir():
+                shutil.rmtree(full_path)
+            else:
+                full_path.unlink()
+            return True
+        
+        # If prefix is not a dir but part of filenames (not common here but for completeness)
+        parent = full_path.parent
+        if parent.exists():
+            count = 0
+            for item in parent.glob(f"{full_path.name}*"):
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+                count += 1
+            return count > 0
+        return False
+        
+
     async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
         """For local storage, we just copy contents to the target dir."""
         target_dir = self.base_dir / remote_prefix
@@ -118,6 +155,22 @@ class LocalStorageService:
             logger.error(f"Error uploading directory locally: {e}")
             raise e
 
+    async def download(self, path: str, local_path: str) -> bool:
+        src_path = self.base_dir / path
+        if not src_path.exists():
+            return False
+        
+        dest_path = Path(local_path)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        try:
+            shutil.copy2(src_path, dest_path)
+            return True
+        except Exception as e:
+            logger.error(f"Error downloading local file: {e}")
+            return False
+
+
 class S3StorageService:
     def __init__(self):
         self.endpoint_url = settings.MINIO_ENDPOINT
@@ -134,14 +187,19 @@ class S3StorageService:
         self.config = Config(signature_version='s3v4')
 
     async def _ensure_bucket(self, s3_client):
+        logger.info(f"S3Storage: checking bucket {self.bucket_name}...")
         try:
             await s3_client.head_bucket(Bucket=self.bucket_name)
+            logger.info(f"S3Storage: bucket {self.bucket_name} exists.")
         except Exception:
             # Try to create bucket if it doesn't exist (only if permissions allow)
+            logger.warning(f"S3Storage: bucket {self.bucket_name} not found or inaccessible, attempting to create...")
             try:
                 await s3_client.create_bucket(Bucket=self.bucket_name)
+                logger.info(f"S3Storage: bucket {self.bucket_name} created successfully.")
             except Exception as e:
-                logger.warning(f"Could not check/create bucket {self.bucket_name}: {e}")
+                logger.warning(f"S3Storage: could not check/create bucket {self.bucket_name}: {e}")
+
 
     async def save(self, file: UploadFile, directory: str = "") -> str:
         file_ext = Path(file.filename).suffix if file.filename else ""
@@ -172,7 +230,10 @@ class S3StorageService:
             aws_secret_access_key=self.secret_key
         ) as s3:
             await self._ensure_bucket(s3)
+            logger.info(f"S3Storage: uploading file {file_path} to key {key}...")
             await s3.upload_file(str(file_path), self.bucket_name, key)
+            logger.info(f"S3Storage: upload complete.")
+
             
         return key
 
@@ -216,6 +277,31 @@ class S3StorageService:
             logger.error(f"Error deleting from S3: {e}")
             return False
             
+    async def delete_prefix(self, prefix: str) -> bool:
+        """Delete everything under a prefix in S3."""
+        try:
+            async with self.session.client("s3",
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key
+            ) as s3:
+                # 1. List all objects with prefix
+                paginator = s3.get_paginator('list_objects_v2')
+                async for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+                    if 'Contents' in page:
+                        objects_to_delete = [{'Key': obj['Key']} for obj in page['Contents']]
+                        # 2. Delete them
+                        if objects_to_delete:
+                            await s3.delete_objects(
+                                Bucket=self.bucket_name,
+                                Delete={'Objects': objects_to_delete}
+                            )
+                return True
+        except Exception as e:
+            logger.error(f"Error deleting prefix from S3: {e}")
+            return False
+            
+
     async def upload_directory(self, local_dir: str, remote_prefix: str) -> str:
         """Upload recursively to S3."""
         local_path = Path(local_dir)
@@ -237,6 +323,22 @@ class S3StorageService:
                     await s3.upload_file(str(item), self.bucket_name, key)
                     
         return remote_prefix
+
+    async def download(self, path: str, local_path: str) -> bool:
+        try:
+            async with self.session.client("s3",
+                endpoint_url=self.endpoint_url,
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key
+            ) as s3:
+                logger.info(f"S3Storage: downloading key {path} to {local_path}...")
+                await s3.download_file(self.bucket_name, path, local_path)
+                logger.info(f"S3Storage: download complete.")
+            return True
+        except Exception as e:
+            logger.error(f"Error downloading from S3: {e}")
+            return False
+
 
 def get_storage_service() -> StorageService:
     # Prefer S3/MinIO if configured, otherwise fallback to Local

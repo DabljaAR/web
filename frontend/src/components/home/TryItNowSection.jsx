@@ -1,11 +1,13 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import { useTranslation } from '../../hooks/useTranslation';
 import { mediaService } from '../../services/mediaService';
 import '../../styles/home.css';
 
 const TryItNowSection = () => {
     const { isAuthenticated } = useAuth();
+    const { t } = useTranslation();
     const navigate = useNavigate();
     const fileInputRef = useRef(null);
     const [isDragOver, setIsDragOver] = useState(false);
@@ -77,11 +79,11 @@ const TryItNowSection = () => {
         <section id="demo" className="try-it-now-section">
             <div className="container">
                 <div className="try-it-header">
-                    <span className="section-eyebrow">Try It Now</span>
+                    <span className="section-eyebrow">{t('demo.eyebrow')}</span>
                     <h2 className="section-title-custom">
-                        {isAuthenticated ? 'Upload Your Video' : 'Join to Start Dubbing'}
+                        {isAuthenticated ? t('demo.title') : t('demo.joinTitle')}
                     </h2>
-                    <p className="section-description">Experience the power of AI dubbing in seconds</p>
+                    <p className="section-description">{t('demo.subtitle')}</p>
                 </div>
 
                 <div
@@ -107,31 +109,31 @@ const TryItNowSection = () => {
                             {isUploading ? (
                                 <div className="upload-status">
                                     <div className="spinner"></div>
-                                    <h3>Uploading and Processing...</h3>
-                                    <p>Please wait while we prepare your dashboard.</p>
+                                    <h3>{t('demo.uploadingTitle')}</h3>
+                                    <p>{t('demo.uploadingSubtitle')}</p>
                                 </div>
                             ) : (
                                 <div className="upload-content">
                                     <div className="upload-icon-large">📤</div>
-                                    <h3>Drag & Drop Your Video</h3>
-                                    <p className="upload-sub">or click to browse files</p>
+                                    <h3>{t('demo.uploadTitle')}</h3>
+                                    <p className="upload-sub">{t('demo.uploadText')}</p>
 
                                     <button className="btn btn-primary choose-file-btn">
-                                        Choose File
+                                        {t('demo.chooseFile')}
                                     </button>
 
                                     <div className="upload-features">
                                         <div className="upload-feature-item">
                                             <span className="check-icon">✓</span>
-                                            <span>Max size: 500MB</span>
+                                            <span>{t('demo.info1')}</span>
                                         </div>
                                         <div className="upload-feature-item">
                                             <span className="check-icon">✓</span>
-                                            <span>Formats: MP4, AVI, MOV</span>
+                                            <span>{t('demo.info2')}</span>
                                         </div>
                                         <div className="upload-feature-item">
                                             <span className="check-icon">✓</span>
-                                            <span>Processing: ~2 minutes</span>
+                                            <span>{t('demo.info3')}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -142,30 +144,30 @@ const TryItNowSection = () => {
                         // Guest State
                         <div className="upload-content guest-content">
                             <div className="upload-icon-large" style={{ opacity: 0.5 }}>🔒</div>
-                            <h3>Sign Up to Upload Videos</h3>
-                            <p className="upload-sub">Create a free account to start dubbing your videos today.</p>
+                            <h3>{t('demo.guestTitle')}</h3>
+                            <p className="upload-sub">{t('demo.guestSubtitle')}</p>
 
                             <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginBottom: '32px' }}>
                                 <Link to="/register" className="btn btn-primary">
-                                    Create Free Account
+                                    {t('demo.createAccount')}
                                 </Link>
                                 <Link to="/login" className="btn btn-secondary-outline">
-                                    Login
+                                    {t('demo.login')}
                                 </Link>
                             </div>
 
                             <div className="upload-features">
                                 <div className="upload-feature-item">
                                     <span className="check-icon">✓</span>
-                                    <span>5 Free Credits</span>
+                                    <span>{t('demo.guestFeature1')}</span>
                                 </div>
                                 <div className="upload-feature-item">
                                     <span className="check-icon">✓</span>
-                                    <span>Fast Processing</span>
+                                    <span>{t('demo.guestFeature2')}</span>
                                 </div>
                                 <div className="upload-feature-item">
                                     <span className="check-icon">✓</span>
-                                    <span>High Quality AI Voices</span>
+                                    <span>{t('demo.guestFeature3')}</span>
                                 </div>
                             </div>
                         </div>

@@ -31,15 +31,13 @@ celery_app.conf.update(
     task_routes={
         "app.jobs.tasks.media.*":    {"queue": "media"},
         "app.jobs.tasks.pipeline.*": {"queue": "pipeline"},
-        "app.jobs.tasks.stt.*":      {"queue": "ai_stt"},
         "app.jobs.tasks.nmt.*":      {"queue": "ai_nmt"},
-        "app.jobs.tasks.tts.*":      {"queue": "ai_tts"},
     },
 
-    # Autodiscovery — add stt tasks package
-imports=[
-    "app.jobs.tasks.media",
-    "app.jobs.tasks.pipeline",
-    "app.stt.models",           
-],
+    # Autodiscovery target packages
+    imports=[
+        "app.jobs.tasks.media",
+        "app.jobs.tasks.pipeline",
+        "app.jobs.tasks.nmt",
+    ],
 )

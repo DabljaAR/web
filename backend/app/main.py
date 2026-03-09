@@ -1,25 +1,27 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+import gc
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-import logging
-import gc
 
-from app.dependencies import connect_to_db, disconnect_from_db
-from app.core.router import router as core_router
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from slowapi.errors import RateLimitExceeded
+
+from app.api.job_router import router as job_router
+from app.api.media_routers import router as media_router
+from app.config import settings
 from app.core import init_db
 from app.core.rate_limiter import limiter
-from slowapi.errors import RateLimitExceeded
+from app.core.router import router as core_router
+from app.dependencies import connect_to_db, disconnect_from_db
+from app.nmt.router import router as nmt_router
 from app.shared.logging import setup_logging
 from app.shared.middleware import ExceptionLoggingMiddleware
-from app.config import settings
 
 # Routers
 from app.stt.router import router as stt_router
-from app.api.media_routers import router as media_router
-from app.api.job_router import router as job_router
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +29,9 @@ logger = logging.getLogger(__name__)
 async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
     return JSONResponse(
         status_code=429,
-        content={"detail": "Too many requests, wait 1 min and after 1 min make it can send request again"}
+        content={
+            "detail": "Too many requests, wait 1 min and after 1 min make it can send request again"
+        },
     )
 
 
@@ -42,7 +46,7 @@ async def lifespan(app: FastAPI):
         backup_count=settings.LOG_BACKUP_COUNT,
         enable_console=settings.LOG_ENABLE_CONSOLE,
         enable_file=settings.LOG_ENABLE_FILE,
-        json_format=settings.LOG_JSON_FORMAT
+        json_format=settings.LOG_JSON_FORMAT,
     )
 
     logger.info("=" * 80)
@@ -54,17 +58,9 @@ async def lifespan(app: FastAPI):
         logger.info("🔌 Connecting to database...")
         await connect_to_db()
         await init_db()
-        logger.info("✅ Database connected and initialized")
-
-        # STT service is now request-scoped via Depends(get_stt_service).
-        # The Whisper model is lazy-loaded inside WhisperModelManager on first
-        # call to .transcribe() — either in the FastAPI process (sync endpoint)
-        # or in the Celery worker (async endpoint). No startup init needed here.
-        logger.info("✅ Application ready!")
-        logger.info("=" * 80)
-
-    except Exception:
-        logger.error("❌ Failed to initialize application", exc_info=True)
+        logger.info("Database connected and initialized")
+    except Exception as e:
+        logger.error("Failed to connect to database during startup", exc_info=True)
         raise
 
     try:
@@ -95,7 +91,7 @@ app = FastAPI(
     title="DabljaAR Backend",
     description="Combined API for User Management and Speech-to-Text",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
@@ -106,6 +102,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
 app.add_middleware(ExceptionLoggingMiddleware)
 
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
@@ -113,8 +110,9 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={
             "detail": "Internal server error",
             "error_type": type(exc).__name__,
-        }
+        },
     )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -128,32 +126,23 @@ app.add_middleware(
 # Routers  (each registered exactly once)
 # ---------------------------------------------------------------------------
 
-app.include_router(core_router,  prefix="/api")
+app.include_router(core_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
-app.include_router(job_router,   prefix="/api")
-app.include_router(stt_router)          # already has prefix="/api/transcription"
+app.include_router(job_router, prefix="/api")
+app.include_router(stt_router)  # already has prefix="/api/transcription"
+app.include_router(nmt_router, prefix="/api")
 
 # ---------------------------------------------------------------------------
 # Root endpoint
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api")
 async def read_root():
-    return {
-        "message": "Welcome to DabljaAR Backend",
-        "available_services": {
-            "user_management": "/api/users, /api/signup, /api/login, /api/subscriptions, /api/payments",
-            "media":           "/api/videos",
-            "jobs":            "/api/jobs",
-            "speech_to_text":  "/api/transcription",
-            "documentation":   "/docs",
-        }
-    }
+    return {"message": "Welcome to DabljaAR Backend"}
 
-# ---------------------------------------------------------------------------
-# Static files
-# ---------------------------------------------------------------------------
 
+# Mount static files for uploaded avatars
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
@@ -164,11 +153,12 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         app,
         host=settings.HOST,
         port=settings.PORT,
         workers=settings.WORKERS if settings.ENVIRONMENT == "production" else 1,
         reload=settings.ENVIRONMENT == "development",
-        log_level=settings.LOG_LEVEL.lower()
+        log_level=settings.LOG_LEVEL.lower(),
     )

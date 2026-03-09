@@ -165,6 +165,15 @@ class UserUpdate(BaseModel):
         description="Updated avatar URL",
         examples=["https://example.com/new-avatar.jpg"]
     )
+    # Preferences
+    default_domain: Optional[str] = Field(None, max_length=50)
+    translation_style: Optional[str] = Field(None, max_length=50)
+    default_voice: Optional[str] = Field(None, max_length=50)
+    
+    # Notifications
+    notif_completed: Optional[bool] = None
+    notif_credits: Optional[bool] = None
+    notif_marketing: Optional[bool] = None
 
     @field_validator('username')
     @classmethod
@@ -249,6 +258,16 @@ class UserResponse(UserBase):
         description="Whether the user is active",
         examples=[True]
     )
+    
+    # Preferences
+    default_domain: str
+    translation_style: str
+    default_voice: str
+    
+    # Notifications
+    notif_completed: bool
+    notif_credits: bool
+    notif_marketing: bool
 
     model_config = ConfigDict(
         from_attributes=True,  # Allows conversion from SQLAlchemy models
@@ -285,6 +304,31 @@ class UserPublicResponse(BaseModel):
 
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PasswordChangeRequest(BaseModel):
+    """Schema for password change request."""
+    old_password: str = Field(..., description="Current password")
+    new_password: str = Field(
+        ..., 
+        min_length=8, 
+        max_length=100, 
+        description="New password (minimum 8 characters)"
+    )
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        """Validate password strength."""
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+        if not any(c.isupper() for c in v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not any(c.islower() for c in v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one digit')
+        return v
 
 
 class UserLogin(BaseModel):

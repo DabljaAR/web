@@ -624,15 +624,74 @@ class VideoService:
         
         # 3. Delete from DB
         try:
+            logger.info(f"Attempting to delete video {video_id} from DB")
             await self.db.delete(video)
             await self.db.commit()
+            logger.info(f"Successfully committed deletion of video {video_id} to DB")
         except Exception as e:
-            logger.error(f"Error deleting video from DB: {e}")
+            logger.error(f"Error deleting video {video_id} from DB: {e}")
+            await self.db.rollback()
             return False
+
 
         # 4. Cleanup Files after successful DB delete
         storage = self.storage
         
+        try:
+            if file_path_key:
+                logger.info(f"Deleting file {file_path_key} from storage")
+                await storage.delete(file_path_key)
+            
+            if thumbnail_key:
+                logger.info(f"Deleting thumbnail {thumbnail_key} from storage")
+                await storage.delete(thumbnail_key)
+                
+            if audio_key:
+                logger.info(f"Deleting audio {audio_key} from storage")
+                await storage.delete(audio_key)
+        except Exception as e:
+            logger.error(f"Error cleaning up files for video {video_id}: {e}")
+            # Don't fail the request if file cleanup fails, as DB record is gone.
+            
+        logger.info(f"Video {video_id} and associated files deleted.")
+        return True
+
+    async def delete_user_media(self, user_id: int):
+        """
+        Delete all media records and associated files for a specific user.
+        This should be called during user account deletion.
+        """
+        # 1. Fetch all videos for the user
+        result = await self.db.execute(select(Video).where(Video.user_id == user_id))
+        videos = result.scalars().all()
+        
+        if not videos:
+            logger.info(f"No media found for user {user_id}")
+            return
+            
+        logger.info(f"Found {len(videos)} media items to delete for user {user_id}")
+        
+        # 2. Collect all keys for deletion
+        keys_to_delete = []
+        for video in videos:
+            if video.file_path:
+                keys_to_delete.append(video.file_path)
+            if video.thumbnail_path:
+                keys_to_delete.append(video.thumbnail_path)
+            if video.audio_path:
+                keys_to_delete.append(video.audio_path)
+        
+        # 3. Delete from storage
+        for key in keys_to_delete:
+            try:
+                logger.info(f"Deleting user media file: {key}")
+                await self.storage.delete(key)
+            except Exception as e:
+                logger.error(f"Failed to delete file {key} during user media cleanup: {e}")
+        
+        # Note: DB records will be deleted by cascade when user is deleted
+        logger.info(f"Successfully cleaned up media files for user {user_id}")
+
         if file_path_key:
             await storage.delete(file_path_key)
         
