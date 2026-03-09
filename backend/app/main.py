@@ -4,6 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from pathlib import Path
+import logging
+import gc
+
 from app.dependencies import connect_to_db, disconnect_from_db
 from app.core.router import router as core_router
 from app.core import init_db
@@ -12,7 +15,14 @@ from slowapi.errors import RateLimitExceeded
 from app.shared.logging import setup_logging
 from app.shared.middleware import ExceptionLoggingMiddleware
 from app.config import settings
-import logging
+
+# Routers
+from app.stt.router import router as stt_router
+from app.api.media_routers import router as media_router
+from app.api.job_router import router as job_router
+
+logger = logging.getLogger(__name__)
+
 
 async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
     return JSONResponse(
@@ -23,7 +33,7 @@ async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize logging system
+    # Initialize logging
     setup_logging(
         log_level=settings.LOG_LEVEL,
         log_dir=settings.LOG_DIR,
@@ -34,44 +44,70 @@ async def lifespan(app: FastAPI):
         enable_file=settings.LOG_ENABLE_FILE,
         json_format=settings.LOG_JSON_FORMAT
     )
-    
-    # Get logger for startup
-    logger = logging.getLogger(__name__)
-    logger.info("Application starting up...")
-    
-    # Startup logic
+
+    logger.info("=" * 80)
+    logger.info("🚀 Application starting up...")
+    logger.info(f"Environment: {settings.ENVIRONMENT} | Debug: {settings.DEBUG}")
+    logger.info("=" * 80)
+
     try:
+        logger.info("🔌 Connecting to database...")
         await connect_to_db()
         await init_db()
-        logger.info("Database connected and initialized")
-    except Exception as e:
-        logger.error("Failed to connect to database during startup", exc_info=True)
+        logger.info("✅ Database connected and initialized")
+
+        # STT service is now request-scoped via Depends(get_stt_service).
+        # The Whisper model is lazy-loaded inside WhisperModelManager on first
+        # call to .transcribe() — either in the FastAPI process (sync endpoint)
+        # or in the Celery worker (async endpoint). No startup init needed here.
+        logger.info("✅ Application ready!")
+        logger.info("=" * 80)
+
+    except Exception:
+        logger.error("❌ Failed to initialize application", exc_info=True)
         raise
-    
+
     try:
         yield
     finally:
-        # Shutdown logic
-        logger.info("Application shutting down...")
+        logger.info("🛑 Application shutting down...")
+
         try:
             await disconnect_from_db()
-            logger.info("Database disconnected")
-        except Exception as e:
-            logger.error("Error during database disconnection", exc_info=True)
+            logger.info("✅ Database disconnected")
+        except Exception:
+            logger.error("❌ Error during database disconnection", exc_info=True)
 
-app = FastAPI(lifespan=lifespan)
+        try:
+            gc.collect()
+            logger.info("✅ Garbage collection completed")
+        except Exception:
+            logger.error("❌ Error during garbage collection", exc_info=True)
+
+        logger.info("=" * 80)
+
+
+# ===========================================================================
+# App
+# ===========================================================================
+
+app = FastAPI(
+    title="DabljaAR Backend",
+    description="Combined API for User Management and Speech-to-Text",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# ---------------------------------------------------------------------------
+# Middleware & exception handlers
+# ---------------------------------------------------------------------------
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
-
-# Add exception logging middleware
 app.add_middleware(ExceptionLoggingMiddleware)
 
-# Global exception handler for unhandled exceptions
-# Note: Exceptions are already logged by ExceptionLoggingMiddleware, so we only return the response here
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler to return error response for unhandled exceptions."""
-    # Exception is already logged by ExceptionLoggingMiddleware, so we just return the response
     return JSONResponse(
         status_code=500,
         content={
@@ -79,40 +115,60 @@ async def global_exception_handler(request: Request, exc: Exception):
             "error_type": type(exc).__name__,
         }
     )
-# # Configure CORS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-        "*" 
-    ],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ---------------------------------------------------------------------------
+# Routers  (each registered exactly once)
+# ---------------------------------------------------------------------------
+
+app.include_router(core_router,  prefix="/api")
+app.include_router(media_router, prefix="/api")
+app.include_router(job_router,   prefix="/api")
+app.include_router(stt_router)          # already has prefix="/api/transcription"
+
+# ---------------------------------------------------------------------------
+# Root endpoint
+# ---------------------------------------------------------------------------
+
 @app.get("/api")
 async def read_root():
-    return {"message": "Welcome to DabljaAR Backend"}
+    return {
+        "message": "Welcome to DabljaAR Backend",
+        "available_services": {
+            "user_management": "/api/users, /api/signup, /api/login, /api/subscriptions, /api/payments",
+            "media":           "/api/videos",
+            "jobs":            "/api/jobs",
+            "speech_to_text":  "/api/transcription",
+            "documentation":   "/docs",
+        }
+    }
 
+# ---------------------------------------------------------------------------
+# Static files
+# ---------------------------------------------------------------------------
 
-from app.api.media_routers import router as media_router
-
-app.include_router(core_router, prefix="/api")
-app.include_router(media_router, prefix="/api")
-
-
-# Mount static files for uploaded avatars
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
-
-
+# ---------------------------------------------------------------------------
+# Dev entry point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app,
+        host=settings.HOST,
+        port=settings.PORT,
+        workers=settings.WORKERS if settings.ENVIRONMENT == "production" else 1,
+        reload=settings.ENVIRONMENT == "development",
+        log_level=settings.LOG_LEVEL.lower()
+    )

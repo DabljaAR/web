@@ -49,7 +49,21 @@ def get_user_service(
         UserService instance with injected dependencies
     """
     user_repo = UserRepository(db, User)
-    return UserService(user_repo, auth_service, storage_service)
+    return UserService(user_repo, auth_service)
+
+def get_subscription_plan_service(
+    db: AsyncSession = Depends(get_db)
+) -> SubscriptionPlanService:
+    """Dependency injection factory for SubscriptionPlanService."""
+    repo = SubscriptionPlanRepository(db, SubscriptionPlan)
+    return SubscriptionPlanService(repo)
+
+def get_subscription_plan_service(
+    db: AsyncSession = Depends(get_db)
+) -> SubscriptionPlanService:
+    """Dependency injection factory for SubscriptionPlanService."""
+    repo = SubscriptionPlanRepository(db, SubscriptionPlan)
+    return SubscriptionPlanService(repo)
 
 def get_subscription_plan_service(
     db: AsyncSession = Depends(get_db)
@@ -75,7 +89,39 @@ def get_payment_service(
     return PaymentService(repo)
 
 
-@router.post("/signup", response_model=UserLoginResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
+def get_user_subscription_service(
+    db: AsyncSession = Depends(get_db)
+) -> UserSubscriptionService:
+    """Dependency injection factory for UserSubscriptionService."""
+    repo = UserSubscriptionRepository(db, UserSubscription)
+    return UserSubscriptionService(repo)
+
+
+def get_payment_service(
+    db: AsyncSession = Depends(get_db)
+) -> PaymentService:
+    """Dependency injection factory for PaymentService."""
+    repo = PaymentRepository(db, Payment)
+    return PaymentService(repo)
+
+
+def get_user_subscription_service(
+    db: AsyncSession = Depends(get_db)
+) -> UserSubscriptionService:
+    """Dependency injection factory for UserSubscriptionService."""
+    repo = UserSubscriptionRepository(db, UserSubscription)
+    return UserSubscriptionService(repo)
+
+
+def get_payment_service(
+    db: AsyncSession = Depends(get_db)
+) -> PaymentService:
+    """Dependency injection factory for PaymentService."""
+    repo = PaymentRepository(db, Payment)
+    return PaymentService(repo)
+
+
+@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
 @limiter.limit("5/minute")
 async def signup(
     request: Request,
@@ -720,4 +766,4 @@ async def delete_payment(
         404 Not Found: Payment not found
     """
     await service.delete_payment(payment_id)
-    return None
+    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat() + "Z"}

@@ -19,6 +19,7 @@ from app.config import settings
 from app.core.db import Base
 from app.core.models import User, Role, SubscriptionPlan, UserSubscription, Payment
 from app.media.models import Video
+from app.jobs.models import Job  # noqa: F401 — registers Job with Base.metadata
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -95,7 +96,5 @@ def do_run_migrations(connection):
     with context.begin_transaction():
         context.run_migrations()
 
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    asyncio.run(run_migrations_online())
+    with context.begin_transaction():
+        context.run_migrations()

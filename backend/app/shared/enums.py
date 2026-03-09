@@ -35,6 +35,40 @@ class SubscriptionStatusEnum(str, Enum):
 class languageEnum(str, Enum):
     ENGLISH = "en"
     ARABIC = "ar"
-    
+    SPANISH = "es"
+    FRENCH = "fr"
+    GERMAN = "de"
+    PORTUGUESE = "pt"
+    ITALIAN = "it"
+    RUSSIAN = "ru"
+    CHINESE = "zh"
+    JAPANESE = "ja"
+    KOREAN = "ko"
+    AUTO = None  # Auto-detect
 
     
+class modelSize(str, Enum):
+    """Available Whisper model sizes."""
+    TINY = "tiny"
+    SMALL = "small"
+    MEDIUM = "medium"
+    LARGE = "large-v3"
+
+
+
+class AudioVideoExtension(str, Enum):
+    MP3  = ".mp3"
+    MP4  = ".mp4"
+    WAV  = ".wav"
+    M4A  = ".m4a"
+    FLAC = ".flac"
+    OGG  = ".ogg"
+    WMA  = ".wma"
+    AAC  = ".aac"
+    MOV  = ".mov"
+    MKV  = ".mkv"
+    WEBM = ".webm"
+    
+    @classmethod
+    def has_value(cls, value: str) -> bool:
+        return value in cls._value2member_map_
