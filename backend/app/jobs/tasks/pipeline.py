@@ -8,7 +8,7 @@ import logging
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from celery import chain
 
@@ -152,43 +152,7 @@ def stt_transcribe(
 # Neural Machine Translation
 # ===========================================================================
 
-@celery_app.task(
-    bind=True,
-    base=BaseJobTask,
-    name="app.jobs.tasks.pipeline.nmt_translate",
-    max_retries=3,
-    default_retry_delay=60,
-    queue="ai_nmt",
-)
-def nmt_translate(
-    self,
-    job_id: str,
-    video_id: str,
-    transcript_key: str,
-    source_lang: str = "auto",
-    target_lang: str = "en",
-) -> dict:
-    """
-    Stub: translate the transcript produced by ``stt_transcribe``.
-
-    Returns:
-        {"job_id": job_id, "video_id": video_id, "translation_key": "<storage_key>"}
-    """
-    self._run_sync(
-        self._patch_job(
-            job_id,
-            JobStatus.PROCESSING,
-            celery_task_id=self.request.id,
-            started_at=datetime.utcnow(),
-        )
-    )
-    # TODO: call NMT service
-    logger.info(
-        "[STUB] nmt_translate job=%s video=%s %s→%s",
-        job_id, video_id, source_lang, target_lang,
-    )
-    return {"job_id": job_id, "video_id": video_id, "translation_key": None}
-
+from app.jobs.tasks.nmt import nmt_translate
 
 # ===========================================================================
 # Text-to-Speech
@@ -196,7 +160,10 @@ def nmt_translate(
 
 @celery_app.task(
     bind=True,
-    base=BaseJobTask,
+    # ── NOTE: We do NOT use BaseJobTask as the base class here. ──────────
+    # This prevents the automatic lifecycle hooks from crashing when they
+    # encounter a dictionary as the first argument in a Celery chain.
+    # Instead, we use its STATIC methods manually.
     name="app.jobs.tasks.pipeline.tts_synthesize",
     max_retries=3,
     default_retry_delay=60,
@@ -204,28 +171,63 @@ def nmt_translate(
 )
 def tts_synthesize(
     self,
-    job_id: str,
-    video_id: str,
-    translation_key: str,
+    job_id: Any,
+    video_id: Optional[str] = None,
+    translation_key: Optional[str] = None,
     target_lang: str = "en",
 ) -> dict:
     """
     Stub: synthesise speech from the translated text.
 
     Returns:
-        {"job_id": job_id, "video_id": video_id, "audio_key": "<storage_key>"}
+        {"job_id": job_id, "video_id": video_id, "audio_key": None}
     """
-    self._run_sync(
-        self._patch_job(
-            job_id,
-            JobStatus.PROCESSING,
-            celery_task_id=self.request.id,
-            started_at=datetime.utcnow(),
+    if isinstance(job_id, dict):
+        result = job_id
+        job_id = result.get("job_id")
+        video_id = video_id or result.get("video_id")
+        translation_key = translation_key or result.get("transcript_key") or result.get("translation_key")
+        target_lang = result.get("target_lang") or target_lang or "en"
+
+    if job_id:
+        BaseJobTask._run_sync(
+            BaseJobTask._patch_job(
+                job_id,
+                JobStatus.PROCESSING,
+                celery_task_id=self.request.id,
+                started_at=datetime.utcnow(),
+            )
         )
-    )
-    # TODO: call TTS service
-    logger.info("[STUB] tts_synthesize job=%s video=%s lang=%s", job_id, video_id, target_lang)
-    return {"job_id": job_id, "video_id": video_id, "audio_key": None}
+
+    try:
+        # TODO: call TTS service
+        logger.info("[STUB] tts_synthesize job=%s video=%s lang=%s", job_id, video_id, target_lang)
+        
+        output = {"job_id": job_id, "video_id": video_id, "audio_key": None}
+        
+        if job_id:
+            BaseJobTask._run_sync(
+                BaseJobTask._patch_job(
+                    job_id,
+                    JobStatus.COMPLETED,
+                    progress=100.0,
+                    completed_at=datetime.utcnow()
+                )
+            )
+        return output
+        
+    except Exception as e:
+        logger.error("tts_synthesize failed for job %s: %s", job_id, e)
+        if job_id:
+            BaseJobTask._run_sync(
+                BaseJobTask._patch_job(
+                    job_id,
+                    JobStatus.FAILED,
+                    error_message=str(e),
+                    completed_at=datetime.utcnow()
+                )
+            )
+        raise
 
 
 # ===========================================================================

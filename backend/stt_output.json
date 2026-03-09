@@ -1,0 +1,80 @@
+{
+    "transcript": "Hello everyone. Welcome to NSO Academy. In the previous lecture, we have understood call sequence of constructors and destructors. Now we are in this lecture, and the name of this lecture is Virtual Base Class. In this lecture, we will understand the concept of Virtual Base Class properly. So without any further delay, let's get started with this lecture and let's see what are the topics. The first topic is the Diamond Problem. First, I will introduce you to the Diamond Problem and I will make you understand what this problem is about. Then we will move to the second topic where we will understand Virtual Base Class properly which will help us in resolving the Diamond Problem. So these are the topics of this lecture. Let's start with the first one, the Diamond Problem. Now what is the Diamond Problem? In order to understand the Diamond Problem, let's consider one simple example program. Here I have included the iostream header file and here is the definition of Class A. We have the public constructor that will display A constructor. And we also have this public member function display which will display I am A. After this, we have Class B which is inheriting from Class A and this is public inheritance. Therefore, this public member function will be treated public here as well. Also, we have this public constructor that will display B constructor. After this class, we have Class C which is inheriting from Class A. Again, here we have public inheritance. Therefore, this public member function will be treated public here as well. Apart from this, it has its own public constructor which will display C constructor. Now after this, we have Class D which is inheriting from both the classes D and C. Here also, we have public inheritance. Also, it has its own public constructor which will display D constructor. Now if we observe these classes carefully, we will get a diamond-like structure which looks like this. Here we know Class D is inheriting from both these classes B and C. Also, we can observe both these classes B and C are inheriting from the same Class A. So, we are getting a diamond-like structure. Now this structure causes a problem which is what we call the diamond problem. Now to understand the diamond problem properly, let's define the main function first. Here is the definition of the main function with return zero statement. Now let's define the object of Class D. Let's say the object of Class D is OBJ. We know Class D is inheriting from Class B and Class B is inheriting from Class A. Therefore, the constructor of Class A will be called first. Then the constructor of Class B will be called. This is what we have learned in the last lecture where we have learned the call sequence of constructors and destructors. We know this concept already. We also know this that Class D is inheriting from Class C and Class C is inheriting from Class A. Therefore, the constructor of Class A will be called first and then the constructor of Class C will be called. At the end, constructor of Class D will be called. So, when we execute this program, we will get this output on the screen. A constructor, B constructor, A constructor, C constructor, D constructor. I hope this is clear to you. Now here we can observe in the output that the constructor A has been called twice. This means this constructor is called twice. Now this is something that we may not want. To avoid this, we can use one concept which is called virtual base class. Apart from this, there is one more problem. We have this public member function display. We know this that these two classes are inheriting from Class A. Therefore, these two classes will receive their own copies of the display function. Now we also know this that Class D is inheriting from both these classes. If we try to call the display function with the help of the object of Class D, then we will get error from the compiler. Here I am calling the display function through the object of Class D. We will get error from the compiler and the reason is very simple. We know that display function is available in both these classes. Now if we try to call the display function through the object of Class D, we will get error because compiler is confused which display function we want to call. Is it the display function of Class B or is it the display function of Class C? Compiler is confused and due to this reason it will produce an error. I hope this is clear to you. This is what diamond problem is about. In case of diamond problem, we have two different problems. The first one is that the base class constructor is called twice and the second problem is the inherited function cannot be called because this inherited function is available in multiple classes and therefore the compiler is confused. Due to this reason the inherited function cannot be called. That is what the diamond problem is about. I hope this is completely clear to you. Now to resolve this diamond problem, we have what is called virtual base class. This is what we will understand in the next topic. For now we are done with the diamond problem. We have understood what is diamond problem and now we know that we need to resolve this problem. In order to resolve this problem we need to move to the next topic where we will understand the virtual base class concept. Now what is virtual base class? And how it can help us in resolving the diamond problem? For this purpose, we need to consider the same example program. Here we have these classes and we have the main function. We have the same program as before. We know when we execute this program we will get error because of this specific line. Now to resolve this issue, we can define this base class as the virtual base class and this can be done at the time of inheriting this class. So here before these public keywords we need to place the virtual keyword. I hope this is clear to you. In both these places we need to put the virtual keyword. Now this class will be treated as the virtual base class and this simply means that the constructor will be called once, not twice. This is what we want and the inherited function will be shared among these two classes. This means both these classes will share the same copy of the display function. So there will be just one copy of the display function and therefore there is no confusion. So if we want to call this function with the help of the object of class D, we can't do this without any problem. We will not get error from the compiler. So when we execute this program we will get the output A constructor, B constructor, C constructor, D constructor and then I am A. Here you can observe that the constructor of class A is called once. Apart from this we are getting the output from the display function as well. This means this function has been called successfully. So with this it is clear what is the concept of virtual base class and how it can help in resolving the diamond problem. This means we are done with the second topic also and this clearly means we are done with this lecture. Okay friends, this is it for now. Thank you for watching this lecture. I will see you in the next one.",
+    "segments": [
+        {
+            "start": 0.0,
+            "end": 4.0,
+            "text": "Hello everyone. Welcome to NSO Academy."
+        },
+        {
+            "start": 4.0,
+            "end": 10.0,
+            "text": "In the previous lecture, we have understood call sequence of constructors and destructors."
+        },
+        {
+            "start": 10.0,
+            "end": 15.0,
+            "text": "Now we are in this lecture, and the name of this lecture is Virtual Base Class."
+        },
+        {
+            "start": 15.0,
+            "end": 20.0,
+            "text": "In this lecture, we will understand the concept of Virtual Base Class properly."
+        },
+        {
+            "start": 20.0,
+            "end": 26.0,
+            "text": "So without any further delay, let's get started with this lecture and let's see what are the topics."
+        },
+        {
+            "start": 26.0,
+            "end": 30.0,
+            "text": "The first topic is the Diamond Problem."
+        },
+        {
+            "start": 30.0,
+            "end": 35.0,
+            "text": "First, I will introduce you to the Diamond Problem and I will make you understand what this problem is about."
+        },
+        {
+            "start": 35.0,
+            "end": 42.0,
+            "text": "Then we will move to the second topic where we will understand Virtual Base Class properly which will help us in resolving the Diamond Problem."
+        },
+        {
+            "start": 42.0,
+            "end": 46.0,
+            "text": "So these are the topics of this lecture. Let's start with the first one, the Diamond Problem."
+        },
+        {
+            "start": 46.0,
+            "end": 51.0,
+            "text": "Now what is the Diamond Problem? In order to understand the Diamond Problem, let's consider one simple example program."
+        },
+        {
+            "start": 51.0,
+            "end": 56.0,
+            "text": "Here I have included the iostream header file and here is the definition of Class A."
+        },
+        {
+            "start": 56.0,
+            "end": 61.0,
+            "text": "We have the public constructor that will display A constructor."
+        },
+        {
+            "start": 61.0,
+            "end": 65.0,
+            "text": "And we also have this public member function display which will display I am A."
+        },
+        {
+            "start": 528.3,
+            "end": 530.3,
+            "text": "I will see you in the next one."
+        }
+    ],
+    "metadata": {
+        "language": "en",
+        "duration": 541.51,
+        "segment_count": 191
+    }
+}
