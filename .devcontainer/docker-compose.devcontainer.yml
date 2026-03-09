@@ -1,0 +1,29 @@
+services:
+  # Mount the full project root into the backend container so VS Code
+  # can navigate the whole workspace (frontend, docs, configs, etc.)
+  backend:
+    volumes:
+      - ..:/workspace:cached
+
+  # Standalone Vite dev server for frontend development.
+  # Uses a named volume for node_modules so the bind-mounted source
+  # doesn't overwrite packages installed inside the container.
+  frontend-dev:
+    image: node:20-alpine
+    container_name: dabljaar_frontend_dev
+    working_dir: /workspace/frontend
+    command: sh -c "npm install --legacy-peer-deps && npm run dev -- --host"
+    volumes:
+      - ..:/workspace:cached
+      - frontend_dev_node_modules:/workspace/frontend/node_modules
+    ports:
+      - "5174:5173"
+    environment:
+      VITE_API_URL: http://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - dabljaar_network
+
+volumes:
+  frontend_dev_node_modules:
