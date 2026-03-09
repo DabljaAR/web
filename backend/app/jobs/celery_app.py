@@ -16,6 +16,7 @@ celery_app.conf.update(
     worker_max_tasks_per_child=50,
 
     # Time limits (seconds)
+    # STT on long audio can take a while — give it breathing room
     task_soft_time_limit=600,
     task_time_limit=900,
 
@@ -28,17 +29,20 @@ celery_app.conf.update(
 
     # Queue routing
     task_routes={
-        "app.jobs.tasks.media.*": {"queue": "media"},
+        "app.jobs.tasks.media.*":    {"queue": "media"},
         "app.jobs.tasks.pipeline.*": {"queue": "pipeline"},
-        "app.jobs.tasks.stt.*": {"queue": "ai_stt"},
-        "app.jobs.tasks.nmt.*": {"queue": "ai_nmt"},
-        "app.jobs.tasks.tts.*": {"queue": "ai_tts"},
+        "app.jobs.tasks.stt.*":      {"queue": "ai_stt"},
+        "app.jobs.tasks.nmt.*":      {"queue": "ai_nmt"},
+        "app.jobs.tasks.tts.*":      {"queue": "ai_tts"},
     },
 
     # Autodiscovery target packages
     imports=[
         "app.jobs.tasks.media",
         "app.jobs.tasks.pipeline",
+        "app.stt.models",
+        "app.jobs.tasks.stt",
+        "app.jobs.tasks.tts",
         "app.jobs.tasks.nmt",
     ],
 )

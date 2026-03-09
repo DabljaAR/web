@@ -25,35 +25,32 @@ from app.core.exceptions import (
     UserAlreadyExistsException,
     InvalidCredentialsException
 )
-from app.media.storage import StorageService
 from app.config import settings
 import logging
 logger = logging.getLogger(__name__)
 class UserService:
     """User service with dependency injection."""
     
-    def __init__(self, user_repo: UserRepository, auth_service: AuthService, storage_service: StorageService = None):
+    def __init__(self, user_repo: UserRepository, auth_service: AuthService):
         """
         Initialize UserService with repository and auth service dependencies.
         
         Args:
             user_repo: UserRepository instance for data access
             auth_service: AuthService instance for authentication
-            storage_service: StorageService instance for file operations
         """
         self.user_repo = user_repo
         self.auth_service = auth_service
-        self.storage_service = storage_service
     
-    async def signup(self, user_data: UserCreate) -> UserLoginResponse:
+    async def signup(self, user_data: UserCreate) -> UserResponse:
         """
-        Register a new user and automatically log them in.
+        Register a new user.
         
         Args:
             user_data: User creation data
             
         Returns:
-            UserLoginResponse with created user data and tokens
+            UserResponse with created user data
             
         Raises:
             UserAlreadyExistsException: If username or email already exists
@@ -90,10 +87,9 @@ class UserService:
         await self.user_repo.db.commit()
         await self.user_repo.db.refresh(db_user)
         
-        logger.info(f"User created: {db_user.username}")
-        # return UserResponse.model_validate(db_user)
-        # Automatically login to return tokens
-        return await self.login(user_data.username, user_data.password)
+        logger.info(db_user)
+        # Return user response
+        return UserResponse.model_validate(db_user)
     
     async def login(self, username: str, password: str) -> UserLoginResponse:
         """
@@ -224,10 +220,6 @@ class UserService:
                     f"Email '{user_data.email}' is already registered"
                 )
         
-        # Handle old avatar deletion if avatar_url is being updated
-        old_avatar_url = user.avatar_url
-        new_avatar_url = user_data.avatar_url
-        
         # Prepare update data
         update_data = user_data.model_dump(exclude_unset=True, exclude={'password'})
         
@@ -246,31 +238,6 @@ class UserService:
         self.user_repo.db.add(user)
         await self.user_repo.db.commit()
         await self.user_repo.db.refresh(user)
-
-        # Post-commit: delete old avatar if it was changed
-        # We delete if:
-        # 1. new_avatar_url is provided (even if it's None for removal) 
-        # 2. old_avatar_url exists and is different from new_avatar_url
-        if self.storage_service and "avatar_url" in update_data and old_avatar_url and old_avatar_url != new_avatar_url:
-            try:
-                # Try to extract the key from the old URL
-                # If it's a MinIO/S3 URL, it usually looks like http://.../bucket/key?...
-                # Our keys start with 'avatars/'
-                key = None
-                if 'avatars/' in old_avatar_url:
-                    key = old_avatar_url.split('avatars/')[-1].split('?')[0]
-                    key = f"avatars/{key}"
-                else:
-                    # Fallback or local path
-                    key = old_avatar_url.split('?')[0].split('/')[-1]
-                    if 'avatars' not in key:
-                         key = f"avatars/{key}"
-                
-                if key:
-                    logger.info(f"Deleting old avatar: {key}")
-                    await self.storage_service.delete(key)
-            except Exception as e:
-                logger.error(f"Failed to delete old avatar {old_avatar_url}: {e}")
         
         return UserResponse.model_validate(user)
     
@@ -367,23 +334,6 @@ class UserService:
 
         await self.user_repo.db.delete(user)
         await self.user_repo.db.commit()
-
-        # Cleanup avatar from storage
-        if self.storage_service and avatar_url:
-            try:
-                key = None
-                if 'avatars/' in avatar_url:
-                    key = avatar_url.split('avatars/')[-1].split('?')[0]
-                    key = f"avatars/{key}"
-                else:
-                    key = avatar_url.split('?')[0].split('/')[-1]
-                    if 'avatars' not in key:
-                         key = f"avatars/{key}"
-                
-                if key:
-                    await self.storage_service.delete(key)
-            except Exception as e:
-                logger.error(f"Failed to delete avatar during user deletion: {e}")
         
         logger.info(f"User {user_id} and all associated data deleted successfully")
         return True

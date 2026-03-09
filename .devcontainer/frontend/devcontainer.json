@@ -1,0 +1,64 @@
+{
+  "name": "Dabljaar — Frontend",
+
+  // Bring up the full compose stack + the devcontainer workspace mount + frontend-dev service
+  "dockerComposeFile": ["../../docker-compose.yaml", "../docker-compose.devcontainer.yml"],
+
+  // Attach VS Code to the Vite dev service defined in docker-compose.devcontainer.yml
+  "service": "frontend-dev",
+
+  // Full project root is mounted here by the devcontainer compose override
+  "workspaceFolder": "/workspace",
+
+  // node:20-alpine creates a 'node' user with uid 1000
+  "remoteUser": "node",
+
+  // Install git (not present in node:20-alpine) and forward host credentials
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+
+  // Mark the workspace as safe so git doesn't reject the mounted volume
+  "postCreateCommand": "git config --global --add safe.directory /workspace",
+
+  // Forward the Vite dev server (5174 on host → 5173 in container) and the API
+  "forwardPorts": [5174, 8000, 5555],
+  "portsAttributes": {
+    "5174": { "label": "Frontend Dev (Vite)", "onAutoForward": "openBrowser" },
+    "8000": { "label": "Backend API",         "onAutoForward": "notify" },
+    "5555": { "label": "Flower",              "onAutoForward": "notify" }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // Formatting & linting
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        // TypeScript & React
+        "ms-vscode.vscode-typescript-next",
+        // Tailwind CSS
+        "bradlc.vscode-tailwindcss",
+        // Productivity
+        "eamodio.gitlens",
+        "usernamehw.errorlens",
+        "christian-kohler.path-intellisense",
+        // Config / markup
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        // Use the TypeScript version from the project's own node_modules
+        // (populated once npm install finishes on container start)
+        "typescript.tsdk": "/workspace/frontend/node_modules/typescript/lib",
+
+        "[typescript]":      { "editor.defaultFormatter": "esbenp.prettier-vscode", "editor.formatOnSave": true },
+        "[typescriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode", "editor.formatOnSave": true },
+        "[javascriptreact]": { "editor.defaultFormatter": "esbenp.prettier-vscode", "editor.formatOnSave": true },
+        "[json]":            { "editor.defaultFormatter": "esbenp.prettier-vscode", "editor.formatOnSave": true },
+
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+      }
+    }
+  }
+}

@@ -21,8 +21,8 @@ class BaseJobTask(celery.Task):
     2. Call ``self.update_progress(job_id, pct)`` when they want to
        report intermediate progress.
 
-    The ``after_return`` hook handles COMPLETED / FAILED / RETRYING
-    transitions automatically.
+    The ``on_failure`` / ``on_retry`` / ``on_success`` hooks handle
+    COMPLETED / FAILED / RETRYING transitions automatically.
     """
 
     abstract = True
@@ -44,42 +44,56 @@ class BaseJobTask(celery.Task):
         return loop.run_until_complete(coro)
 
     @staticmethod
+    def _make_db():
+        """Fresh engine + session for this event loop — never reuse FastAPI's pool."""
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+        from sqlalchemy.orm import sessionmaker
+        from app.config import settings
+        engine = create_async_engine(
+            settings.DATABASE_URL, pool_size=1, max_overflow=0, pool_pre_ping=True
+        )
+        return engine, sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    @staticmethod
     async def _patch_job(
         job_id: str,
         status: JobStatus,
         *,
         progress: Optional[float] = None,
         error_message: Optional[str] = None,
+        output_data: Optional[dict] = None,
         celery_task_id: Optional[str] = None,
         started_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
     ) -> None:
         """Update a job row directly — no service layer to avoid circular
         imports between the task module and the service."""
-        from app.core.db import AsyncSessionLocal  # lazy import
         from app.jobs.models import Job
 
-        db = AsyncSessionLocal()
+        engine, SessionLocal = BaseJobTask._make_db()
         try:
-            job = db.get(Job, job_id)
-            if job is None:
-                logger.warning("BaseJobTask: job %s not found, skipping patch", job_id)
-                return
-            job.status = status
-            if progress is not None:
-                job.progress = progress
-            if error_message is not None:
-                job.error_message = error_message
-            if celery_task_id is not None:
-                job.celery_task_id = celery_task_id
-            if started_at is not None:
-                job.started_at = started_at
-            if completed_at is not None:
-                job.completed_at = completed_at
-            job.updated_at = datetime.utcnow()
-            db.commit()
+            async with SessionLocal() as db:
+                job = await db.get(Job, job_id)
+                if job is None:
+                    logger.warning("BaseJobTask: job %s not found, skipping patch", job_id)
+                    return
+                job.status = status
+                if progress is not None:
+                    job.progress = progress
+                if error_message is not None:
+                    job.error_message = error_message
+                if output_data is not None:
+                    job.output_data = output_data
+                if celery_task_id is not None:
+                    job.celery_task_id = celery_task_id
+                if started_at is not None:
+                    job.started_at = started_at
+                if completed_at is not None:
+                    job.completed_at = completed_at
+                job.updated_at = datetime.utcnow()
+                await db.commit()
         finally:
-            db.close()
+            await engine.dispose()
 
     # ------------------------------------------------------------------
     # Public helpers for sub-tasks

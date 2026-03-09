@@ -1,0 +1,70 @@
+{
+  "name": "Dabljaar — Backend",
+
+  // Bring up the full compose stack + the devcontainer workspace mount
+  "dockerComposeFile": ["../../docker-compose.yaml", "../docker-compose.devcontainer.yml"],
+
+  // Attach VS Code to the backend container
+  "service": "backend",
+
+  // Full project root is mounted here by docker-compose.devcontainer.yml
+  "workspaceFolder": "/workspace",
+
+  // Match the non-root user created in backend/Dockerfile (uid 1000)
+  "remoteUser": "appuser",
+
+  // Install git (not present in python:3.12-slim) and forward host credentials
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+
+  // Mark the workspace as safe so git doesn't reject the mounted volume
+  "postCreateCommand": "git config --global --add safe.directory /workspace",
+
+  // Expose service ports to the host browser
+  "forwardPorts": [8000, 5173, 5555, 9001],
+  "portsAttributes": {
+    "8000": { "label": "Backend API",     "onAutoForward": "notify" },
+    "5173": { "label": "Frontend",        "onAutoForward": "silent" },
+    "5555": { "label": "Flower",          "onAutoForward": "notify" },
+    "9001": { "label": "MinIO Console",   "onAutoForward": "notify" }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        // Python
+        "ms-python.python",
+        "ms-python.pylance",
+        "charliermarsh.ruff",
+        "ms-python.black-formatter",
+        "ms-python.debugpy",
+        // Productivity
+        "eamodio.gitlens",
+        "usernamehw.errorlens",
+        // Config / markup
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        // Docker & DB helpers
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        // Point Pylance at the system Python that has all deps installed
+        "python.defaultInterpreterPath": "/usr/local/bin/python3",
+
+        // Allow Pylance to resolve `from app.xxx import ...` from the backend root
+        "python.analysis.extraPaths": ["/workspace/backend"],
+        "python.analysis.autoImportCompletions": true,
+
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true,
+          "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+          }
+        },
+        "editor.rulers": [88]
+      }
+    }
+  }
+}

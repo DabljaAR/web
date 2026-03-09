@@ -14,7 +14,7 @@ from app.core.schema import (
 from app.core.services import (
     SubscriptionPlanService, UserSubscriptionService, PaymentService, UserService
 )
-from app.core.enums import (
+from app.shared.enums import (
     SubscriptionStatusEnum, CurrencyEnum, PaymentMethodEnum, 
     PaymentGatewayEnum, PaymentStatusEnum, languageEnum
 )

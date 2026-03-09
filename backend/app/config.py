@@ -1,4 +1,5 @@
 import os
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
@@ -6,21 +7,26 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
-    DATABASE_URL: str = os.getenv(
-            "DATABASE_URL", 
-            "postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar"
-        )
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore"  # Ignore extra environment variables
+    )
     
+    # ========== DATABASE ==========
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL", 
+        "postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar"
+    )
+    
+    # ========== AUTHENTICATION ==========
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    
-    # Note: os.getenv returns strings, so we must cast to int
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15))
-    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
+    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
     
     # Auth0 / Social configuration
     GOOGLE_REDIRECT_URL: str = os.getenv("GOOGLE_REDIRECT_URL", "")
@@ -29,63 +35,84 @@ class Settings(BaseSettings):
     AUTH0_CLIENT_ID: str = os.getenv("AUTH0_CLIENT_ID", "")
     AUTH0_CLIENT_SECRET: str = os.getenv("AUTH0_CLIENT_SECRET", "")
     AUTH0_AUDIENCE: str = os.getenv("AUTH0_AUDIENCE", "")
-    # MinIO / S3 Configuration
-    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "dablaja-minio:9000")
 
+    # ========== MINIO / S3 CONFIGURATION ==========
+    MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
     MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
     MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "False").lower() == "true"
-
-
-    # Celery / Redis
+    
+    # ========== LOGGING CONFIGURATION ==========
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_DIR: str = os.getenv("LOG_DIR", "logs")
+    LOG_FILE: str = os.getenv("LOG_FILE", "app.log")
+    LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+    LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
+    LOG_ENABLE_CONSOLE: bool = os.getenv("LOG_ENABLE_CONSOLE", "True").lower() == "true"
+    LOG_ENABLE_FILE: bool = os.getenv("LOG_ENABLE_FILE", "True").lower() == "true"
+    LOG_JSON_FORMAT: bool = os.getenv("LOG_JSON_FORMAT", "False").lower() == "true"
+    LOG_ENABLE_SUCCESS: bool = os.getenv("LOG_ENABLE_SUCCESS", "True").lower() == "true"
+    
+    # ========== SPEECH-TO-TEXT (STT) ==========
+    STT_MODEL_SIZE: str = os.getenv("STT_MODEL_SIZE", "small")
+    STT_DEVICE: str = os.getenv("STT_DEVICE", "auto")
+    STT_COMPUTE_TYPE: str = os.getenv("STT_COMPUTE_TYPE", "auto")
+    STT_MAX_CONCURRENT: int = int(os.getenv("STT_MAX_CONCURRENT", "1"))
+    STT_MAX_AUDIO_DURATION: int = int(os.getenv("STT_MAX_AUDIO_DURATION", "3600"))
+    STT_MAX_FILE_SIZE_GB: float = float(os.getenv("STT_MAX_FILE_SIZE_GB", "5"))
+    STT_GPU_MEMORY_THRESHOLD: float = float(os.getenv("STT_GPU_MEMORY_THRESHOLD", "0.9"))
+    STT_RETRY_ATTEMPTS: int = int(os.getenv("STT_RETRY_ATTEMPTS", "3"))
+    STT_RETRY_DELAY: int = int(os.getenv("STT_RETRY_DELAY", "2"))
+    
+    # ========== SERVER ==========
+    HOST: str = os.getenv("HOST", "0.0.0.0")
+    PORT: int = int(os.getenv("PORT", "8000"))
+    WORKERS: int = int(os.getenv("WORKERS", "1"))
+    
+    # ========== CORS ==========
+    CORS_ORIGINS: list = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
+    
+    # ========== ENVIRONMENT ==========
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
+    
+    # ========== CELERY / REDIS ==========
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
     CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
-    WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", 2))
-
-
-    # Logging Configuration
-    LOG_LEVEL: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    LOG_DIR: str = "logs"  # Directory for log files
-    LOG_FILE: str = "app.log"  # Main log file name
-    LOG_MAX_BYTES: int = 10 * 1024 * 1024  # 10MB - max size before rotation
-    LOG_BACKUP_COUNT: int = 5  # Number of backup log files to keep
-    LOG_ENABLE_CONSOLE: bool = True  # Enable console logging
-    LOG_ENABLE_FILE: bool = True  # Enable file logging
-    LOG_JSON_FORMAT: bool = False  # Use JSON format for logs
-    LOG_ENABLE_SUCCESS: bool = True  # Enable success request logging (2xx status codes)
-   
-
-
-   
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        extra = "ignore"
-
+    WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", "2"))
+    
+    def get_device(self) -> str:
+        """Get the device (auto-detect if set to 'auto')."""
+        if self.STT_DEVICE == "auto":
+            try:
+                import torch
+                return "cuda" if torch.cuda.is_available() else "cpu"
+            except:
+                return "cpu"
+        return self.STT_DEVICE
+    
+    def get_compute_type(self) -> str:
+        """Get compute type (auto-select based on device)."""
+        if self.STT_COMPUTE_TYPE == "auto":
+            device = self.get_device()
+            return "float16" if device == "cuda" else "int8"
+        return self.STT_COMPUTE_TYPE
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production."""
+        return self.ENVIRONMENT == "production"
+    
+    @property
+    def is_development(self) -> bool:
+        """Check if running in development."""
+        return self.ENVIRONMENT == "development"
 
 
 settings = Settings()
-
-# Note: Required environment variables:
-# - DATABASE_URL: PostgreSQL connection string
-# - SECRET_KEY or JWT_SECRET: Secret key for JWT token signing (should be a strong random string)
-# Optional:
-# - ALGORITHM: JWT algorithm (default: HS256)
-# - ACCESS_TOKEN_EXPIRE_MINUTES: Access token expiration in minutes (default: 15)
-# - REFRESH_TOKEN_EXPIRE_DAYS: Refresh token expiration in days (default: 7)
-
-
-
-
-
-# Note: Required environment variables:
-# - DATABASE_URL: PostgreSQL connection string
-# - SECRET_KEY or JWT_SECRET: Secret key for JWT token signing (should be a strong random string)
-# Optional:
-# - ALGORITHM: JWT algorithm (default: HS256)
-# - ACCESS_TOKEN_EXPIRE_MINUTES: Access token expiration in minutes (default: 15)
-# - REFRESH_TOKEN_EXPIRE_DAYS: Refresh token expiration in days (default: 7)
-
-
-

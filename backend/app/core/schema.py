@@ -4,7 +4,7 @@ from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from pydantic import model_validator
 from decimal import Decimal
 from pydantic import BaseModel, Field
-from app.core.enums import (
+from app.shared.enums import (
     CurrencyEnum,
     PaymentMethodEnum,
     PaymentGatewayEnum,
@@ -38,9 +38,8 @@ class UserBase(BaseModel):
         examples=["magdy", "ibrahim"]
     )
     preferred_language: languageEnum = Field(
-        languageEnum.ENGLISH,
         description="User's preferred language code (e.g., 'en', 'ar')",
-        examples=["en", "ar", "fr"]
+        examples=["ENGLISH", "ARABIC", "FRENCH"]
     )
     avatar_url: Optional[str] = Field(
         None,
