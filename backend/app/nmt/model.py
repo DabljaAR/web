@@ -184,6 +184,12 @@ class NLLBTranslatorWrapper:
         return self._device
 
     @property
+    def model_name(self) -> str:
+        if self._model_name is None:
+            self._model_name = resolve_default_model()
+        return self._model_name
+
+    @property
     def tokenizer(self):
         """Lazy load the tokenizer once."""
         if NLLBTranslatorWrapper._tokenizer is None:
