@@ -167,9 +167,14 @@ class NLLBTranslatorWrapper:
     _lock = Lock()
 
     def __init__(self, model_name: Optional[str] = None):
-        # Resolve config — do NOT load the model here
-        self.model_name = model_name or resolve_default_model()
+        self._model_name = model_name
         self.device = self._get_device()
+
+    @property
+    def model_name(self) -> str:
+        if self._model_name is None:
+            self._model_name = resolve_default_model()
+        return self._model_name
 
     @property
     def tokenizer(self):

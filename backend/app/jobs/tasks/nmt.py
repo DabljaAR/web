@@ -136,3 +136,102 @@ def nmt_translate(
         raise
 
 
+@celery_app.task(
+    bind=True,
+    base=BaseJobTask,
+    name="app.jobs.tasks.nmt.translate_segment",
+    max_retries=3,
+    default_retry_delay=30,
+    queue="ai_nmt",
+)
+def nmt_translate_segment(
+    self,
+    segment_id: int,
+    job_id: str,
+    text: str,
+    start: float,
+    end: float,
+    source_lang: Optional[str] = None,
+    target_lang: str = "arb_Arab",
+) -> dict:
+    """
+    Translate a single STT segment.
+    
+    This task is dispatched by STT after transcription completes.
+    Each segment is translated independently and in parallel.
+    
+    Args:
+        segment_id: Index of the segment in the original transcript
+        job_id: Parent STT job ID
+        text: Original segment text
+        start: Segment start time in seconds
+        end: Segment end time in seconds
+        source_lang: Source language code (e.g., 'en', 'auto')
+        target_lang: Target language code (e.g., 'arb_Arab')
+    
+    Returns:
+        {
+            "segment_id": int,
+            "job_id": str,
+            "original_text": str,
+            "translated_text": str,
+            "start": float,
+            "end": float,
+            "source_lang": str,
+            "target_lang": str,
+        }
+    """
+    logger.info(
+        f"[NMT] Translating segment {segment_id} for job {job_id} | "
+        f"text_len={len(text)} | {source_lang}→{target_lang}"
+    )
+    
+    try:
+        actual_src_lang = None if source_lang == "auto" else source_lang
+        
+        translated_text = asyncio.to_thread(
+            translator._translate_item,
+            text,
+            actual_src_lang,
+            target_lang,
+            max_length=512,
+        )
+        
+        if asyncio.iscoroutine(translated_text):
+            translated_text = asyncio.run(translated_text)
+        
+        result = {
+            "segment_id": segment_id,
+            "job_id": job_id,
+            "original_text": text,
+            "translated_text": translated_text,
+            "start": start,
+            "end": end,
+            "source_lang": source_lang or "auto",
+            "target_lang": target_lang,
+            "status": "completed",
+        }
+        
+        logger.info(
+            f"[NMT] Segment {segment_id} translated for job {job_id} | "
+            f"original_len={len(text)} | translated_len={len(translated_text)}"
+        )
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"[NMT] Failed to translate segment {segment_id} for job {job_id}: {e}")
+        return {
+            "segment_id": segment_id,
+            "job_id": job_id,
+            "original_text": text,
+            "translated_text": text,
+            "start": start,
+            "end": end,
+            "source_lang": source_lang or "auto",
+            "target_lang": target_lang,
+            "status": "failed",
+            "error": str(e),
+        }
+
+

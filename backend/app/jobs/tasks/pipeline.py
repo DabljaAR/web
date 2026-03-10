@@ -36,6 +36,7 @@ def stt_transcribe(
     job_id: str,
     video_id: str,
     language: Optional[str] = None,
+    target_lang: str = "arb_Arab",
 ) -> dict:
     """
     Transcribe the audio track of *video_id*.
@@ -43,6 +44,9 @@ def stt_transcribe(
     Downloads the file from MinIO, runs Whisper via the shared
     ``transcribe_task`` model instance (loaded once per worker), then
     stores the result in the Job row.
+
+    As segments are transcribed, they are immediately dispatched to the
+    NMT queue for parallel translation (chunked processing).
 
     Returns:
         {
@@ -52,13 +56,14 @@ def stt_transcribe(
             "transcript":     str,           # full text
             "segments":       list[dict],    # [{start, end, text}, ...]
             "metadata":       dict,
+            "nmt_tasks_submitted": int,      # number of NMT tasks dispatched
         }
     """
     from app.media.storage import S3StorageService, get_storage_service
-    # Import the task instance — its base IS WhisperModelManager,
-    # so calling .transcribe() reuses the single model loaded in this worker.
-    from app.stt.models import transcribe_task as whisper
+    from app.stt.models import WhisperModelManager
+    from app.jobs.tasks.nmt import nmt_translate_segment
 
+    whisper = WhisperModelManager()
     storage = get_storage_service()
 
     # ── 1. Mark PROCESSING + record Celery task id ───────────────────────────
@@ -113,39 +118,101 @@ def stt_transcribe(
         self.update_progress(job_id, 25.0)
 
         # ── 4. Transcribe using the shared WhisperModelManager instance ──────
-        # whisper IS the transcribe_task instance whose base=WhisperModelManager,
-        # so whisper.transcribe() calls WhisperModelManager.transcribe() and the
-        # model is lazy-loaded once, then reused for every subsequent task call.
+        # Whisper yields segments progressively, so we dispatch each segment
+        # to NMT queue as soon as it's available (chunked processing)
+        import time
+        structured_segments = []
+        nmt_tasks_submitted = 0
+        transcript_parts = []
+
         try:
-            result: dict = whisper.transcribe(str(local_path), language=language)
+            start_time = time.time()
+            segments_generator, info = whisper.model.transcribe(
+                str(local_path),
+                language=language,
+                vad_filter=True,
+                vad_parameters={"min_silence_duration_ms": 50},
+            )
+
+            if info.duration > 3600:
+                raise ValueError(f"Audio too long: {info.duration:.0f}s (max 3600s)")
+
+            logger.info(f"[STT] Starting transcription | duration={info.duration:.1f}s | job={job_id}")
+
+            for seg in segments_generator:
+                segment_dict = {
+                    "start": round(seg.start, 2),
+                    "end": round(seg.end, 2),
+                    "text": " ".join(seg.text.split()),
+                }
+                structured_segments.append(segment_dict)
+                transcript_parts.append(segment_dict["text"])
+
+                if segment_dict["text"].strip():
+                    nmt_translate_segment.apply_async(
+                        kwargs={
+                            "segment_id": len(structured_segments) - 1,
+                            "job_id": job_id,
+                            "text": segment_dict["text"],
+                            "start": segment_dict["start"],
+                            "end": segment_dict["end"],
+                            "source_lang": language,
+                            "target_lang": target_lang,
+                        },
+                        queue="ai_nmt"
+                    )
+                    nmt_tasks_submitted += 1
+                    logger.debug(f"[STT] Dispatched segment {len(structured_segments)-1} to NMT | job={job_id}")
+
+                self.update_progress(job_id, 25.0 + (60.0 * len(structured_segments) / max(info.duration, 1)))
+
+            processing_time = time.time() - start_time
+            full_transcript = " ".join(transcript_parts)
+
+            result = {
+                "transcript": full_transcript,
+                "segments": structured_segments,
+                "metadata": {
+                    "language": info.language,
+                    "duration": round(info.duration, 2),
+                    "model_size": whisper.model_size,
+                    "device": whisper.device,
+                    "compute_type": whisper.compute_type,
+                    "processing_time": round(processing_time, 2),
+                    "segment_count": len(structured_segments),
+                },
+            }
+
         except Exception as exc:
             logger.error("[STT pipeline] transcription error job=%s: %s", job_id, exc)
             raise self.retry(exc=exc)
 
-    self.update_progress(job_id, 90.0)
+        self.update_progress(job_id, 90.0)
 
-    # ── 5. Persist output_data — on_success hook will set COMPLETED ──────────
-    output = {
-        "job_id":         job_id,
-        "video_id":       video_id,
-        "transcript_key": file_key,   # the source audio key — unchanged
-        "transcript":     result["transcript"],
-        "segments":       result["segments"],
-        "metadata":       result["metadata"],
-    }
+        # ── 5. Persist output_data — on_success hook will set COMPLETED ──────────
+        output = {
+            "job_id":         job_id,
+            "video_id":       video_id,
+            "transcript_key": file_key,
+            "transcript":     result["transcript"],
+            "segments":       result["segments"],
+            "metadata":       result["metadata"],
+            "nmt_tasks_submitted": nmt_tasks_submitted,
+        }
 
-    self._run_sync(
-        self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
-    )
+        self._run_sync(
+            self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
+        )
 
-    logger.info(
-        "[STT pipeline] job=%s done | duration=%.1fs | segments=%d",
-        job_id,
-        result["metadata"].get("duration", 0),
-        result["metadata"].get("segment_count", 0),
-    )
+        logger.info(
+            "[STT pipeline] job=%s done | duration=%.1fs | segments=%d | nmt_tasks=%d",
+            job_id,
+            result["metadata"].get("duration", 0),
+            result["metadata"].get("segment_count", 0),
+            nmt_tasks_submitted,
+        )
 
-    return output
+        return output
 
 
 # ===========================================================================
