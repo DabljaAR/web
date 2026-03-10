@@ -379,17 +379,20 @@ def _run_stt_job(
     job_id: str,
     file_key: str,
     language: Optional[str],
+    target_lang: str = "arb_Arab",
 ) -> None:
     """
     Fully synchronous pipeline:
       - DB via psycopg2 + NullPool (no asyncpg, no event loop issues)
       - MinIO download via isolated asyncio.run() (no shared loop state)
       - Whisper blocking call directly (no executor needed in sync context)
+      - After STT completes, dispatches each segment to NMT queue for translation
     """
     import tempfile
     from app.jobs.models import Job, JobStatus
     from app.media.models import Video 
     from app.media.storage import get_storage_service
+    from app.jobs.tasks.nmt import nmt_translate_segment
 
     storage = get_storage_service()
     engine, SessionLocal = _make_celery_db()
@@ -425,7 +428,30 @@ def _run_stt_job(
                 # 3. Transcribe — direct blocking call (sync worker context)
                 result = task.transcribe(str(local_path), language=language)
 
-            # 4. COMPLETED
+            # 4. Dispatch segments to NMT queue for parallel translation
+            segments = result.get("segments", [])
+            nmt_tasks_submitted = 0
+            
+            if segments:
+                logger.info(f"[STT] Dispatching {len(segments)} segments to NMT queue for job {job_id}")
+                for idx, segment in enumerate(segments):
+                    nmt_translate_segment.apply_async(
+                        kwargs={
+                            "segment_id": idx,
+                            "job_id": job_id,
+                            "text": segment.get("text", ""),
+                            "start": segment.get("start", 0.0),
+                            "end": segment.get("end", 0.0),
+                            "source_lang": language,
+                            "target_lang": target_lang,
+                        },
+                        queue="ai_nmt"
+                    )
+                    nmt_tasks_submitted += 1
+            
+            result["nmt_tasks_submitted"] = nmt_tasks_submitted
+
+            # 5. COMPLETED
             job.status       = JobStatus.COMPLETED
             job.progress     = 100.0
             job.output_data  = result
@@ -436,7 +462,8 @@ def _run_stt_job(
             logger.info(
                 f"[STT] Job {job_id} completed | "
                 f"duration={result['metadata'].get('duration')}s | "
-                f"time={result['metadata'].get('processing_time')}s"
+                f"time={result['metadata'].get('processing_time')}s | "
+                f"segments={len(segments)} | nmt_tasks={nmt_tasks_submitted}"
             )
 
         except Exception as exc:
@@ -454,7 +481,7 @@ def _run_stt_job(
 @celery_app.task(
     bind=True,
     base=WhisperModelManager,            # self IS the WhisperModelManager
-    name="app.jobs.tasks.stt.transcribe",
+    name="app.jobs.tasks.pipeline.stt_transcribe",
     queue="ai_stt",
     max_retries=3,
     default_retry_delay=30,
@@ -465,13 +492,15 @@ def transcribe_task(
     job_id: str,
     file_key: str,
     language: Optional[str] = None,
+    target_lang: str = "arb_Arab",
 ) -> None:
     """
     Celery STT task — fully synchronous.
     `self` is the WhisperModelManager; model loads once, reused every call.
+    After transcription, dispatches each segment to NMT queue for translation.
     """
-    logger.info(f"[STT] Task received | job_id={job_id} | file_key={file_key}")
+    logger.info(f"[STT] Task received | job_id={job_id} | file_key={file_key} | target_lang={target_lang}")
     try:
-        _run_stt_job(self, job_id, file_key, language)
+        _run_stt_job(self, job_id, file_key, language, target_lang)
     except Exception as exc:
         raise self.retry(exc=exc)

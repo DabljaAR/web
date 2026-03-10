@@ -112,3 +112,10 @@ venv.bak/
 
 
 ../frontend/package-lock.json
+
+
+GEMINI.md
+AGENTS.md
+logs
+start_dev.sh
+stop_dev.sh

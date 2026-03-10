@@ -107,6 +107,7 @@ class TranscriptionService:
         user_id: int,
         language: Optional[str] = None,
         video_id: Optional[str] = None,
+        target_lang: str = "arb_Arab",
     ) -> Job:
         """
         Create a Job record and dispatch the Celery STT task.
@@ -120,6 +121,7 @@ class TranscriptionService:
             video_id:  Optional — link the job to a Video DB record.
                        Pass it when the file came from the media upload flow.
                        Omit it when referencing a MinIO key directly.
+            target_lang: Target language for NMT translation (default: arb_Arab)
 
         Returns:
             The newly created Job ORM instance.
@@ -148,8 +150,9 @@ class TranscriptionService:
             status=JobStatus.QUEUED,
             progress=0.0,
             input_data={
-                "file_key": file_key,
+                "video_id": video_id,
                 "language": language,
+                "target_lang": target_lang,
             },
             retry_count=0,
             max_retries=3,
@@ -161,11 +164,26 @@ class TranscriptionService:
         await self.db.refresh(job)
 
         # 2. Dispatch Celery task
-        from app.stt.models import transcribe_task  # task lives in stt/models.py
+        from app.jobs.tasks.pipeline import stt_transcribe as transcribe_task
         celery_result = transcribe_task.apply_async(
             kwargs={
                 "job_id": job.id,
-                "file_key": file_key,
+                "video_id": video_id,
+                "language": language,
+                "target_lang": target_lang,
+            },
+            task_id=job.id,
+        )
+        self.db.add(job)
+        await self.db.commit()
+        await self.db.refresh(job)
+
+        # 2. Dispatch Celery task
+        from app.jobs.tasks.pipeline import stt_transcribe as transcribe_task
+        celery_result = transcribe_task.apply_async(
+            kwargs={
+                "job_id": job.id,
+                "video_id": video_id,
                 "language": language,
             },
             task_id=job.id,

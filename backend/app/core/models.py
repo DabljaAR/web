@@ -14,6 +14,7 @@ from app.shared.enums import (
     languageEnum,
     SubscriptionStatusEnum,
 )
+from app.media.models import Video
 
 class Role(Base):
     __tablename__ = "roles"
