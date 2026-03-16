@@ -16,8 +16,11 @@ const OriginalVideos = () => {
         status: 'all',
         domain: 'all',
         dateRange: 'last30Days',
-        sortBy: 'dateNewest'
+        sortBy: 'dateNewest',
+        mediaType: 'all'
     });
+
+    const [activeMediaTab, setActiveMediaTab] = useState('all');
 
     const [pagination, setPagination] = useState({
         page: 1,
@@ -105,7 +108,7 @@ const OriginalVideos = () => {
                     sortBy: filters.sortBy,
                     dateRange: filters.dateRange,
                     status: filters.status,
-                    mediaType: 'VIDEO'
+                    mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
                 });
 
                 const videos = Array.isArray(data) ? data : data.items || [];
@@ -134,7 +137,7 @@ const OriginalVideos = () => {
                     createdAt: video.created_at,
                     url: video.url,
                     audioUrl: video.audio_url,
-                    mediaType: video.media_type
+                    mediaType: video.media_type || (activeMediaTab !== 'all' ? activeMediaTab.toUpperCase() : 'VIDEO')
                 }));
 
                 setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
@@ -181,7 +184,7 @@ const OriginalVideos = () => {
                             sortBy: filters.sortBy,
                             dateRange: filters.dateRange,
                             status: filters.status,
-                            mediaType: 'VIDEO'
+                            mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
                         });
 
                         const videos = Array.isArray(data) ? data : data.items || [];
@@ -198,7 +201,7 @@ const OriginalVideos = () => {
                             createdAt: video.created_at,
                             url: video.url,
                             audioUrl: video.audio_url,
-                            mediaType: video.media_type
+                            mediaType: video.media_type || (activeMediaTab !== 'all' ? activeMediaTab.toUpperCase() : 'VIDEO')
                         }));
 
                         setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
@@ -243,8 +246,15 @@ const OriginalVideos = () => {
             status: 'all',
             domain: 'all',
             dateRange: 'last30Days',
-            sortBy: 'dateNewest'
+            sortBy: 'dateNewest',
+            mediaType: 'all'
         });
+        setActiveMediaTab('all');
+        setPagination(prev => ({ ...prev, page: 1 }));
+    };
+
+    const handleMediaTabChange = (tab) => {
+        setActiveMediaTab(tab);
         setPagination(prev => ({ ...prev, page: 1 }));
     };
 
@@ -371,7 +381,7 @@ const OriginalVideos = () => {
                     sortBy: filters.sortBy,
                     dateRange: filters.dateRange,
                     status: filters.status,
-                    mediaType: 'VIDEO'
+                    mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
                 });
                 const videos = Array.isArray(data) ? data : data.items || [];
                 const mappedItems = videos.map(video => ({
@@ -394,7 +404,7 @@ const OriginalVideos = () => {
                     createdAt: video.created_at,
                     url: video.url,
                     audioUrl: video.audio_url,
-                    mediaType: video.media_type
+                    mediaType: video.media_type || (activeMediaTab !== 'all' ? activeMediaTab.toUpperCase() : 'VIDEO')
                 }));
                 setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
                 setPagination(prev => ({
@@ -480,6 +490,33 @@ const OriginalVideos = () => {
                     </button>
                 </div>
 
+                <div className="tabs" style={{ marginBottom: '24px' }}>
+                    <button
+                        className={`tab ${activeMediaTab === 'all' ? 'active' : ''}`}
+                        onClick={() => handleMediaTabChange('all')}
+                    >
+                        {t('originalVideos.allFiles')}
+                    </button>
+                    <button
+                        className={`tab ${activeMediaTab === 'video' ? 'active' : ''}`}
+                        onClick={() => handleMediaTabChange('video')}
+                    >
+                        {t('originalVideos.video')}
+                    </button>
+                    <button
+                        className={`tab ${activeMediaTab === 'audio' ? 'active' : ''}`}
+                        onClick={() => handleMediaTabChange('audio')}
+                    >
+                        {t('originalVideos.audio')}
+                    </button>
+                    <button
+                        className={`tab ${activeMediaTab === 'text' ? 'active' : ''}`}
+                        onClick={() => handleMediaTabChange('text')}
+                    >
+                        {t('originalVideos.text')}
+                    </button>
+                </div>
+
                 {showUploadSection && (
                     <div className="card upload-section" style={{ marginBottom: '32px', animation: 'slideDown 0.3s ease-out' }}>
                         <div className="upload-container">
@@ -494,7 +531,10 @@ const OriginalVideos = () => {
                                     type="file"
                                     ref={fileInputRef}
                                     onChange={handleFileChange}
-                                    accept="video/*"
+                                    accept={activeMediaTab === 'video' ? 'video/*' :
+                                        activeMediaTab === 'audio' ? 'audio/*' :
+                                            activeMediaTab === 'text' ? '.txt,text/plain' :
+                                                'video/*,audio/*,.txt,text/plain'}
                                     style={{ display: 'none' }}
                                 />
                                 <div className="upload-icon">📤</div>
@@ -658,7 +698,8 @@ const OriginalVideos = () => {
                                         {item.thumbnail ? (
                                             <img src={item.thumbnail} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px' }} />
                                         ) : (
-                                            '📹'
+                                            item.mediaType === 'AUDIO' ? '🎵' :
+                                                item.mediaType === 'TEXT' ? '📄' : '🎬'
                                         )}
                                     </div>
                                     <div className="item-details">
