@@ -538,3 +538,41 @@ select.filter-select:focus {
   }
 }
 
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+[data-theme="dark"] .tabs {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.tab {
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: var(--text-light);
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-bottom: -2px;
+  font-family: 'Inter', sans-serif;
+}
+
+[dir="rtl"] .tab {
+  font-family: 'Cairo', sans-serif;
+}
+
+.tab:hover {
+  color: var(--accent-blue);
+}
+
+.tab.active {
+  color: var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+}

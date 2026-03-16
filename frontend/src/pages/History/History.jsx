@@ -14,8 +14,11 @@ const History = () => {
     status: 'all',
     domain: 'all',
     dateRange: 'last30Days',
-    sortBy: 'dateNewest'
+    sortBy: 'dateNewest',
+    mediaType: 'all'
   });
+
+  const [activeMediaTab, setActiveMediaTab] = useState('all');
 
   const [pagination, setPagination] = useState({
     page: 1,
@@ -97,7 +100,8 @@ const History = () => {
           search: debouncedSearch,
           sortBy: filters.sortBy,
           dateRange: filters.dateRange,
-          status: filters.status
+          status: filters.status,
+          mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
         });
 
         const videos = Array.isArray(data) ? data : data.items || [];
@@ -172,7 +176,8 @@ const History = () => {
               search: debouncedSearch,
               sortBy: filters.sortBy,
               dateRange: filters.dateRange,
-              status: filters.status
+              status: filters.status,
+              mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
             });
 
             const videos = Array.isArray(data) ? data : data.items || [];
@@ -240,8 +245,15 @@ const History = () => {
       status: 'all',
       domain: 'all',
       dateRange: 'last30Days',
-      sortBy: 'dateNewest'
+      sortBy: 'dateNewest',
+      mediaType: 'all'
     });
+    setActiveMediaTab('all');
+    setPagination(prev => ({ ...prev, page: 1 }));
+  };
+
+  const handleMediaTabChange = (tab) => {
+    setActiveMediaTab(tab);
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
@@ -298,7 +310,8 @@ const History = () => {
           search: debouncedSearch,
           sortBy: filters.sortBy,
           dateRange: filters.dateRange,
-          status: filters.status
+          status: filters.status,
+          mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
         });
         const videos = Array.isArray(data) ? data : data.items || [];
         const total = data.total || videos.length;
@@ -430,6 +443,33 @@ const History = () => {
           <h1 className="page-title">{t('history.title')}</h1>
         </div>
 
+        <div className="tabs" style={{ marginBottom: '24px' }}>
+          <button
+            className={`tab ${activeMediaTab === 'all' ? 'active' : ''}`}
+            onClick={() => handleMediaTabChange('all')}
+          >
+            {t('originalVideos.allFiles')}
+          </button>
+          <button
+            className={`tab ${activeMediaTab === 'video' ? 'active' : ''}`}
+            onClick={() => handleMediaTabChange('video')}
+          >
+            {t('originalVideos.video')}
+          </button>
+          <button
+            className={`tab ${activeMediaTab === 'audio' ? 'active' : ''}`}
+            onClick={() => handleMediaTabChange('audio')}
+          >
+            {t('originalVideos.audio')}
+          </button>
+          <button
+            className={`tab ${activeMediaTab === 'text' ? 'active' : ''}`}
+            onClick={() => handleMediaTabChange('text')}
+          >
+            {t('originalVideos.text')}
+          </button>
+        </div>
+
         {/* Filter Section */}
         <div className="filter-section">
           <h3 className="filter-title">{t('history.filterSearch')}</h3>
@@ -553,7 +593,8 @@ const History = () => {
                     {item.thumbnail ? (
                       <img src={item.thumbnail} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px' }} />
                     ) : (
-                      '📹'
+                      item.mediaType === 'AUDIO' ? '🎵' :
+                        item.mediaType === 'TEXT' ? '📄' : '🎬'
                     )}
                   </div>
                   <div className="item-details">

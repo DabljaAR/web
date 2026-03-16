@@ -157,7 +157,7 @@ const Dashboard = () => {
   const [uploadError, setUploadError] = useState(null);
 
   const [formData, setFormData] = useState({
-    outputType: 'both',
+    outputType: 'fullDubbing',
     domain: 'general',
     voice: 'male1',
     translationStyle: 'neutral',
@@ -329,6 +329,12 @@ const Dashboard = () => {
         const uploadFormData = new FormData();
         // Append user ID or handle in backend via token
         uploadFormData.append('file', selectedFile);
+
+        // Append processing options
+        uploadFormData.append('output_type', formData.outputType);
+        uploadFormData.append('domain', formData.domain);
+        uploadFormData.append('voice', formData.voice);
+        uploadFormData.append('translation_style', formData.translationStyle);
 
         let response;
         if (activeTab === 'video') {
@@ -638,39 +644,53 @@ const Dashboard = () => {
               {/* Output Type */}
               <div className="option-group">
                 <label className="option-label">{t('dashboard.outputType')}</label>
-                <div className="radio-group">
-                  <div className="radio-item">
-                    <input
-                      type="radio"
-                      id="dubbing"
-                      name="outputType"
-                      value="dubbing"
-                      checked={formData.outputType === 'dubbing'}
-                      onChange={handleInputChange}
-                    />
-                    <label htmlFor="dubbing">{t('dashboard.dubbingOnly')}</label>
+                <div className="output-options-grid">
+                  {/* Captions Only */}
+                  <div
+                    className={`output-option-card ${formData.outputType === 'captionsOnly' ? 'selected' : ''}`}
+                    onClick={() => setFormData(prev => ({ ...prev, outputType: 'captionsOnly' }))}
+                  >
+                    <div className="output-option-icon">📄</div>
+                    <div className="output-option-info">
+                      <h4>{t('dashboard.captionsOnly')}</h4>
+                      <p>{t('dashboard.captionsOnlyDesc') || "Fast transcription of any audio/video into text in the original language."}</p>
+                    </div>
                   </div>
-                  <div className="radio-item">
-                    <input
-                      type="radio"
-                      id="subtitles"
-                      name="outputType"
-                      value="subtitles"
-                      checked={formData.outputType === 'subtitles'}
-                      onChange={handleInputChange}
-                    />
-                    <label htmlFor="subtitles">{t('dashboard.subtitlesOnly')}</label>
+
+                  {/* Captions & Translation */}
+                  <div
+                    className={`output-option-card ${formData.outputType === 'captionsAndTranslation' ? 'selected' : ''}`}
+                    onClick={() => setFormData(prev => ({ ...prev, outputType: 'captionsAndTranslation' }))}
+                  >
+                    <div className="output-option-icon">🌍</div>
+                    <div className="output-option-info">
+                      <h4>{t('dashboard.captionsAndTranslation')}</h4>
+                      <p>{t('dashboard.captionsAndTranslationDesc') || "Translate transcribed content into high-quality Arabic text/subtitles."}</p>
+                    </div>
                   </div>
-                  <div className="radio-item">
-                    <input
-                      type="radio"
-                      id="both"
-                      name="outputType"
-                      value="both"
-                      checked={formData.outputType === 'both'}
-                      onChange={handleInputChange}
-                    />
-                    <label htmlFor="both">{t('dashboard.both')}</label>
+
+                  {/* Translation & TTS */}
+                  <div
+                    className={`output-option-card ${formData.outputType === 'translationAndTTS' ? 'selected' : ''}`}
+                    onClick={() => setFormData(prev => ({ ...prev, outputType: 'translationAndTTS' }))}
+                  >
+                    <div className="output-option-icon">🔊</div>
+                    <div className="output-option-info">
+                      <h4>{t('dashboard.translationAndTTS')}</h4>
+                      <p>{t('dashboard.translationAndTTSDesc') || "Generate natural Arabic speech audio from the translated content."}</p>
+                    </div>
+                  </div>
+
+                  {/* Full Dubbing */}
+                  <div
+                    className={`output-option-card ${formData.outputType === 'fullDubbing' ? 'selected' : ''}`}
+                    onClick={() => setFormData(prev => ({ ...prev, outputType: 'fullDubbing' }))}
+                  >
+                    <div className="output-option-icon">🎬</div>
+                    <div className="output-option-info">
+                      <h4>{t('dashboard.fullDubbing')}</h4>
+                      <p>{t('dashboard.fullDubbingDesc') || "A complete package: original video integrated with new Arabic audio and subtitles."}</p>
+                    </div>
                   </div>
                 </div>
               </div>

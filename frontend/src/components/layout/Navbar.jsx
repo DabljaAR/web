@@ -104,7 +104,7 @@ const Navbar = () => {
                   <li><Link to="/" onClick={() => setIsMenuOpen(false)}>{t('nav.home')}</Link></li>
                   <li><Link to="/dashboard" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/dashboard' ? 'active' : ''}>{t('nav.dashboard')}</Link></li>
                   <li><Link to="/history" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/history' ? 'active' : ''}>{t('nav.history')}</Link></li>
-                  <li><Link to="/original-videos" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/original-videos' ? 'active' : ''}>{t('nav.originalVideos')}</Link></li>
+                  <li><Link to="/original-videos" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/original-videos' ? 'active' : ''}>{t('nav.myLibrary')}</Link></li>
                   <li><Link to="/profile" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/profile' ? 'active' : ''}>{t('nav.profile')}</Link></li>
                   <li><Link to="/about" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/about' ? 'active' : ''}>{t('nav.about')}</Link></li>
                   <li>
@@ -273,7 +273,7 @@ const Navbar = () => {
                           e.target.style.backgroundColor = location.pathname === '/original-videos' ? 'rgba(102, 126, 234, 0.1)' : 'transparent';
                         }}
                       >
-                        {t('nav.originalVideos')}
+                        {t('nav.myLibrary')}
                       </Link>
 
                       <Link
