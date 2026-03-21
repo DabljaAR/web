@@ -142,6 +142,7 @@ async def transcribe_async(
     file_key: Optional[str] = Query(default=None, description="MinIO object key, e.g. 'audio/42/uuid.mp3'"),
     video_id: Optional[str] = Query(default=None, description="UUID of an existing Video/Audio DB record"),
     language: Optional[str] = Query(default=None, description="ISO-639-1 code, e.g. 'ar'. None = auto-detect"),
+    target_lang: Optional[str] = Query(default="arb_Arab", description="Target language for NMT translation, e.g. 'arb_Arab'"),
     current_user=Depends(get_current_user),
     svc: TranscriptionService = Depends(get_stt_service),
 ):
@@ -152,10 +153,11 @@ async def transcribe_async(
         )
 
     job: Job = await svc.submit_async_transcription(
-        file_key=file_key or "",   # service resolves key from video_id if blank
+        file_key=file_key or "",
         user_id=current_user.user_id,
         language=language,
         video_id=video_id,
+        target_lang=target_lang,
     )
 
     return AsyncJobResponse(
