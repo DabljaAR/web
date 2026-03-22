@@ -167,7 +167,7 @@ const OriginalVideos = () => {
 
         fetchHistory();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status]);
+    }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab]);
 
     // Polling Effect (Dashboard Style)
     useEffect(() => {
@@ -221,7 +221,7 @@ const OriginalVideos = () => {
         return () => {
             if (intervalId) clearInterval(intervalId);
         };
-    }, [isPolling, pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status]);
+    }, [isPolling, pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab]);
 
 
 

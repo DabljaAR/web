@@ -3,20 +3,21 @@ import uuid
 import logging
 import asyncio
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import UploadFile, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, and_, or_, exists, func, not_
 from app.media.models import Video, VideoStatus, MediaType
 from app.media.storage import get_storage_service, S3StorageService
 from app.media.ffmpeg_service import FFmpegService, MediaProcessingError
 from app.core.db import AsyncSessionLocal
+from app.jobs.models import Job, JobStatus, JobType
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-async def process_video_task(video_id: str, file_path_key: str):
+async def process_video_task(video_id: str, file_path_key: str, options: dict = None):
     """
     Background task logic. It creates its own DB session.
     """
@@ -101,6 +102,37 @@ async def process_video_task(video_id: str, file_path_key: str):
                 video.status = VideoStatus.COMPLETED
                 await db.commit()
                 logger.info(f"Processing completed for {video.media_type} {video_id}")
+
+                # 6. Trigger pipeline if requested
+                if options and video.media_type in [MediaType.VIDEO, MediaType.AUDIO]:
+                    output_type = options.get("output_type", "fullDubbing")
+                    logger.info(f"Triggering pipeline with output_type={output_type} for {video_id}")
+                    
+
+                    # Create the initial STT job
+                    stt_job_id = str(uuid.uuid4())
+                    stt_job = Job(
+                        id=stt_job_id,
+                        video_id=video_id,
+                        user_id=video.user_id,
+                        job_type=JobType.STT_TRANSCRIBE,
+                        status=JobStatus.QUEUED,
+                        input_data={
+                            **options,
+                            "audio_key": audio_key or file_path_key, # Use extracted audio if video
+                            "target_lang": "ar" # Default for now
+                        }
+                    )
+                    db.add(stt_job)
+                    await db.commit()
+                    
+                    # Enqueue the STT task directly
+                    from app.jobs.tasks.pipeline import stt_transcribe
+                    stt_transcribe.delay(
+                        stt_job_id, 
+                        video_id, 
+                        target_lang=stt_job.input_data.get("target_lang", "ar")
+                    )
 
         except Exception as e:
             logger.error(f"Processing failed for video {video_id}: {e}")
@@ -222,7 +254,8 @@ class VideoService:
         self, 
         user_id: int, 
         file: UploadFile, 
-        background_tasks: BackgroundTasks
+        background_tasks: BackgroundTasks,
+        options: dict = None
     ) -> Video:
         # 1. Validation
         if not file.content_type.startswith("video/"):
@@ -251,7 +284,8 @@ class VideoService:
             new_video.url = await self.storage.get_url(new_video.file_path)
 
         # 5. Task
-        background_tasks.add_task(process_video_task, new_video.id, file_path_key)
+        # 5. Task
+        background_tasks.add_task(process_video_task, new_video.id, file_path_key, options=options)
         
         return new_video
 
@@ -259,7 +293,8 @@ class VideoService:
         self, 
         user_id: int, 
         file: UploadFile, 
-        background_tasks: BackgroundTasks
+        background_tasks: BackgroundTasks,
+        options: dict = None
     ) -> Video:
         # 1. Validation
         # Strict check: Must be audio MIME type AND not be a video disguised
@@ -310,7 +345,8 @@ class VideoService:
             new_audio.url = await self.storage.get_url(new_audio.file_path)
 
         # 5. Task
-        background_tasks.add_task(process_video_task, new_audio.id, file_path_key)
+        # 5. Task
+        background_tasks.add_task(process_video_task, new_audio.id, file_path_key, options=options)
         
         return new_audio
 
@@ -387,28 +423,88 @@ class VideoService:
         
         return new_video
 
+    async def reprocess_existing_media(self, user_id: int, video_id: str, options: dict | None = None):
+        """Create a fresh STT pipeline job for an existing uploaded media file."""
+
+        media = await self.db.get(Video, video_id)
+        if not media:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        if media.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to process this media")
+
+        if media.media_type not in [MediaType.VIDEO, MediaType.AUDIO]:
+            raise HTTPException(status_code=400, detail="Only video/audio can be reprocessed")
+
+        selected_options = options or {}
+        input_options = {
+            "output_type": selected_options.get("output_type", "fullDubbing"),
+            "domain": selected_options.get("domain", "general"),
+            "voice": selected_options.get("voice", "male1"),
+            "translation_style": selected_options.get("translation_style", "neutral"),
+            "target_lang": "ar",
+            "audio_key": media.audio_path or media.file_path,
+        }
+
+        stt_job = Job(
+            id=str(uuid.uuid4()),
+            video_id=media.id,
+            user_id=media.user_id,
+            job_type=JobType.STT_TRANSCRIBE,
+            status=JobStatus.QUEUED,
+            input_data=input_options,
+        )
+        self.db.add(stt_job)
+        await self.db.commit()
+        await self.db.refresh(stt_job)
+ 
+        # Enqueue the STT task directly
+        from app.jobs.tasks.pipeline import stt_transcribe
+        stt_transcribe.delay(
+            stt_job.id, 
+            media.id, 
+            target_lang=input_options["target_lang"]
+        )
+
+        return stt_job
+
 
     async def get_user_videos(
-        self, 
-        user_id: int, 
-        page: int = 1, 
-        limit: int = 10, 
+        self,
+        user_id: int,
+        page: int = 1,
+        limit: int = 10,
         search: Optional[str] = None,
         sort_by: str = "date-desc",
         date_range: str = "allTime",
         status: Optional[str] = None,
-        media_type: Optional[str] = None
-    ) -> dict:
-        from sqlalchemy import func, or_
-        from datetime import datetime, timedelta
-        from app.media.models import VideoStatus
-        
-        # Base query
+        media_type: Optional[str] = None,
+    ):
         query = select(Video).where(Video.user_id == user_id)
 
         # Status Filter
         if status and status != 'all':
-            query = query.where(Video.status == status.upper())
+            requested_status = status.upper()
+
+            active_statuses = [JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.RETRYING]
+            active_job_exists = exists(
+                select(Job.id).where(
+                    and_(
+                        Job.video_id == Video.id,
+                        Job.status.in_(active_statuses)
+                    )
+                )
+            )
+
+            if requested_status in ['PROCESSING', 'PENDING', 'QUEUED', 'RETRYING']:
+                query = query.where(
+                    or_(
+                        Video.status.in_([VideoStatus.PENDING, VideoStatus.PROCESSING]),
+                        active_job_exists
+                    )
+                )
+            else:
+                query = query.where(Video.status == requested_status)
         
         # Media Type Filter
         if media_type and media_type != 'all':
@@ -496,6 +592,19 @@ class VideoService:
         
         result = await self.db.execute(query)
         videos = result.scalars().all()
+
+        # Fetch all jobs for the current page videos once, then enrich each row.
+        jobs_by_video = {}
+        video_ids = [v.id for v in videos]
+        if video_ids:
+            jobs_result = await self.db.execute(
+                select(Job)
+                .where(Job.video_id.in_(video_ids))
+                .order_by(Job.created_at.desc())
+            )
+            all_jobs = jobs_result.scalars().all()
+            for job in all_jobs:
+                jobs_by_video.setdefault(job.video_id, []).append(job)
         
         # Process URLs (same as before)
         for video in videos:
@@ -518,6 +627,44 @@ class VideoService:
                     video.audio_url = await self.storage.get_url(video.audio_path, filename=audio_name)
                  except Exception as e:
                     print(f"Error fetching audio url: {e}")
+
+             # Enrich with job-based fields (for history processing state + text preview)
+             page_jobs = jobs_by_video.get(video.id, [])
+             active_jobs = [j for j in page_jobs if j.status in [JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.RETRYING]]
+             completed_jobs = [j for j in page_jobs if j.status == JobStatus.COMPLETED]
+
+             video.has_active_job = len(active_jobs) > 0
+             if active_jobs:
+                 newest_active = active_jobs[0]
+                 video.active_job_status = newest_active.status.value
+                 video.active_job_progress = max((j.progress or 0.0) for j in active_jobs)
+             else:
+                 video.active_job_status = None
+                 video.active_job_progress = 0.0
+
+             transcript_url = None
+             translation_url = None
+             for job in completed_jobs:
+                 if not job.output_data:
+                     continue
+
+                 if job.job_type == JobType.STT_TRANSCRIBE:
+                     if isinstance(job.output_data.get("segments"), list) and job.output_data.get("segments"):
+                         if not transcript_url:
+                             transcript_url = f"/jobs/{job.id}/preview?kind=transcript"
+                         # If this STT job also has translation data, use it for translation_url
+                         if not translation_url and (job.output_data.get("translated_transcript") or any(s.get("translated_text") for s in job.output_data.get("segments", []))):
+                             translation_url = f"/jobs/{job.id}/preview?kind=translation"
+                 
+                 if not translation_url and job.job_type == JobType.NMT_TRANSLATE:
+                     if isinstance(job.output_data.get("segments"), list) and job.output_data.get("segments"):
+                         translation_url = f"/jobs/{job.id}/preview?kind=translation"
+
+                 if transcript_url and translation_url:
+                     break
+
+             video.transcript_url = transcript_url
+             video.translation_url = translation_url
                  
         pages = (total + limit - 1) // limit if limit > 0 else 0
         
@@ -533,49 +680,115 @@ class VideoService:
         return response_data
 
     async def get_dashboard_jobs(self, user_id: int) -> dict:
-        from app.media.models import VideoStatus
 
-        # Fetch all active (pending/processing)
-        query_active = select(Video).where(
+        # 1. Fetch active media processing (Videos marked PENDING/PROCESSING)
+        query_active_videos = select(Video).where(
             Video.user_id == user_id,
             Video.status.in_([VideoStatus.PENDING, VideoStatus.PROCESSING])
         ).order_by(Video.created_at.desc())
         
-        result_active = await self.db.execute(query_active)
-        active_videos = result_active.scalars().all()
+        result_active_videos = await self.db.execute(query_active_videos)
+        active_videos = result_active_videos.scalars().all()
+
+        # 2. Fetch active background Jobs (STT, NMT, TTS, etc.)
+        query_active_jobs = select(Job).where(
+            Job.user_id == user_id,
+            Job.status.in_([JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.RETRYING])
+        ).order_by(Job.created_at.desc())
         
-        # Fetch recent completed/failed (limit 10)
-        query_recent = select(Video).where(
+        result_active_jobs = await self.db.execute(query_active_jobs)
+        active_jobs = result_active_jobs.scalars().all()
+        
+        # Merge them for the "Processing" UI
+        # We wrap them in a consistent format
+        active_items = []
+        for v in active_videos:
+             active_items.append({
+                 "id": v.id,
+                 "video_id": v.id,
+                 "name": v.title or v.original_filename,
+                 "status": v.status,
+                 "type": "MEDIA_PROCESS",
+                 "progress": 0.0,
+                 "created_at": v.created_at
+             })
+        
+        for j in active_jobs:
+             # Check if we already have this video as processing (Media Process is often followed by Jobs)
+             # but we want to show everything.
+             active_items.append({
+                 "id": j.id,
+                 "video_id": j.video_id,
+                 "name": f"{j.job_type.value}: {j.id[:8]}", # Simple label
+                 "status": j.status,
+                 "type": j.job_type,
+                 "progress": j.progress,
+                 "created_at": j.created_at
+             })
+
+        # Sort combined active items
+        active_items.sort(key=lambda x: x["created_at"], reverse=True)
+
+        # 3. Fetch recent completed items (Videos)
+        query_recent_videos = select(Video).where(
              Video.user_id == user_id,
              Video.status.in_([VideoStatus.COMPLETED, VideoStatus.FAILED])
         ).order_by(Video.created_at.desc()).limit(10)
         
-        result_recent = await self.db.execute(query_recent)
-        recent_videos = result_recent.scalars().all()
+        result_recent_videos = await self.db.execute(query_recent_videos)
+        recent_videos = result_recent_videos.scalars().all()
         
-        # Process URLs helper
-        async def process_video_urls(video):
-             if video.file_path:
-                 video.url = await self.storage.get_url(video.file_path, filename=video.original_filename)
-             if video.thumbnail_path:
-                 video.thumbnail_url = await self.storage.get_url(video.thumbnail_path)
-             if video.audio_path:
-                 audio_name = video.original_filename
-                 if audio_name:
-                     base_name = os.path.splitext(audio_name)[0]
-                     audio_name = f"{base_name}.mp3"
-                 else:
-                     audio_name = f"{video.title}.mp3"
-                 video.audio_url = await self.storage.get_url(video.audio_path, filename=audio_name)
-
-        for v in active_videos:
-            await process_video_urls(v)
+        # 4. For each recent video, find its completed Jobs (latest first)
+        # to see if we have transcripts or translations.
+        processed_recent = []
         for v in recent_videos:
-            await process_video_urls(v)
+             video_data = {
+                 "id": v.id,
+                 "title": v.title,
+                 "original_filename": v.original_filename,
+                 "status": v.status,
+                 "media_type": v.media_type,
+                 "created_at": v.created_at,
+                 "url": await self.storage.get_url(v.file_path, filename=v.original_filename) if v.file_path else None,
+                 "thumbnail_url": await self.storage.get_url(v.thumbnail_path) if v.thumbnail_path else None,
+                 "audio_url": None
+             }
+
+             if v.audio_path:
+                  audio_name = v.original_filename
+                  if audio_name:
+                      base_name = os.path.splitext(audio_name)[0]
+                      audio_name = f"{base_name}.mp3"
+                  video_data["audio_url"] = await self.storage.get_url(v.audio_path, filename=audio_name)
+
+             # Get jobs for this video
+             j_query = select(Job).where(Job.video_id == v.id).order_by(Job.completed_at.desc())
+             j_result = await self.db.execute(j_query)
+             jobs = j_result.scalars().all()
+             
+             video_data["jobs"] = []
+             for j in jobs:
+                 job_entry = {
+                     "id": j.id,
+                     "type": j.job_type,
+                     "status": j.status,
+                     "completed_at": j.completed_at
+                 }
+                 if j.status == JobStatus.COMPLETED and j.output_data:
+                       if j.job_type == JobType.STT_TRANSCRIBE and j.output_data.get("segments"):
+                           job_entry["transcript_url"] = f"/jobs/{j.id}/preview?kind=transcript"
+                           # If this STT job also has translation data
+                           if j.output_data.get("translated_transcript") or any(s.get("translated_text") for s in j.output_data.get("segments", [])):
+                               job_entry["translation_url"] = f"/jobs/{j.id}/preview?kind=translation"
+                       if j.job_type == JobType.NMT_TRANSLATE and j.output_data.get("segments"):
+                           job_entry["translation_url"] = f"/jobs/{j.id}/preview?kind=translation"
+                 video_data["jobs"].append(job_entry)
+             
+             processed_recent.append(video_data)
             
         return {
-            "active": active_videos,
-            "recent": recent_videos
+            "active": active_items,
+            "recent": processed_recent
         }
 
 
@@ -627,14 +840,11 @@ class VideoService:
             logger.info(f"Attempting to delete video {video_id} from DB")
             await self.db.delete(video)
             await self.db.commit()
-            logger.info(f"Successfully committed deletion of video {video_id} to DB")
         except Exception as e:
             logger.error(f"Error deleting video {video_id} from DB: {e}")
             await self.db.rollback()
             return False
 
-
-        # 4. Cleanup Files after successful DB delete
         storage = self.storage
         
         try:

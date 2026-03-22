@@ -39,6 +39,7 @@ const History = () => {
   // Preview Modal State
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewJob, setPreviewJob] = useState(null);
+  const [comparisonPreview, setComparisonPreview] = useState(null);
 
   // Track deleting items
   const deletingIds = React.useRef(new Set());
@@ -110,11 +111,14 @@ const History = () => {
         const totalCompleted = data.total_completed || 0;
         const totalFailed = data.total_failed || 0;
 
-        const mappedItems = videos.map(video => ({
+        const mappedItems = videos.map(video => {
+          const hasActiveJob = Boolean(video.has_active_job);
+          const computedStatus = hasActiveJob ? 'processing' : video.status.toLowerCase();
+          return {
           id: video.id,
           title: video.title || video.original_filename,
           thumbnail: video.thumbnail_url,
-          status: video.status.toLowerCase(),
+          status: computedStatus,
           domain: video.domain || t('history.domainGeneral') || 'General',
           style: video.style || 'Neutral',
           voice: video.voice || 'Male Voice 1',
@@ -128,11 +132,16 @@ const History = () => {
           error: video.error_message,
 
           createdAt: video.created_at,
-          estCompletion: video.status === 'PROCESSING' ? (t('history.processing') || 'Calculating...') : '',
+          estCompletion: hasActiveJob || video.status === 'PROCESSING' ? (t('history.processing') || 'Calculating...') : '',
           url: video.url,
           audioUrl: video.audio_url,
-          mediaType: video.media_type
-        }));
+          mediaType: video.media_type,
+          transcriptUrl: video.transcript_url,
+          translationUrl: video.translation_url,
+          activeJobStatus: video.active_job_status,
+          activeJobProgress: video.active_job_progress
+        };
+      });
 
         setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
         setPagination(prev => ({
@@ -161,7 +170,7 @@ const History = () => {
 
     fetchHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status]);
+  }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab]);
 
   // Polling Effect (Dashboard Style)
   useEffect(() => {
@@ -181,11 +190,14 @@ const History = () => {
             });
 
             const videos = Array.isArray(data) ? data : data.items || [];
-            const mappedItems = videos.map(video => ({
+            const mappedItems = videos.map(video => {
+              const hasActiveJob = Boolean(video.has_active_job);
+              const computedStatus = hasActiveJob ? 'processing' : video.status.toLowerCase();
+              return {
               id: video.id,
               title: video.title || video.original_filename,
               thumbnail: video.thumbnail_url,
-              status: video.status.toLowerCase(),
+              status: computedStatus,
               duration: formatDuration(video.duration),
               size: formatSize(video.size_bytes),
               processed: formatDate(video.updated_at),
@@ -194,8 +206,13 @@ const History = () => {
               createdAt: video.created_at,
               url: video.url,
               audioUrl: video.audio_url,
-              mediaType: video.media_type
-            }));
+              mediaType: video.media_type,
+              transcriptUrl: video.transcript_url,
+              translationUrl: video.translation_url,
+              activeJobStatus: video.active_job_status,
+              activeJobProgress: video.active_job_progress
+            };
+          });
 
             setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
 
@@ -214,7 +231,27 @@ const History = () => {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [isPolling, pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status]);
+  }, [isPolling, pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab]);
+
+  const handlePreviewTextComparison = (id) => {
+    const item = historyItems.find(i => i.id === id);
+    if (!item || !item.transcriptUrl || !item.translationUrl) {
+      alert(t('dashboard.noPreviewError') || 'No text preview available.');
+      return;
+    }
+
+    setComparisonPreview({
+      id,
+      originalUrl: item.transcriptUrl,
+      translatedUrl: item.translationUrl,
+      title: item.title
+    });
+    setPreviewJob({
+      mediaType: 'TEXT',
+      name: `${item.title} (Original + Translation)`
+    });
+    setPreviewModalOpen(true);
+  };
 
 
 
@@ -662,6 +699,15 @@ const History = () => {
                     <div className="item-actions">
                       {item.status === 'completed' && (
                         <>
+                          {item.transcriptUrl && item.translationUrl && (
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => handlePreviewTextComparison(item.id)}
+                            >
+                              <span>📝</span>
+                              <span>{t('history.preview') || 'Preview'} Text</span>
+                            </button>
+                          )}
                           <div className="action-group" style={{ display: 'flex', gap: '0.5rem' }}>
                             <button
                               className="btn btn-secondary"
@@ -753,8 +799,14 @@ const History = () => {
       {/* Preview Modal */}
       <MediaPreviewModal
         isOpen={previewModalOpen}
-        onClose={() => setPreviewModalOpen(false)}
-        url={previewJob?.url}
+        onClose={() => {
+          setPreviewModalOpen(false);
+          setComparisonPreview(null);
+        }}
+        url={comparisonPreview?.originalUrl || previewJob?.url}
+        secondaryUrl={comparisonPreview?.translatedUrl}
+        secondaryTitle={t('dashboard.previewTranslation') || 'Translation'}
+        primaryTitle={t('dashboard.previewTranscript') || 'Original Transcript'}
         type={previewJob?.mediaType}
         title={previewJob?.name}
       />

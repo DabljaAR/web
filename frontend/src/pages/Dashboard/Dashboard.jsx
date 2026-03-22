@@ -12,7 +12,7 @@ import '../../styles/dashboard.css';
 import '../../styles/dashboard-job-item.css'; // New styles
 
 // Sub-component for Job Item to handle menu state locally
-const JobItem = ({ job, t, onPreview, onDownload, onDelete, onRetry, onDetails, onPreviewAudio, onDownloadAudio }) => {
+const JobItem = ({ job, t, onPreview, onDownload, onDelete, onRetry, onDetails, onPreviewAudio, onDownloadAudio, onPreviewTranscript, onPreviewTranslation }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -108,6 +108,18 @@ const JobItem = ({ job, t, onPreview, onDownload, onDelete, onRetry, onDetails, 
                     </button>
                   </>
                 )}
+                {/* Transcript Option */}
+                {job.transcriptUrl && (
+                  <button className="action-menu-item" onClick={() => { onPreviewTranscript(job.id); setMenuOpen(false); }}>
+                    <span>📄</span> {t('dashboard.previewTranscript') || 'Preview Transcript'}
+                  </button>
+                )}
+                {/* Translation Option */}
+                {job.translationUrl && (
+                  <button className="action-menu-item" onClick={() => { onPreviewTranslation(job.id); setMenuOpen(false); }}>
+                    <span>🌍</span> {t('dashboard.previewTranslation') || 'Preview Translation'}
+                  </button>
+                )}
               </>
             ) : (
               <>
@@ -189,21 +201,31 @@ const Dashboard = () => {
 
       const pending = active.map(v => ({
         id: v.id,
-        name: v.title || v.original_filename,
+        name: v.name,
         status: v.status.toLowerCase(),
-        estTime: 'Processing...'
+        type: v.type,
+        progress: v.progress,
+        estTime: v.progress > 0 ? `${v.progress.toFixed(0)}%` : 'Processing...'
       }));
 
-      const completed = recent.map(v => ({
-        id: v.id,
-        name: v.title || v.original_filename,
-        status: v.status.toLowerCase(),
-        url: v.url,
-        thumbnailUrl: v.thumbnail_url,
-        audioUrl: v.audio_url,
-        mediaType: v.media_type,
-        type: v.status === 'COMPLETED' ? 'success' : 'failed'
-      }));
+      const completed = recent.map(v => {
+        // Find transcript and translation URLs from the jobs array
+        const transcriptUrl = v.jobs?.find(j => j.transcript_url)?.transcript_url;
+        const translationUrl = v.jobs?.find(j => j.translation_url)?.translation_url;
+
+        return {
+          id: v.id,
+          name: v.title || v.original_filename,
+          status: v.status.toLowerCase(),
+          url: v.url,
+          thumbnailUrl: v.thumbnail_url,
+          audioUrl: v.audio_url,
+          transcriptUrl: transcriptUrl,
+          translationUrl: translationUrl,
+          mediaType: v.media_type,
+          type: v.status === 'COMPLETED' ? 'success' : 'failed'
+        };
+      });
 
       // Filter out items that are currently marked for deletion
       const safePending = pending.filter(job => !deletingIds.current.has(job.id));
@@ -294,9 +316,36 @@ const Dashboard = () => {
 
     // library selection
     if (selectedLibraryFile) {
-      alert("Processing library file: " + (selectedLibraryFile.title || selectedLibraryFile.original_filename) + " (Workflow not fully integrated with backend for re-processing existing files yet, but UI is ready)");
-      // For now, if we want to process an existing file, we might need a specific endpoint.
-      // But user just wanted the UI/Model to choose.
+      setIsUploading(true);
+      setUploadError(null);
+
+      try {
+        const payload = {
+          output_type: formData.outputType,
+          domain: formData.domain,
+          voice: formData.voice,
+          translation_style: formData.translationStyle
+        };
+
+        const response = await mediaService.reprocessMedia(selectedLibraryFile.id, payload);
+
+        const newJob = {
+          id: response.id || selectedLibraryFile.id,
+          name: selectedLibraryFile.title || selectedLibraryFile.original_filename,
+          status: (response.status || 'queued').toLowerCase(),
+          estTime: 'Processing...'
+        };
+
+        setProcessingJobs(prev => [newJob, ...prev]);
+        setIsPolling(true);
+        alert(t('dashboard.uploadSuccess') || 'Processing started.');
+      } catch (error) {
+        console.error("Reprocess failed", error);
+        setUploadError("Failed to start processing: " + (error.message || "Unknown error"));
+        alert(t('dashboard.uploadError') || "Failed to start processing. Please try again.");
+      } finally {
+        setIsUploading(false);
+      }
       return;
     }
 
@@ -431,6 +480,31 @@ const Dashboard = () => {
       alert(t('dashboard.noAudioError') || "No audio URL available.");
     }
   };
+  const handlePreviewTranscript = (id) => {
+    const job = recentJobs.find(j => j.id === id);
+    if (job && job.transcriptUrl) {
+      setPreviewJob({
+        ...job,
+        url: job.transcriptUrl,
+        mediaType: 'TEXT',
+        name: `${job.name} (Transcript)`
+      });
+      setPreviewModalOpen(true);
+    }
+  };
+
+  const handlePreviewTranslation = (id) => {
+    const job = recentJobs.find(j => j.id === id);
+    if (job && job.translationUrl) {
+      setPreviewJob({
+        ...job,
+        url: job.translationUrl,
+        mediaType: 'TEXT',
+        name: `${job.name} (Translation)`
+      });
+      setPreviewModalOpen(true);
+    }
+  };
 
   const handleDelete = async (id) => {
     if (window.confirm(t('dashboard.deleteConfirm') || "Are you sure you want to delete this job?")) {
@@ -539,52 +613,60 @@ const Dashboard = () => {
 
           {/* Upload Area Split */}
           {(activeTab === 'video' || activeTab === 'audio' || activeTab === 'text') && !selectedFile && !selectedLibraryFile && (
-            <div className="upload-split-container">
-              {/* Option 1: New Upload */}
-              <div
-                className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
-                onClick={handleFileSelect}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-              >
-                <div className="upload-icon">📤</div>
-                <div className="upload-text">
-                  <h3>{t('dashboard.uploadTitle')}</h3>
-                  <p>{t('dashboard.uploadSubtitle')}</p>
+            <>
+              <div className="upload-split-container">
+                {/* Option 1: New Upload */}
+                <div
+                  className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
+                  onClick={handleFileSelect}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
+                  <div className="upload-icon">📤</div>
+                  <div className="upload-text">
+                    <h3>{t('dashboard.uploadTitle')}</h3>
+                    <p>{t('dashboard.uploadSubtitle')}</p>
+                  </div>
+                  <div className="upload-formats">
+                    <span>{
+                      activeTab === 'video' ? 'Supported: MP4, MOV, AVI' :
+                        activeTab === 'audio' ? 'Supported: MP3, WAV' :
+                          'Supported: TXT'
+                    }</span>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    hidden
+                    accept={
+                      activeTab === 'video' ? 'video/*,.mp4,.mov,.avi,.mkv' :
+                        activeTab === 'audio' ? '.mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a' :
+                          '.txt,text/plain'
+                    }
+                    onChange={handleFileChange}
+                  />
                 </div>
-                <div className="upload-formats">
-                  <span>{
-                    activeTab === 'video' ? 'Supported: MP4, MOV, AVI' :
-                      activeTab === 'audio' ? 'Supported: MP3, WAV' :
-                        'Supported: TXT'
-                  }</span>
+
+                {/* Option 2: Choose Existing */}
+                <div
+                  className="choose-existing-area"
+                  onClick={() => setIsLibraryModalOpen(true)}
+                >
+                  <div className="upload-icon">📚</div>
+                  <div className="upload-text">
+                    <h3>{t('dashboard.chooseExisting')}</h3>
+                    <p>{t('dashboard.chooseExistingSubtitle')}</p>
+                  </div>
                 </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  hidden
-                  accept={
-                    activeTab === 'video' ? 'video/*,.mp4,.mov,.avi,.mkv' :
-                      activeTab === 'audio' ? '.mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a' :
-                        '.txt,text/plain'
-                  }
-                  onChange={handleFileChange}
-                />
               </div>
 
-              {/* Option 2: Choose Existing */}
-              <div
-                className="choose-existing-area"
-                onClick={() => setIsLibraryModalOpen(true)}
-              >
-                <div className="upload-icon">📚</div>
-                <div className="upload-text">
-                  <h3>{t('dashboard.chooseExisting')}</h3>
-                  <p>{t('dashboard.chooseExistingSubtitle')}</p>
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
+                <button className="btn btn-secondary" onClick={handleFileSelect}>
+                  {activeTab === 'video' ? '⬆️ Upload Video' : activeTab === 'audio' ? '⬆️ Upload Audio' : '⬆️ Upload Text'}
+                </button>
               </div>
-            </div>
+            </>
           )}
 
           {/* Selected File Display (For both Upload and Library) */}
@@ -836,6 +918,8 @@ const Dashboard = () => {
                 onDetails={handleDetails}
                 onPreviewAudio={handlePreviewAudio}
                 onDownloadAudio={handleDownloadAudio}
+                onPreviewTranscript={handlePreviewTranscript}
+                onPreviewTranslation={handlePreviewTranslation}
               />
             ))}
           </div>

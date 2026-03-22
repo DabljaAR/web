@@ -98,10 +98,20 @@ class Settings(BaseSettings):
         return self.STT_DEVICE
     
     def get_compute_type(self) -> str:
-        """Get compute type (auto-select based on device)."""
+        """Get compute type (auto-select based on device and capability)."""
         if self.STT_COMPUTE_TYPE == "auto":
             device = self.get_device()
-            return "float16" if device == "cuda" else "int8"
+            if device == "cuda":
+                try:
+                    import torch
+                    major, _ = torch.cuda.get_device_capability()
+                    # Pascal (6.x) and older don't support efficient float16
+                    if major >= 7:
+                        return "float16"
+                    return "int8_float32"
+                except:
+                    return "int8_float32"
+            return "int8"
         return self.STT_COMPUTE_TYPE
     
     @property

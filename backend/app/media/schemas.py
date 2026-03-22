@@ -46,6 +46,11 @@ class VideoResponse(VideoBase):
     url: Optional[str] = None # Added for convenience to return full URL
     thumbnail_url: Optional[str] = None
     audio_url: Optional[str] = None
+    transcript_url: Optional[str] = None
+    translation_url: Optional[str] = None
+    has_active_job: Optional[bool] = None
+    active_job_status: Optional[str] = None
+    active_job_progress: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -59,5 +64,5 @@ class PaginatedVideoResponse(BaseModel):
     total_failed: int
 
 class DashboardResponse(BaseModel):
-    active: List[VideoResponse]
-    recent: List[VideoResponse]
+    active: List[dict]
+    recent: List[dict]

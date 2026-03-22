@@ -1,17 +1,13 @@
-import logging
 import asyncio
-import json
-import os
-import tempfile
+import logging
 from datetime import datetime
 from typing import Any, Optional
+from uuid import uuid4
 
+from app.core.db import AsyncSessionLocal
 from app.jobs.celery_app import celery_app
+from app.jobs.models import Job, JobStatus, JobType
 from app.jobs.tasks.base import BaseJobTask
-from app.jobs.models import JobStatus
-
-# These are the heavy imports we need for the NMT service and storage
-from app.media.storage import get_storage_service
 from app.nmt.service import translator
 
 logger = logging.getLogger(__name__)
@@ -20,125 +16,133 @@ logger = logging.getLogger(__name__)
 @celery_app.task(
     bind=True,
     base=BaseJobTask,
-    name="app.jobs.tasks.pipeline.nmt_translate",  # Using the pipeline name for orchestration
+    name="app.jobs.tasks.nmt.nmt_translate",
     max_retries=3,
     default_retry_delay=60,
     queue="ai_nmt",
+    soft_time_limit=1800,
+    time_limit=2100,
 )
 def nmt_translate(
     self,
-    job_id: str,
-    video_id: str,
-    transcript_key: str,
+    job_id: Any,
+    *,
     source_lang: str = "auto",
-    target_lang: str = "en",
+    target_lang: str = "arb_Arab",
 ) -> dict:
+    """Translate the STT segments for a given NMT Job.
+
+    Fileless + segmented:
+      - Reads STT segments from the parent STT Job.output_data
+      - Writes translated segments to this Job.output_data
+      - Creates the next TTS job row as QUEUED (does not dispatch)
+
+    Notes:
+      - The dispatcher is the only component allowed to enqueue Celery tasks.
+      - This task is invoked with ``job_id`` as the first argument.
     """
-    Translate the transcript produced by ``stt_transcribe``.
-    Supports being called in a Celery chain.
-    """
-    stt_data = None
-    
-    # 1. Handle Celery chain input (if the previous task passed a dict as the first arg)
+    # Compatibility: if someone calls this with a dict (legacy chain), extract job_id.
     if isinstance(job_id, dict):
-        stt_result = job_id
-        job_id = stt_result.get("job_id")
-        video_id = video_id or stt_result.get("video_id")
-        transcript_key = transcript_key or stt_result.get("transcript_key")
-        # Prefer in-memory 'output' passed from STT if available
-        stt_data = stt_result.get("output")
+        job_id = job_id.get("job_id")
 
-    if job_id:
-        self._run_sync(
-            self._patch_job(
-                job_id,
-                JobStatus.PROCESSING,
-                celery_task_id=self.request.id,
-                started_at=datetime.utcnow(),
-            )
+    self._run_sync(
+        self._patch_job(
+            job_id,
+            JobStatus.PROCESSING,
+            celery_task_id=self.request.id,
+            started_at=datetime.utcnow(),
         )
+    )
 
-    async def _do_translation():
-        nonlocal stt_data
-        
-        # 2. If we don't have direct data, download the transcript JSON from storage
-        if not stt_data:
-            if not transcript_key:
-                logger.warning("nmt_translate job=%s video=%s | No transcript_key or data provided, skipping", job_id, video_id)
-                return None
-                
-            storage = get_storage_service()
-            with tempfile.TemporaryDirectory() as tmpdir:
-                local_src = os.path.join(tmpdir, "stt.json")
-                success = await storage.download(transcript_key, local_src)
-                if not success:
-                    raise RuntimeError(f"Failed to download transcript from storage (key: {transcript_key})")
-                
-                with open(local_src, "r", encoding="utf-8") as f:
-                    stt_data = json.load(f)
-        
-        # 3. Run NMT translation
-        actual_src_lang = None if source_lang == "auto" else source_lang
-        logger.info("Starting NMT translation for job=%s source=%s target=%s", job_id, source_lang, target_lang)
-        
-        # Since translator.translate_stt_result is a blocking ML task, offload to thread
-        translated_result = await asyncio.to_thread(
-            translator.translate_stt_result,
-            stt_data,
-            src_lang=actual_src_lang,
-            tgt_lang=target_lang
-        )
-        return translated_result
+    async def _load_context():
+        async with AsyncSessionLocal() as db:
+            job = await db.get(Job, job_id)
+            if not job:
+                raise ValueError(f"NMT job {job_id} not found")
+
+            parent = None
+            if job.parent_job_id:
+                parent = await db.get(Job, job.parent_job_id)
+            return job, parent
+
+    nmt_job, parent_job = self._run_sync(_load_context())
+
+    if not parent_job or not parent_job.output_data:
+        raise ValueError(f"NMT job {job_id} has no parent STT output")
+
+    parent_output = parent_job.output_data or {}
+    stt_segments = parent_output.get("segments") or []
+    stt_meta = parent_output.get("metadata") or {}
+
+    # Determine langs/output_type from this job's input_data if present.
+    input_data = nmt_job.input_data or {}
+    output_type = input_data.get("output_type", "fullDubbing")
+    resolved_source_lang = input_data.get("source_lang", source_lang)
+    resolved_target_lang = input_data.get("target_lang", target_lang)
+
+    # Build a minimal STT result for the translator.
+    stt_data = {
+        "segments": [
+            {
+                "start": seg.get("start"),
+                "end": seg.get("end"),
+                "text": seg.get("text", ""),
+                "original_text": seg.get("text", ""),
+            }
+            for seg in stt_segments
+        ],
+        "metadata": {**stt_meta},
+    }
+
+    actual_src_lang = None if resolved_source_lang == "auto" else resolved_source_lang
 
     try:
-        translated_data = self._run_sync(_do_translation())
-        if translated_data is None:
-             return {"job_id": job_id, "video_id": video_id, "output": None}
-
-        logger.info(
-            "nmt_translate success: job=%s video=%s %s→%s",
-            job_id, video_id, source_lang, target_lang
-        )
-        
-        # 4. Save results to the database and return
-        output = {
-            "job_id":         job_id,
-            "video_id":       video_id,
-            "transcript_key": transcript_key,
-            "transcript":     translated_data.get("transcript"),
-            "segments":       translated_data.get("segments"),
-            "metadata":       translated_data.get("metadata"),
-            "output":         translated_data, # Keeping 'output' for chain consistency
-        }
-
-        if job_id:
-            # We fulfill the 'persist output_data' requirement manually since we won't change _patch_job signature
-            async def _update_output():
-                from app.core.db import AsyncSessionLocal
-                from app.jobs.models import Job
-                async with AsyncSessionLocal() as db:
-                    job = await db.get(Job, job_id)
-                    if job:
-                        job.output_data = output
-                        await db.commit()
-
-            self._run_sync(_update_output())
-            # Still call the official helper for standard state management
-            self._run_sync(
-                self._patch_job(job_id, JobStatus.COMPLETED)
+        translated = self._run_sync(
+            asyncio.to_thread(
+                translator.translate_stt_result,
+                stt_data,
+                src_lang=actual_src_lang,
+                tgt_lang=resolved_target_lang,
             )
+        )
+    except Exception as exc:
+        logger.error("[NMT] translation error job=%s: %s", job_id, exc)
+        raise self.retry(exc=exc)
 
-        return output
-        
-    except Exception as e:
-        logger.error("nmt_translate failed for job %s: %s", job_id, e)
-        # Re-raise so BaseJobTask can handle failure state update
-        raise
+    translated_segments = translated.get("segments") or []
+    output_segments = []
+    for seg in translated_segments:
+        output_segments.append(
+            {
+                "start": seg.get("start"),
+                "end": seg.get("end"),
+                "original_text": seg.get("original_text") or "",
+                "translated_text": seg.get("text") or "",
+            }
+        )
+
+    output = {
+        "job_id": job_id,
+        "video_id": nmt_job.video_id,
+        "source_job_id": parent_job.id,
+        "source_lang": resolved_source_lang,
+        "target_lang": resolved_target_lang,
+        "segments": output_segments,
+        "metadata": {
+            **(translated.get("metadata") or {}),
+            "source_lang": resolved_source_lang,
+            "target_lang": resolved_target_lang,
+        },
+    }
+
+    self._run_sync(self._patch_job(job_id, JobStatus.PROCESSING, output_data=output))
+    self.update_progress(job_id, 95.0)
+
+    return output
 
 
 @celery_app.task(
     bind=True,
-    base=BaseJobTask,
     name="app.jobs.tasks.nmt.translate_segment",
     max_retries=3,
     default_retry_delay=30,
@@ -154,53 +158,20 @@ def nmt_translate_segment(
     source_lang: Optional[str] = None,
     target_lang: str = "arb_Arab",
 ) -> dict:
+    """Helper task to translate a single segment.
+
+    This task is NOT a BaseJobTask, so it DOES NOT mark the entire
+    job as COMPLETED. This prevents status flipping.
     """
-    Translate a single STT segment.
-    
-    This task is dispatched by STT after transcription completes.
-    Each segment is translated independently and in parallel.
-    
-    Args:
-        segment_id: Index of the segment in the original transcript
-        job_id: Parent STT job ID
-        text: Original segment text
-        start: Segment start time in seconds
-        end: Segment end time in seconds
-        source_lang: Source language code (e.g., 'en', 'auto')
-        target_lang: Target language code (e.g., 'arb_Arab')
-    
-    Returns:
-        {
-            "segment_id": int,
-            "job_id": str,
-            "original_text": str,
-            "translated_text": str,
-            "start": float,
-            "end": float,
-            "source_lang": str,
-            "target_lang": str,
-        }
-    """
-    logger.info(
-        f"[NMT] Translating segment {segment_id} for job {job_id} | "
-        f"text_len={len(text)} | {source_lang}→{target_lang}"
-    )
-    
+    actual_src_lang = None if (source_lang in {None, "auto"}) else source_lang
     try:
-        actual_src_lang = None if source_lang == "auto" else source_lang
-        
-        translated_text = asyncio.to_thread(
-            translator._translate_item,
+        translated_text = translator._translate_item(
             text,
             actual_src_lang,
             target_lang,
-            max_length=512,
+            512,
         )
-        
-        if asyncio.iscoroutine(translated_text):
-            translated_text = asyncio.run(translated_text)
-        
-        result = {
+        return {
             "segment_id": segment_id,
             "job_id": job_id,
             "original_text": text,
@@ -211,16 +182,8 @@ def nmt_translate_segment(
             "target_lang": target_lang,
             "status": "completed",
         }
-        
-        logger.info(
-            f"[NMT] Segment {segment_id} translated for job {job_id} | "
-            f"original_len={len(text)} | translated_len={len(translated_text)}"
-        )
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"[NMT] Failed to translate segment {segment_id} for job {job_id}: {e}")
+    except Exception as exc:
+        logger.error("[NMT] segment translate failed seg=%s job=%s: %s", segment_id, job_id, exc)
         return {
             "segment_id": segment_id,
             "job_id": job_id,
@@ -231,7 +194,5 @@ def nmt_translate_segment(
             "source_lang": source_lang or "auto",
             "target_lang": target_lang,
             "status": "failed",
-            "error": str(e),
+            "error": str(exc),
         }
-
-
