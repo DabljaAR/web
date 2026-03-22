@@ -8,9 +8,10 @@ Endpoints:
   PATCH  /api/jobs/{job_id}/progress   — Worker callback to update progress.
 """
 import logging
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user
@@ -34,6 +35,58 @@ router = APIRouter(
 
 def get_job_service(db: AsyncSession = Depends(get_db)) -> JobService:
     return JobService(db)
+
+
+@router.get("/{job_id}/preview", response_class=PlainTextResponse)
+async def preview_job_text(
+    job_id: str,
+    kind: Optional[str] = None,
+    service: JobService = Depends(get_job_service),
+    current_user: User = Depends(get_current_user),
+) -> PlainTextResponse:
+    """Return a text preview for a Job based on segmented output_data.
+
+    This endpoint is intentionally fileless: it reconstructs preview text from
+    the stored segments and does not rely on storage keys.
+    """
+    job = await service.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    if job.user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    output = job.output_data or {}
+    segments = output.get("segments") or []
+    if not isinstance(segments, list) or not segments:
+        return PlainTextResponse("")
+
+    normalized_kind = (kind or "").strip().lower() or None
+    if normalized_kind not in {None, "transcript", "translation"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid kind")
+
+    # Infer kind from segment shape if not provided.
+    if normalized_kind is None:
+        first = segments[0] if segments else None
+        if isinstance(first, dict) and "translated_text" in first:
+            normalized_kind = "translation"
+        else:
+            normalized_kind = "transcript"
+
+    if normalized_kind == "translation":
+        parts = [
+            (seg.get("translated_text") or "").strip()
+            for seg in segments
+            if isinstance(seg, dict)
+        ]
+    else:
+        parts = [
+            (seg.get("text") or "").strip()
+            for seg in segments
+            if isinstance(seg, dict)
+        ]
+
+    text = "\n".join([p for p in parts if p])
+    return PlainTextResponse(text)
 
 
 # ------------------------------------------------------------------

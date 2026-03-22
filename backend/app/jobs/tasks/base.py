@@ -113,6 +113,9 @@ class BaseJobTask(celery.Task):
     def on_failure(self, exc, task_id, args, kwargs, einfo) -> None:
         """Called by Celery when the task raises an unhandled exception."""
         job_id: Optional[str] = args[0] if args else kwargs.get("job_id")
+        if isinstance(job_id, dict):
+            job_id = job_id.get("job_id")
+            
         if not job_id:
             return
         logger.error("Task %s failed for job %s: %s", task_id, job_id, exc)
@@ -128,6 +131,9 @@ class BaseJobTask(celery.Task):
     def on_retry(self, exc, task_id, args, kwargs, einfo) -> None:
         """Called by Celery when the task is about to be retried."""
         job_id: Optional[str] = args[0] if args else kwargs.get("job_id")
+        if isinstance(job_id, dict):
+            job_id = job_id.get("job_id")
+            
         if not job_id:
             return
         logger.warning("Task %s retrying for job %s: %s", task_id, job_id, exc)
@@ -138,6 +144,9 @@ class BaseJobTask(celery.Task):
     def on_success(self, retval, task_id, args, kwargs) -> None:
         """Called by Celery when the task succeeds."""
         job_id: Optional[str] = args[0] if args else kwargs.get("job_id")
+        if isinstance(job_id, dict):
+            job_id = job_id.get("job_id")
+            
         if not job_id:
             return
         logger.info("Task %s succeeded for job %s", task_id, job_id)

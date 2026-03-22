@@ -190,6 +190,105 @@ const api = {
     }
   },
 
+  getText: async (endpoint, options = {}) => {
+    try {
+      const token = getAuthToken();
+      const headers = {
+        ...options.headers,
+      };
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: 'GET',
+        headers,
+        ...options,
+      });
+
+      if (!response.ok) {
+        // If 401 Unauthorized, try to refresh token
+        if (response.status === 401 && getRefreshToken()) {
+          try {
+            const newAccessToken = await refreshAccessToken();
+            headers['Authorization'] = `Bearer ${newAccessToken}`;
+            const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
+              method: 'GET',
+              headers,
+              ...options,
+            });
+
+            if (!retryResponse.ok) {
+              let errorMessage = `API Error: ${retryResponse.statusText}`;
+              try {
+                const errorData = await retryResponse.json();
+                if (errorData.detail) {
+                  if (Array.isArray(errorData.detail)) {
+                    const validationErrors = errorData.detail.map(err => {
+                      const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
+                      return `${field}: ${err.msg}`;
+                    });
+                    errorMessage = validationErrors.join(', ');
+                  } else {
+                    errorMessage = errorData.detail;
+                  }
+                } else if (errorData.message) {
+                  errorMessage = errorData.message;
+                }
+              } catch (e) {
+                // If response is not JSON, use status text
+              }
+              const error = new Error(errorMessage);
+              error.status = retryResponse.status;
+              error.response = retryResponse;
+              throw error;
+            }
+
+            return retryResponse.text();
+          } catch (refreshError) {
+            clearTokens();
+            if (window.location.pathname !== '/login') {
+              window.location.href = '/login';
+            }
+            throw refreshError;
+          }
+        }
+
+        let errorMessage = `API Error: ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          if (errorData.detail) {
+            if (Array.isArray(errorData.detail)) {
+              const validationErrors = errorData.detail.map(err => {
+                const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
+                return `${field}: ${err.msg}`;
+              });
+              errorMessage = validationErrors.join(', ');
+            } else {
+              errorMessage = errorData.detail;
+            }
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          }
+        } catch (e) {
+          // If response is not JSON, use status text
+        }
+        const error = new Error(errorMessage);
+        error.status = response.status;
+        error.response = response;
+        throw error;
+      }
+
+      return response.text();
+    } catch (error) {
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        throw new Error('Something went wrong');
+      }
+      throw error;
+    }
+  },
+
   post: async (endpoint, data, options = {}) => {
     try {
       const token = getAuthToken();

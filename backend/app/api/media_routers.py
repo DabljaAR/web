@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException, status, Query
+from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException, status, Query, Form, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.models import User
@@ -18,44 +18,73 @@ router = APIRouter(
 
 async def get_video_service(db: AsyncSession = Depends(get_db)) -> VideoService:
     return VideoService(db)
-
 @router.post("/upload", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    output_type: str = Form("fullDubbing"),
+    domain: str = Form("general"),
+    voice: str = Form("male1"),
+    translation_style: str = Form("neutral"),
     service: VideoService = Depends(get_video_service),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Upload a video file.
+    Upload a video file with processing options.
     """
-    video = await service.upload_video(current_user.user_id, file, background_tasks)
+    options = {
+        "output_type": output_type,
+        "domain": domain,
+        "voice": voice,
+        "translation_style": translation_style
+    }
+    video = await service.upload_video(current_user.user_id, file, background_tasks, options=options)
     return VideoUploadResponse(id=video.id, status=video.status)
 
 @router.post("/upload/audio", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_audio(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    output_type: str = Form("fullDubbing"),
+    domain: str = Form("general"),
+    voice: str = Form("male1"),
+    translation_style: str = Form("neutral"),
     service: VideoService = Depends(get_video_service),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Upload an audio file.
+    Upload an audio file with processing options.
     """
-    audio = await service.upload_audio(current_user.user_id, file, background_tasks)
+    options = {
+        "output_type": output_type,
+        "domain": domain,
+        "voice": voice,
+        "translation_style": translation_style
+    }
+    audio = await service.upload_audio(current_user.user_id, file, background_tasks, options=options)
     return VideoUploadResponse(id=audio.id, status=audio.status)
 
 @router.post("/upload/text", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_text(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    output_type: str = Form("fullDubbing"),
+    domain: str = Form("general"),
+    voice: str = Form("male1"),
+    translation_style: str = Form("neutral"),
     service: VideoService = Depends(get_video_service),
     current_user: User = Depends(get_current_user)
 ):
     """
-    Upload a text file.
+    Upload a text file with processing options.
     """
-    text = await service.upload_text(current_user.user_id, file, background_tasks)
+    options = {
+        "output_type": output_type,
+        "domain": domain,
+        "voice": voice,
+        "translation_style": translation_style
+    }
+    text = await service.upload_text(current_user.user_id, file, background_tasks, options=options)
     return VideoUploadResponse(id=text.id, status=text.status)
 
 @router.post("/upload/hls", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -71,6 +100,22 @@ async def upload_video_hls(
     """
     video = await service.upload_video_hls(current_user.user_id, file, background_tasks)
     return VideoUploadResponse(id=video.id, status=video.status)
+
+
+@router.post("/{video_id}/reprocess", status_code=status.HTTP_202_ACCEPTED)
+async def reprocess_video(
+    video_id: str,
+    payload: Optional[dict] = Body(default=None),
+    service: VideoService = Depends(get_video_service),
+    current_user: User = Depends(get_current_user)
+):
+    """Re-run processing pipeline on an existing media item owned by the user."""
+    job = await service.reprocess_existing_media(current_user.user_id, video_id, payload or {})
+    return {
+        "id": job.id,
+        "status": job.status.value.lower(),
+        "message": "Reprocessing started"
+    }
 
 @router.get("/", response_model=PaginatedVideoResponse)
 async def list_videos(

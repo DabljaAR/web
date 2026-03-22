@@ -136,6 +136,31 @@ http://localhost:9001
 Username: minioadmin  
 Password: minioadmin
 
+## Background Tasks (Celery)
+
+The project uses Celery for asynchronous task processing (STT, NMT, TTS, etc.) with Redis as the broker.
+
+### Running Celery Worker
+
+1.  **Ensure Redis is running** (default: `localhost:6379`).
+2.  Start the worker:
+    ```bash
+    export PYTHONPATH=$PYTHONPATH:.
+    .venv/bin/python3 -m celery -A app.jobs.celery_app worker --loglevel=info -Q ai_tts,ai_nmt,pipeline,media,ai_stt
+    ```
+
+### Monitoring with Flower
+
+Flower provides a real-time web dashboard for monitoring Celery tasks.
+
+1.  Start Flower:
+    ```bash
+    export PYTHONPATH=$PYTHONPATH:.
+    .venv/bin/python3 -m celery -A app.jobs.celery_app flower --port=5555
+    ```
+2.  Open the Flower Dashboard:
+    [http://localhost:5555](http://localhost:5555)
+
 
  /home/eslam/Desktop/dablaja2/dablaja/web/.venv/bin/python /home/eslam/Desktop/dablaja2/dablaja/web/nmt/demo_translation.py
 

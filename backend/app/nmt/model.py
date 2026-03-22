@@ -168,13 +168,20 @@ class NLLBTranslatorWrapper:
 
     def __init__(self, model_name: Optional[str] = None):
         self._model_name = model_name
-        self.device = self._get_device()
+        self._device     = None
 
     @property
     def model_name(self) -> str:
         if self._model_name is None:
             self._model_name = resolve_default_model()
         return self._model_name
+
+    @property
+    def device(self) -> str:
+        """Lazy resolve device to avoid premature CUDA initialization in Celery parent."""
+        if self._device is None:
+            self._device = self._get_device()
+        return self._device
 
     @property
     def tokenizer(self):
@@ -197,22 +204,24 @@ class NLLBTranslatorWrapper:
                 if NLLBTranslatorWrapper._model is None:
                     logger.info(f"[NMT] Loading model from '{self.model_name}' on {self.device}")
                     local_files_only = os.path.isdir(self.model_name)
+                    
+                    # Use float16 for significant VRAM savings (2.5GB -> 1.2GB)
+                    model_kwargs = {"local_files_only": local_files_only}
+                    if "cuda" in self.device:
+                        model_kwargs["torch_dtype"] = torch.float16
+                    
                     NLLBTranslatorWrapper._model = AutoModelForSeq2SeqLM.from_pretrained(
                         self.model_name,
-                        local_files_only=local_files_only
+                        **model_kwargs
                     ).to(self.device)
-                    logger.info("✅ NMT model loaded successfully")
+                    logger.info("✅ NMT model loaded successfully (float16 if GPU)")
         return NLLBTranslatorWrapper._model
 
     def _get_device(self):
         if torch.cuda.is_available():
-            try:
-                major, minor = torch.cuda.get_device_capability()
-                gpu_arch = f"sm_{major}{minor}"
-                if gpu_arch in torch.cuda.get_arch_list():
-                    return "cuda:0"
-            except Exception:
-                pass
+            # Return cuda:0 if available, bypassing the strict arch check
+            # which sometimes omits sm_61 even if compatible cards are present.
+            return "cuda:0"
         return "cpu"
 
     LANG_MAP = {
@@ -244,6 +253,11 @@ class NLLBTranslatorWrapper:
 
     def _translate_item(self, text: str, src_lang: Optional[str] = None, tgt_lang: str = "arb_Arab", max_length: int = 512) -> str:
         """Translates a single string after detecting its language."""
+        # 0. Robust language mapping (ensures "ar" -> "arb_Arab")
+        tgt_lang = self.LANG_MAP.get(tgt_lang, tgt_lang)
+        if src_lang:
+            src_lang = self.LANG_MAP.get(src_lang, src_lang)
+
         stripped = text.strip()
         if not stripped:
             return text

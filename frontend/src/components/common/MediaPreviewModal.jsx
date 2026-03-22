@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from '../../hooks/useTranslation';
+import api from '../../services/api';
 import './MediaPreviewModal.css';
 
-const MediaPreviewModal = ({ isOpen, onClose, url, type, title }) => {
+const MediaPreviewModal = ({ isOpen, onClose, url, type, title, secondaryUrl, primaryTitle = 'Original', secondaryTitle = 'Translated' }) => {
     const { t } = useTranslation();
     const [isMaximized, setIsMaximized] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
+    const [textPreview, setTextPreview] = useState('');
+    const [textError, setTextError] = useState('');
+    const [secondaryTextPreview, setSecondaryTextPreview] = useState('');
+    const [secondaryTextError, setSecondaryTextError] = useState('');
     const videoRef = useRef(null);
 
     // Close on Escape key
@@ -29,8 +34,92 @@ const MediaPreviewModal = ({ isOpen, onClose, url, type, title }) => {
         if (isOpen) {
             setIsMaximized(false);
             setIsLoading(true);
+            setTextPreview('');
+            setTextError('');
+            setSecondaryTextPreview('');
+            setSecondaryTextError('');
         }
     }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen || !url) return;
+
+        const isVideoLike = type === 'VIDEO' || type === 'video' || (type === undefined && url.match(/\.(mp4|mov|avi|mkv|webm|m3u8)$/i));
+        const isAudioLike = type === 'AUDIO' || type === 'audio' || (type === undefined && url.match(/\.(mp3|wav|m4a|ogg)$/i));
+
+        if (isVideoLike || isAudioLike) return;
+
+        let aborted = false;
+
+        const parseTextPayload = (payload) => {
+            if (payload == null) return 'No content available.';
+
+            if (typeof payload === 'string') {
+                // Might be a raw JSON string or plain text.
+                try {
+                    return parseTextPayload(JSON.parse(payload));
+                } catch (_) {
+                    return payload || 'No content available.';
+                }
+            }
+
+            // Object payload
+            if (typeof payload?.text === 'string') return payload.text;
+            if (typeof payload?.transcript === 'string') return payload.transcript;
+            return JSON.stringify(payload, null, 2);
+        };
+
+        const loadText = async (u) => {
+            // Backend API endpoints are passed as relative paths (e.g. /jobs/{id}/preview)
+            if (typeof u === 'string' && u.startsWith('/')) {
+                const data = await api.getText(u);
+                return parseTextPayload(data);
+            }
+
+            const res = await fetch(u);
+            if (!res.ok) {
+                throw new Error(`Failed to fetch preview (${res.status})`);
+            }
+            const bodyText = await res.text();
+            return parseTextPayload(bodyText);
+        };
+
+        const loadTextPreview = async () => {
+            try {
+                const preview = await loadText(url);
+
+                if (!aborted) {
+                    setTextPreview(preview);
+
+                    if (secondaryUrl) {
+                        try {
+                            const secondPreview = await loadText(secondaryUrl);
+                            if (!aborted) {
+                                setSecondaryTextPreview(secondPreview);
+                            }
+                        } catch (secondaryErr) {
+                            if (!aborted) {
+                                setSecondaryTextError(secondaryErr.message || 'Failed to load translation preview.');
+                            }
+                        }
+                    }
+
+                    setIsLoading(false);
+                }
+            } catch (err) {
+                if (!aborted) {
+                    setTextError(err.message || 'Failed to load text preview.');
+                    setIsLoading(false);
+                }
+            }
+        };
+
+        loadTextPreview();
+
+        return () => {
+            aborted = true;
+        };
+    }, [isOpen, url, type, secondaryUrl]);
 
     if (!isOpen || !url) return null;
 
@@ -55,7 +144,8 @@ const MediaPreviewModal = ({ isOpen, onClose, url, type, title }) => {
     // Determine label based on type
     const typeLabel = type === 'VIDEO' ? t('dashboard.tabVideo') || 'Video' :
         type === 'AUDIO' ? t('dashboard.tabAudio') || 'Audio' :
-            'Media';
+            type === 'TEXT' ? t('dashboard.tabText') || 'Text' :
+                'Media';
 
     // Improved detection logic
     const isVideo = type === 'VIDEO' || type === 'video' || (type === undefined && url.match(/\.(mp4|mov|avi|mkv|webm|m3u8)$/i));
@@ -132,10 +222,44 @@ const MediaPreviewModal = ({ isOpen, onClose, url, type, title }) => {
                             </audio>
                         </div>
                     ) : (
-                        <div style={{ color: 'white', padding: '20px' }}>
-                            Unsupported media type for preview.
-                            <br />
-                            <a href={url} target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Download File</a>
+                        <div className="text-preview-wrapper">
+                            {secondaryUrl ? (
+                                <div className="text-compare-grid">
+                                    <div className="text-compare-panel">
+                                        <h4 className="text-compare-title">{primaryTitle}</h4>
+                                        {textError ? (
+                                            <div className="text-preview-error">
+                                                {textError}
+                                                <br />
+                                                <a href={url} target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Open File</a>
+                                            </div>
+                                        ) : (
+                                            <pre className="text-preview-content">{textPreview}</pre>
+                                        )}
+                                    </div>
+
+                                    <div className="text-compare-panel">
+                                        <h4 className="text-compare-title">{secondaryTitle}</h4>
+                                        {secondaryTextError ? (
+                                            <div className="text-preview-error">
+                                                {secondaryTextError}
+                                                <br />
+                                                <a href={secondaryUrl} target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Open File</a>
+                                            </div>
+                                        ) : (
+                                            <pre className="text-preview-content">{secondaryTextPreview}</pre>
+                                        )}
+                                    </div>
+                                </div>
+                            ) : textError ? (
+                                <div className="text-preview-error">
+                                    {textError}
+                                    <br />
+                                    <a href={url} target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Open File</a>
+                                </div>
+                            ) : (
+                                <pre className="text-preview-content">{textPreview}</pre>
+                            )}
                         </div>
                     )}
                 </div>

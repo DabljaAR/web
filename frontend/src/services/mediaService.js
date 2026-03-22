@@ -13,6 +13,10 @@ export const mediaService = {
         return api.post('/videos/upload/text', formData);
     },
 
+    reprocessMedia: async (id, payload) => {
+        return api.post(`/videos/${id}/reprocess`, payload);
+    },
+
 
 
     getDashboardData: async () => {
