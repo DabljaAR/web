@@ -144,7 +144,7 @@ class TranscriptionService:
         # video_id is nullable on the Job model — fine to pass None
         job = Job(
             id=str(uuid.uuid4()),
-            video_id=video_id or file_key,  # use file_key as fallback reference
+            video_id=video_id,  # Use None if not provided (nullable in model)
             user_id=user_id,
             job_type=JobType.STT_TRANSCRIBE,
             status=JobStatus.QUEUED,
@@ -174,23 +174,10 @@ class TranscriptionService:
             },
             task_id=job.id,
         )
-        self.db.add(job)
-        await self.db.commit()
-        await self.db.refresh(job)
-
-        # 2. Dispatch Celery task
-        from app.jobs.tasks.pipeline import stt_transcribe as transcribe_task
-        celery_result = transcribe_task.apply_async(
-            kwargs={
-                "job_id": job.id,
-                "video_id": video_id,
-                "language": language,
-            },
-            task_id=job.id,
-        )
 
         # 3. Persist Celery task id
         job.celery_task_id = celery_result.id
+        self.db.add(job)
         await self.db.commit()
         await self.db.refresh(job)
 

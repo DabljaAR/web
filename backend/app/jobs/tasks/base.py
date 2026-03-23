@@ -46,17 +46,18 @@ class BaseJobTask(celery.Task):
 
     @staticmethod
     def _make_db():
-        """Fresh engine + session for this event loop — never reuse FastAPI's pool."""
-        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+        """Fresh sync engine for Celery workers — uses psycopg2 with NullPool
+        to avoid asyncpg incompatibility issues in Celery context."""
+        from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import NullPool
         from app.config import settings
-        engine = create_async_engine(
-            settings.DATABASE_URL, pool_size=1, max_overflow=0, pool_pre_ping=True
-        )
-        return engine, sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+        engine = create_engine(sync_url, poolclass=NullPool)
+        return engine, sessionmaker(bind=engine)
 
     @staticmethod
-    async def _patch_job(
+    def _patch_job(
         job_id: str,
         status: JobStatus,
         *,
@@ -73,8 +74,8 @@ class BaseJobTask(celery.Task):
 
         engine, SessionLocal = BaseJobTask._make_db()
         try:
-            async with SessionLocal() as db:
-                job = await db.get(Job, job_id)
+            with SessionLocal() as db:
+                job = db.get(Job, job_id)
                 if job is None:
                     logger.warning("BaseJobTask: job %s not found, skipping patch", job_id)
                     return
@@ -92,9 +93,9 @@ class BaseJobTask(celery.Task):
                 if completed_at is not None:
                     job.completed_at = completed_at
                 job.updated_at = datetime.utcnow()
-                await db.commit()
+                db.commit()
         finally:
-            await engine.dispose()
+            engine.dispose()
 
     # ------------------------------------------------------------------
     # Public helpers for sub-tasks
@@ -102,9 +103,7 @@ class BaseJobTask(celery.Task):
 
     def update_progress(self, job_id: str, progress: float) -> None:
         """Persist a progress update (0–100) for the given job."""
-        self._run_sync(
-            self._patch_job(job_id, JobStatus.PROCESSING, progress=progress)
-        )
+        self._patch_job(job_id, JobStatus.PROCESSING, progress=progress)
 
     # ------------------------------------------------------------------
     # Lifecycle hooks
@@ -119,13 +118,11 @@ class BaseJobTask(celery.Task):
         if not job_id:
             return
         logger.error("Task %s failed for job %s: %s", task_id, job_id, exc)
-        self._run_sync(
-            self._patch_job(
-                job_id,
-                JobStatus.FAILED,
-                error_message=str(exc),
-                completed_at=datetime.utcnow(),
-            )
+        self._patch_job(
+            job_id,
+            JobStatus.FAILED,
+            error_message=str(exc),
+            completed_at=datetime.utcnow(),
         )
 
     def on_retry(self, exc, task_id, args, kwargs, einfo) -> None:
@@ -137,9 +134,7 @@ class BaseJobTask(celery.Task):
         if not job_id:
             return
         logger.warning("Task %s retrying for job %s: %s", task_id, job_id, exc)
-        self._run_sync(
-            self._patch_job(job_id, JobStatus.RETRYING, error_message=str(exc))
-        )
+        self._patch_job(job_id, JobStatus.RETRYING, error_message=str(exc))
 
     def on_success(self, retval, task_id, args, kwargs) -> None:
         """Called by Celery when the task succeeds."""
@@ -150,11 +145,9 @@ class BaseJobTask(celery.Task):
         if not job_id:
             return
         logger.info("Task %s succeeded for job %s", task_id, job_id)
-        self._run_sync(
-            self._patch_job(
-                job_id,
-                JobStatus.COMPLETED,
-                progress=100.0,
-                completed_at=datetime.utcnow(),
-            )
+        self._patch_job(
+            job_id,
+            JobStatus.COMPLETED,
+            progress=100.0,
+            completed_at=datetime.utcnow(),
         )
