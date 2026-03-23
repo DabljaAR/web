@@ -30,8 +30,8 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    video_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False, index=True
+    video_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("videos.id", ondelete="CASCADE"), nullable=True, index=True
     )
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True

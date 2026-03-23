@@ -57,10 +57,11 @@ fi
 # Ensure logs directory exists
 mkdir -p backend/logs
 
-# 1. Start MinIO (Object Store)
-echo -e "${GREEN}Starting MinIO...${NC}"
-mkdir -p data/minio
-minio server ./data/minio --console-address ":9001" > backend/logs/minio.log 2>&1 &
+cd ~
+MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin \
+  nohup ./minio server ./minio-data --console-address ":9001" \
+  > ~/minio.log 2>&1 &
+echo "✅ MinIO started (log: ~/minio.log)"
 sleep 5 # Give MinIO time to initialize
 
 # 2. Start Backend (FastAPI)
@@ -89,10 +90,10 @@ celery -A app.jobs.celery_app flower --port=5555 > logs/flower.log 2>&1 &
 cd ..
 
 # 5. Start Frontend (React/Vite)
-echo -e "${GREEN}Starting Frontend...${NC}"
-cd frontend
-npm run dev > ../backend/logs/frontend.log 2>&1 &
-cd ..
+# echo -e "${GREEN}Starting Frontend...${NC}"
+# cd frontend
+# npm run dev  &
+# cd ..
 
 echo -e "\n${GREEN}==================================================${NC}"
 echo -e "${GREEN}All services are running in the background!${NC}"
