@@ -6,17 +6,15 @@ Each task follows the same contract:
 """
 import logging
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from celery import chain
-from celery.result import allow_join_result
-
 from app.jobs.celery_app import celery_app
 from app.jobs.tasks.base import BaseJobTask
-from app.jobs.models import JobStatus, JobType, Job
-from uuid import uuid4
+from app.jobs.tasks.buffer import SegmentBuffer
+from app.jobs.models import JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +67,11 @@ def stt_transcribe(
     storage = get_storage_service()
 
     # ── 1. Mark PROCESSING + record Celery task id ───────────────────────────
-    self._run_sync(
-        self._patch_job(
-            job_id,
-            JobStatus.PROCESSING,
-            celery_task_id=self.request.id,
-            started_at=datetime.utcnow(),
-        )
+    self._patch_job(
+        job_id,
+        JobStatus.PROCESSING,
+        celery_task_id=self.request.id,
+        started_at=datetime.utcnow(),
     )
 
     # ── 2. Look up the Video row to get the MinIO key ────────────────────────
@@ -122,7 +118,6 @@ def stt_transcribe(
         # ── 4. Transcribe using the shared WhisperModelManager instance ──────
         # Whisper yields segments progressively, so we dispatch each segment
         # to NMT queue as soon as it's available (chunked processing)
-        import time
         structured_segments = []
         nmt_tasks_submitted = 0
         nmt_results = []
@@ -192,21 +187,71 @@ def stt_transcribe(
             }
 
             # ── 5. Wait for background NMT tasks and merge results ───────────
-            if nmt_results:
-                logger.info(f"[STT] Waiting for {len(nmt_results)} NMT translations... | job={job_id}")
-                with allow_join_result():
-                    for res in nmt_results:
-                        try:
-                            # Wait for results safely
-                            task_result = res.get(timeout=600)
-                            if task_result and "segment_id" in task_result:
-                                idx = task_result["segment_id"]
-                                txt = task_result["translated_text"]
-                                if 0 <= idx < len(structured_segments):
-                                    structured_segments[idx]["translated_text"] = txt
-                        except Exception as e:
-                            logger.warning(f"[STT] A segment translation task failed: {e}")
-            
+            # Use SegmentBuffer (priority queue) to order out-of-order NMT results
+            segment_buffer = SegmentBuffer()
+            completed_count = 0
+            failed_count = 0
+
+            if nmt_tasks_submitted > 0:
+                logger.info(f"[STT] Waiting for {nmt_tasks_submitted} NMT translations... | job={job_id}")
+
+                # Use as_completed to process results as they arrive (out of order)
+                from celery.result import AsyncResult
+                async_results = [AsyncResult(r.id) for r in nmt_results]
+
+                start_wait = time.time()
+                timeout = 600
+
+                while completed_count + failed_count < nmt_tasks_submitted:
+                    elapsed = time.time() - start_wait
+                    if elapsed > timeout:
+                        logger.warning(f"[STT] NMT wait timeout after {elapsed:.1f}s | job={job_id}")
+                        break
+
+                    # Check each result (polling approach - in production could use callback)
+                    for res in async_results:
+                        if res.ready() and not res.info.get("_checked", False):
+                            res.info["_checked"] = True
+                            try:
+                                task_result = res.get(timeout=1)
+                                if task_result and "segment_id" in task_result:
+                                    idx = task_result["segment_id"]
+                                    start_time = task_result.get("start", 0)
+                                    txt = task_result.get("translated_text")
+
+                                    if 0 <= idx < len(structured_segments) and txt:
+                                        # Push to priority queue for ordered processing
+                                        segment_buffer.push(
+                                            segment_id=idx,
+                                            start=start_time,
+                                            data={"segment_id": idx, "translated_text": txt}
+                                        )
+                                        completed_count += 1
+                                        logger.debug(
+                                            f"[STT] NMT result received segment_id={idx} start={start_time:.2f} | job={job_id}"
+                                        )
+                            except Exception as e:
+                                failed_count += 1
+                                logger.warning(f"[STT] NMT task failed: {e} | job={job_id}")
+
+                    # Small sleep to avoid busy-waiting
+                    time.sleep(0.1)
+
+                # Pop all results in sequence order and merge into segments
+                for i in range(len(structured_segments)):
+                    item = segment_buffer.pop_next(i)
+                    if item and item.get("translated_text"):
+                        structured_segments[i]["translated_text"] = item["translated_text"]
+
+                # Validate NMT count
+                successful_translations = completed_count
+                if successful_translations != nmt_tasks_submitted:
+                    logger.warning(
+                        f"[STT] NMT translation incomplete: {successful_translations}/{nmt_tasks_submitted} segments translated | job={job_id}"
+                    )
+
+                logger.info(f"[STT] NMT complete: {completed_count} success, {failed_count} failed | job={job_id}")
+
             # Combine individual translated segments into a full translated transcript
             if target_lang and target_lang != info.language:
                 result["translated_transcript"] = " ".join([
@@ -233,9 +278,7 @@ def stt_transcribe(
             "nmt_tasks_submitted": nmt_tasks_submitted,
         }
 
-        self._run_sync(
-            self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
-        )
+        self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
         # Note: BaseJobTask.on_success will set it to COMPLETED immediately after return
 
         logger.info(
@@ -252,8 +295,6 @@ def stt_transcribe(
 # ---------------------------------------------------------------------------
 # Neural Machine Translation
 # ---------------------------------------------------------------------------
-
-from app.jobs.tasks.nmt import nmt_translate
 
 
 
@@ -286,19 +327,17 @@ def tts_synthesize(
     Returns:
         {"job_id": job_id, "video_id": video_id, "audio_key": "<storage_key>"}
     """
-    self._run_sync(
-        self._patch_job(
-            job_id,
-            JobStatus.PROCESSING,
-            celery_task_id=self.request.id,
-            started_at=datetime.utcnow(),
-        )
+    self._patch_job(
+        job_id,
+        JobStatus.PROCESSING,
+        celery_task_id=self.request.id,
+        started_at=datetime.utcnow(),
     )
     # TODO: call TTS service
     logger.info("[STUB] tts_synthesize job=%s video=%s lang=%s", job_id, video_id, target_lang)
 
     output = {"job_id": job_id, "video_id": video_id, "audio_key": None}
-    self._run_sync(self._patch_job(job_id, JobStatus.PROCESSING, output_data=output))
+    self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
 
     return output
 
@@ -322,13 +361,11 @@ def dubbing_merge(self, job_id: str, video_id: str, audio_key: str) -> dict:
     Returns:
         {"job_id": job_id, "video_id": video_id, "output_key": "<storage_key>"}
     """
-    self._run_sync(
-        self._patch_job(
-            job_id,
-            JobStatus.PROCESSING,
-            celery_task_id=self.request.id,
-            started_at=datetime.utcnow(),
-        )
+    self._patch_job(
+        job_id,
+        JobStatus.PROCESSING,
+        celery_task_id=self.request.id,
+        started_at=datetime.utcnow(),
     )
     # TODO: call FFmpeg merge service
     logger.info("[STUB] dubbing_merge job=%s video=%s", job_id, video_id)

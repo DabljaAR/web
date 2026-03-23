@@ -128,11 +128,17 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                     
                     # Enqueue the STT task directly
                     from app.jobs.tasks.pipeline import stt_transcribe
-                    stt_transcribe.delay(
-                        stt_job_id, 
-                        video_id, 
-                        target_lang=stt_job.input_data.get("target_lang", "ar")
+                    celery_result = stt_transcribe.apply_async(
+                        kwargs={
+                            "job_id": stt_job_id,
+                            "video_id": video_id,
+                            "target_lang": stt_job.input_data.get("target_lang", "ar")
+                        },
+                        task_id=stt_job_id,
                     )
+                    stt_job.celery_task_id = celery_result.id
+                    db.add(stt_job)
+                    await db.commit()
 
         except Exception as e:
             logger.error(f"Processing failed for video {video_id}: {e}")
@@ -460,11 +466,17 @@ class VideoService:
  
         # Enqueue the STT task directly
         from app.jobs.tasks.pipeline import stt_transcribe
-        stt_transcribe.delay(
-            stt_job.id, 
-            media.id, 
-            target_lang=input_options["target_lang"]
+        celery_result = stt_transcribe.apply_async(
+            kwargs={
+                "job_id": stt_job.id,
+                "video_id": media.id,
+                "target_lang": input_options["target_lang"]
+            },
+            task_id=stt_job.id,
         )
+        stt_job.celery_task_id = celery_result.id
+        self.db.add(stt_job)
+        await self.db.commit()
 
         return stt_job
 
@@ -901,15 +913,3 @@ class VideoService:
         
         # Note: DB records will be deleted by cascade when user is deleted
         logger.info(f"Successfully cleaned up media files for user {user_id}")
-
-        if file_path_key:
-            await storage.delete(file_path_key)
-        
-        if thumbnail_key:
-            await storage.delete(thumbnail_key)
-            
-        if audio_key:
-            await storage.delete(audio_key)
-            
-        logger.info(f"Video {video_id} and associated files deleted.")
-        return True

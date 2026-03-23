@@ -44,5 +44,6 @@ celery_app.conf.update(
         "app.jobs.tasks.media",
         "app.jobs.tasks.pipeline",
         "app.jobs.tasks.nmt",
+        "app.stt.models",
     ],
 )

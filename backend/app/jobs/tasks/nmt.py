@@ -135,7 +135,7 @@ def nmt_translate(
         },
     }
 
-    self._run_sync(self._patch_job(job_id, JobStatus.PROCESSING, output_data=output))
+    self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
     self.update_progress(job_id, 95.0)
 
     return output
