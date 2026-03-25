@@ -22,6 +22,7 @@ from app.shared.middleware import ExceptionLoggingMiddleware
 
 # Routers
 from app.stt.router import router as stt_router
+from app.tts.router import router as tts_router
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,7 @@ app.include_router(media_router, prefix="/api")
 app.include_router(job_router, prefix="/api")
 app.include_router(stt_router)  # already has prefix="/api/transcription"
 app.include_router(nmt_router, prefix="/api")
+app.include_router(tts_router, prefix="/api/tts")
 
 # ---------------------------------------------------------------------------
 # Root endpoint

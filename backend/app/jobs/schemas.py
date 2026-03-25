@@ -8,17 +8,18 @@ from app.jobs.models import JobStatus, JobType
 
 
 class JobBase(BaseModel):
-    video_id: str
+    video_id: Optional[str] = None
     user_id: int
     job_type: JobType
     status: JobStatus = JobStatus.QUEUED
     progress: float = 0.0
     input_data: Optional[dict[str, Any]] = None
 
-    # Accept both raw UUID objects and strings (e.g. uuid4() in tests)
     @field_validator("video_id", mode="before")
     @classmethod
-    def coerce_video_id(cls, v: Any) -> str:
+    def coerce_video_id(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
         return str(v)
 
 

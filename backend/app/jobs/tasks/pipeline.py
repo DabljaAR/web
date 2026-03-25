@@ -260,6 +260,60 @@ def stt_transcribe(
             else:
                 result["translated_transcript"] = result["transcript"]
 
+            # ── 5b. Dispatch TTS for each translated segment ───────────────────────
+            from celery.result import AsyncResult
+            from app.jobs.celery_app import synthesize_tts
+            
+            tts_tasks_submitted = 0
+            tts_results = []
+            tts_dialect = "MSA"  # Habibi-TTS currently only supports MSA
+            
+            # Dispatch TTS for each segment with translated text
+            for i, segment in enumerate(structured_segments):
+                translated = segment.get("translated_text") or segment.get("text", "")
+                if translated:
+                    tts_result = synthesize_tts.apply_async(
+                        kwargs={
+                            "text": translated,
+                            "dialect": tts_dialect,
+                            "job_id": f"{job_id}_tts_{i}",
+                        },
+                        queue="ai_tts",
+                    )
+                    tts_results.append(tts_result)
+                    tts_tasks_submitted += 1
+                    logger.debug(
+                        "[STT] Dispatched TTS task for segment %d | job=%s",
+                        i, job_id
+                    )
+
+            # Wait for TTS tasks to complete (if any)
+            tts_audio_keys = [None] * len(structured_segments)
+            tts_completed = 0
+            
+            if tts_tasks_submitted > 0:
+                logger.info("[STT] Waiting for %d TTS syntheses... | job=%s", tts_tasks_submitted, job_id)
+                
+                # Wait for each TTS result
+                for i, tts_res in enumerate(tts_results):
+                    try:
+                        result_data = tts_res.get(timeout=300)  # 5 min per segment
+                        if result_data and result_data.get("status") == "success":
+                            # TODO: Upload audio to MinIO and get key
+                            # For now, store the result info
+                            tts_audio_keys[i] = result_data.get("output_path")
+                            tts_completed += 1
+                            logger.debug("[STT] TTS segment %d completed | job=%s", i, job_id)
+                    except Exception as e:
+                        logger.warning("[STT] TTS segment %d failed: %s | job=%s", i, e, job_id)
+                
+                logger.info("[STT] TTS complete: %d/%d | job=%s", tts_completed, tts_tasks_submitted, job_id)
+
+            # Store TTS results in segments
+            for i, segment in enumerate(structured_segments):
+                if i < len(tts_audio_keys) and tts_audio_keys[i]:
+                    segment["tts_audio_key"] = tts_audio_keys[i]
+
         except Exception as exc:
             logger.error("[STT pipeline] transcription error job=%s: %s", job_id, exc)
             raise self.retry(exc=exc)
@@ -276,17 +330,19 @@ def stt_transcribe(
             "segments":       structured_segments,
             "metadata":       result["metadata"],
             "nmt_tasks_submitted": nmt_tasks_submitted,
+            "tts_tasks_submitted": tts_tasks_submitted,
         }
 
         self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
         # Note: BaseJobTask.on_success will set it to COMPLETED immediately after return
 
         logger.info(
-            "[STT pipeline] job=%s done | duration=%.1fs | segments=%d | nmt_tasks=%d",
+            "[STT pipeline] job=%s done | duration=%.1fs | segments=%d | nmt_tasks=%d | tts_tasks=%d",
             job_id,
             result["metadata"].get("duration", 0),
             result["metadata"].get("segment_count", 0),
             nmt_tasks_submitted,
+            tts_tasks_submitted,
         )
 
         return output
