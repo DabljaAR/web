@@ -52,6 +52,8 @@ async def synthesize(
             ref_text=req.ref_text,
             speed=req.speed,
             cfg_strength=req.cfg_strength,
+            upload_to_minio=req.upload_to_minio,
+            minio_key=req.minio_key,
         )
         
         return TTSResponse(task_id=job_id, status="queued")

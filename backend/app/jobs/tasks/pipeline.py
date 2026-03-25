@@ -261,6 +261,7 @@ def stt_transcribe(
                 result["translated_transcript"] = result["transcript"]
 
             # ── 5b. Dispatch TTS for each translated segment ───────────────────────
+            import tempfile
             from celery.result import AsyncResult
             from app.jobs.celery_app import synthesize_tts
             
@@ -268,19 +269,25 @@ def stt_transcribe(
             tts_results = []
             tts_dialect = "MSA"  # Habibi-TTS currently only supports MSA
             
+            # Create temp directory for TTS outputs
+            temp_dir = tempfile.mkdtemp(prefix="tts_")
+            logger.info("[STT] TTS temp directory: %s | job=%s", temp_dir, job_id)
+            
             # Dispatch TTS for each segment with translated text
             for i, segment in enumerate(structured_segments):
                 translated = segment.get("translated_text") or segment.get("text", "")
                 if translated:
+                    output_path = f"{temp_dir}/segment_{i}.wav"
                     tts_result = synthesize_tts.apply_async(
                         kwargs={
                             "text": translated,
                             "dialect": tts_dialect,
                             "job_id": f"{job_id}_tts_{i}",
+                            "output_path": output_path,
                         },
                         queue="ai_tts",
                     )
-                    tts_results.append(tts_result)
+                    tts_results.append((i, tts_result))
                     tts_tasks_submitted += 1
                     logger.debug(
                         "[STT] Dispatched TTS task for segment %d | job=%s",
@@ -295,13 +302,28 @@ def stt_transcribe(
                 logger.info("[STT] Waiting for %d TTS syntheses... | job=%s", tts_tasks_submitted, job_id)
                 
                 # Wait for each TTS result
-                for i, tts_res in enumerate(tts_results):
+                for i, tts_res in tts_results:
                     try:
                         result_data = tts_res.get(timeout=300)  # 5 min per segment
                         if result_data and result_data.get("status") == "success":
-                            # TODO: Upload audio to MinIO and get key
-                            # For now, store the result info
-                            tts_audio_keys[i] = result_data.get("output_path")
+                            local_path = result_data.get("output_path")
+                            if local_path:
+                                # Upload to MinIO
+                                minio_key = f"tts/{video_id}/segment_{i}.wav"
+                                try:
+                                    self._run_sync(
+                                        storage.upload_bytes(
+                                            open(local_path, "rb").read(),
+                                            minio_key,
+                                            "audio/wav"
+                                        )
+                                    )
+                                    tts_audio_keys[i] = minio_key
+                                    logger.info("[STT] TTS segment %d uploaded to MinIO: %s | job=%s", i, minio_key, job_id)
+                                except Exception as upload_err:
+                                    logger.warning("[STT] Failed to upload TTS segment %d to MinIO: %s | job=%s", i, upload_err, job_id)
+                                    # Still store local path as fallback
+                                    tts_audio_keys[i] = local_path
                             tts_completed += 1
                             logger.debug("[STT] TTS segment %d completed | job=%s", i, job_id)
                     except Exception as e:

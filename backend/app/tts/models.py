@@ -323,6 +323,8 @@ def register_tts_task(celery_app):
         speed: Optional[float] = None,
         cfg_strength: Optional[float] = None,
         output_path: Optional[str] = None,
+        upload_to_minio: bool = False,
+        minio_key: Optional[str] = None,
         job_id: Optional[str] = None,
     ) -> dict:
         """
@@ -335,6 +337,8 @@ def register_tts_task(celery_app):
                 "job_id":       <job_id>,
                 "dialect":      "MSA",
                 "output_path":  "/path/to/output.wav",  # or None
+                "minio_key":    "tts/xxx/output.wav",   # if uploaded
+                "audio_url":    "https://...",          # presigned URL if uploaded
                 "bytes_size":   <int>,
             }
         """
@@ -356,17 +360,45 @@ def register_tts_task(celery_app):
             cfg_strength=cfg_strength,
         )
 
+        audio_url = None
+        final_minio_key = None
+
+        # Save locally if path provided
         if output_path:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             with open(output_path, "wb") as f:
                 f.write(audio_bytes)
             logger.info("TTS output written to %s (%d bytes)", output_path, len(audio_bytes))
 
+        # Upload to MinIO if requested
+        if upload_to_minio:
+            try:
+                from app.media.storage import get_storage_service
+                storage = get_storage_service()
+                final_minio_key = minio_key or f"tts/{job_id}/output.wav"
+                
+                # Run async upload in sync context
+                import asyncio
+                asyncio.get_event_loop().run_until_complete(
+                    storage.upload_bytes(audio_bytes, final_minio_key, "audio/wav")
+                )
+                
+                # Get presigned URL
+                audio_url = asyncio.get_event_loop().run_until_complete(
+                    storage.get_url(final_minio_key)
+                )
+                
+                logger.info("TTS output uploaded to MinIO: %s", final_minio_key)
+            except Exception as e:
+                logger.warning("Failed to upload TTS to MinIO: %s", e)
+
         return {
             "status":      "success",
             "job_id":      job_id,
             "dialect":     _dialect.value,
             "output_path": output_path,
+            "minio_key":   final_minio_key,
+            "audio_url":   audio_url,
             "bytes_size":  len(audio_bytes),
         }
 

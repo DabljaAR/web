@@ -42,13 +42,22 @@ class TTSRequest(BaseModel):
         default=None,
         description="Job ID for tracking"
     )
+    upload_to_minio: bool = Field(
+        default=False,
+        description="Whether to upload the result to MinIO and return a downloadable URL"
+    )
+    minio_key: Optional[str] = Field(
+        default=None,
+        description="Custom MinIO key (e.g. 'tts/my-audio.wav'). If not provided, auto-generates."
+    )
     
     class Config:
         schema_extra = {
             "example": {
                 "text": "مرحباً بكم في منصة دبلجة عربية",
                 "dialect": "MSA",
-                "speed": 0.8
+                "speed": 0.8,
+                "upload_to_minio": True
             }
         }
 

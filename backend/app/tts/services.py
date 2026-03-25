@@ -42,6 +42,8 @@ class TTSService:
         speed: Optional[float] = None,
         cfg_strength: Optional[float] = None,
         target_lang: str = "arb_Arab",
+        upload_to_minio: bool = False,
+        minio_key: Optional[str] = None,
     ) -> str:
         """
         Submit TTS synthesis job.
@@ -74,6 +76,8 @@ class TTSService:
                 "speed": speed,
                 "cfg_strength": cfg_strength,
                 "target_lang": target_lang,
+                "upload_to_minio": upload_to_minio,
+                "minio_key": minio_key,
             },
             retry_count=0,
             max_retries=3,
@@ -98,6 +102,8 @@ class TTSService:
                 "speed": speed,
                 "cfg_strength": cfg_strength,
                 "job_id": job.id,
+                "upload_to_minio": upload_to_minio,
+                "minio_key": minio_key,
             },
             queue="ai_tts",
             task_id=str(job.id),
