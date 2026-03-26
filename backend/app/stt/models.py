@@ -314,3 +314,205 @@ class WhisperModelManager(Task):
             logger.info("WhisperModelManager cleanup completed")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
+
+
+# ===========================================================================
+# Celery task
+# base=WhisperModelManager means `self` inside the task IS the manager,
+# and the same instance (with the loaded model) is reused every invocation.
+# ===========================================================================
+
+from app.jobs.celery_app import celery_app  # noqa: E402
+
+
+def _make_celery_db():
+    """
+    Build a sync engine + session for use inside Celery tasks.
+
+    We intentionally use:
+      - psycopg2 (sync driver) instead of asyncpg
+      - NullPool so no connection is held between calls
+
+    asyncpg binds connections to the event loop at the driver level.
+    Even a fresh create_async_engine reuses the same asyncpg pool state
+    when asyncio.run() is called repeatedly in the same Celery worker
+    process, causing "another operation is in progress".
+
+    Sync psycopg2 + NullPool has none of these constraints and is the
+    correct choice for Celery workers.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker, Session
+    from sqlalchemy.pool import NullPool
+    from app.config import settings
+
+    # Convert asyncpg URL → psycopg2 URL
+    # e.g. postgresql+asyncpg://user:pass@host/db
+    #   →  postgresql+psycopg2://user:pass@host/db
+    sync_url = settings.DATABASE_URL.replace(
+        "postgresql+asyncpg://", "postgresql+psycopg2://"
+    ).replace(
+        "postgresql://", "postgresql+psycopg2://"
+    )
+
+    engine = create_engine(sync_url, poolclass=NullPool)
+    factory = sessionmaker(engine, expire_on_commit=False)
+    return engine, factory
+
+
+def _download_from_minio(storage, file_key: str, local_path: Path) -> Optional[Path]:
+    """
+    Download file_key from MinIO to local_path.
+    Uses an isolated asyncio.run() — safe because it has no shared loop state.
+    Returns None on success, or the resolved local path for local storage.
+    """
+    import asyncio as _asyncio
+    from app.media.storage import S3StorageService
+
+    if isinstance(storage, S3StorageService):
+        async def _dl():
+            async with storage.session.client(
+                "s3",
+                endpoint_url=storage.endpoint_url,
+                aws_access_key_id=storage.access_key,
+                aws_secret_access_key=storage.secret_key,
+            ) as s3:
+                await s3.download_file(storage.bucket_name, file_key, str(local_path))
+
+        _asyncio.run(_dl())
+        logger.info(f"[STT] Downloaded {file_key} → {local_path}")
+        return None
+    else:
+        return Path(storage.get_absolute_path(file_key))
+
+
+def _run_stt_job(
+    task: "WhisperModelManager",
+    job_id: str,
+    file_key: str,
+    language: Optional[str],
+    target_lang: str = "arb_Arab",
+) -> None:
+    """
+    Fully synchronous pipeline:
+      - DB via psycopg2 + NullPool (no asyncpg, no event loop issues)
+      - MinIO download via isolated asyncio.run() (no shared loop state)
+      - Whisper blocking call directly (no executor needed in sync context)
+      - After STT completes, dispatches each segment to NMT queue for translation
+    """
+    import tempfile
+    from app.jobs.models import Job, JobStatus
+    from app.media.models import Video 
+    from app.media.storage import get_storage_service
+    from app.jobs.tasks.nmt import nmt_translate_segment
+
+    storage = get_storage_service()
+    engine, SessionLocal = _make_celery_db()
+
+    with SessionLocal() as db:
+        job = db.get(Job, job_id)
+        if not job:
+            logger.error(f"[STT] Job {job_id} not found — aborting.")
+            engine.dispose()
+            return
+
+        # 1. PROCESSING
+        job.status     = JobStatus.PROCESSING
+        job.progress   = 0.0
+        job.started_at = datetime.utcnow()
+        job.updated_at = datetime.utcnow()
+        db.commit()
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                suffix     = Path(file_key).suffix or ".mp3"
+                local_path = Path(tmp_dir) / f"audio{suffix}"
+
+                # 2. Download from MinIO
+                resolved = _download_from_minio(storage, file_key, local_path)
+                if resolved is not None:
+                    local_path = resolved  # local storage: use existing file path
+
+                job.progress   = 20.0
+                job.updated_at = datetime.utcnow()
+                db.commit()
+
+                # 3. Transcribe — direct blocking call (sync worker context)
+                result = task.transcribe(str(local_path), language=language)
+
+            # 4. Dispatch segments to NMT queue for parallel translation
+            segments = result.get("segments", [])
+            nmt_tasks_submitted = 0
+            
+            if segments:
+                logger.info(f"[STT] Dispatching {len(segments)} segments to NMT queue for job {job_id}")
+                for idx, segment in enumerate(segments):
+                    nmt_translate_segment.apply_async(
+                        kwargs={
+                            "segment_id": idx,
+                            "job_id": job_id,
+                            "text": segment.get("text", ""),
+                            "start": segment.get("start", 0.0),
+                            "end": segment.get("end", 0.0),
+                            "source_lang": language,
+                            "target_lang": target_lang,
+                        },
+                        queue="ai_nmt"
+                    )
+                    nmt_tasks_submitted += 1
+            
+            result["nmt_tasks_submitted"] = nmt_tasks_submitted
+
+            # 5. COMPLETED
+            job.status       = JobStatus.COMPLETED
+            job.progress     = 100.0
+            job.output_data  = result
+            job.completed_at = datetime.utcnow()
+            job.updated_at   = datetime.utcnow()
+            db.commit()
+
+            logger.info(
+                f"[STT] Job {job_id} completed | "
+                f"duration={result['metadata'].get('duration')}s | "
+                f"time={result['metadata'].get('processing_time')}s | "
+                f"segments={len(segments)} | nmt_tasks={nmt_tasks_submitted}"
+            )
+
+        except Exception as exc:
+            logger.exception(f"[STT] Job {job_id} failed: {exc}")
+            job.status        = JobStatus.FAILED
+            job.error_message = str(exc)
+            job.completed_at  = datetime.utcnow()
+            job.updated_at    = datetime.utcnow()
+            db.commit()
+            raise
+        finally:
+            engine.dispose()
+
+
+@celery_app.task(
+    bind=True,
+    base=WhisperModelManager,            # self IS the WhisperModelManager
+    name="app.jobs.tasks.pipeline.stt_transcribe",
+    queue="ai_stt",
+    max_retries=3,
+    default_retry_delay=30,
+    acks_late=True,
+)
+def transcribe_task(
+    self: "WhisperModelManager",
+    job_id: str,
+    file_key: str,
+    language: Optional[str] = None,
+    target_lang: str = "arb_Arab",
+) -> None:
+    """
+    Celery STT task — fully synchronous.
+    `self` is the WhisperModelManager; model loads once, reused every call.
+    After transcription, dispatches each segment to NMT queue for translation.
+    """
+    logger.info(f"[STT] Task received | job_id={job_id} | file_key={file_key} | target_lang={target_lang}")
+    try:
+        _run_stt_job(self, job_id, file_key, language, target_lang)
+    except Exception as exc:
+        raise self.retry(exc=exc)
