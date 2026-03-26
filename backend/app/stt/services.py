@@ -19,6 +19,7 @@ from typing import Optional
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.jobs.models import Job, JobType, JobStatus
 from app.jobs.schemas import JobCreate
@@ -140,7 +141,22 @@ class TranscriptionService:
             # Prefer extracted audio track if available
             file_key = video.audio_path or video.file_path
 
-        # 1. Create Job record
+        # 1. Check for existing active job first (prevent duplicates)
+        existing_query = select(Job).where(
+            Job.video_id == video_id,
+            Job.job_type == JobType.STT_TRANSCRIBE,
+            Job.status.in_([JobStatus.QUEUED, JobStatus.PROCESSING])
+        )
+        existing_result = await self.db.execute(existing_query)
+        existing_job = existing_result.scalars().first()
+        
+        if existing_job:
+            logger.info(
+                f"[STT] Found existing active job {existing_job.id} for video {video_id}, returning existing job"
+            )
+            return existing_job
+
+        # 2. Create Job record
         # video_id is nullable on the Job model — fine to pass None
         job = Job(
             id=str(uuid.uuid4()),
@@ -163,7 +179,7 @@ class TranscriptionService:
         await self.db.commit()
         await self.db.refresh(job)
 
-        # 2. Dispatch Celery task
+        # 3. Dispatch Celery task
         from app.jobs.tasks.pipeline import stt_transcribe as transcribe_task
         celery_result = transcribe_task.apply_async(
             kwargs={
@@ -175,7 +191,7 @@ class TranscriptionService:
             task_id=job.id,
         )
 
-        # 3. Persist Celery task id
+        # 4. Persist Celery task id
         job.celery_task_id = celery_result.id
         self.db.add(job)
         await self.db.commit()

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # ========== AUTHENTICATION ==========
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "300"))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
     
     # Auth0 / Social configuration
@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     STT_GPU_MEMORY_THRESHOLD: float = float(os.getenv("STT_GPU_MEMORY_THRESHOLD", "0.9"))
     STT_RETRY_ATTEMPTS: int = int(os.getenv("STT_RETRY_ATTEMPTS", "3"))
     STT_RETRY_DELAY: int = int(os.getenv("STT_RETRY_DELAY", "2"))
+    
+    # ========== TEXT-TO-SPEECH (TTS) ==========
+    HABIBI_TTS_SRC: str = os.getenv("HABIBI_TTS_SRC", "")  # Auto-detected from installed package if empty
+    HABIBI_MODEL_PATH: str = os.getenv("HABIBI_MODEL_PATH", "")  # Auto-detected from HF cache if empty  
+    HABIBI_DEVICE: str = os.getenv("HABIBI_DEVICE", "auto")  # "auto", "cpu", "cuda"
+    HABIBI_REFERENCE_AUDIO: str = os.getenv("HABIBI_REFERENCE_AUDIO", "")  # Auto-detected from package if empty
+    TTS_DEFAULT_SPEED: float = float(os.getenv("TTS_DEFAULT_SPEED", "0.8"))  # Speech rate multiplier (1.0 = normal)
+    TTS_DEFAULT_CFG_STRENGTH: float = float(os.getenv("TTS_DEFAULT_CFG_STRENGTH", "3.0"))  # Guidance strength
     
     # ========== SERVER ==========
     HOST: str = os.getenv("HOST", "0.0.0.0")
@@ -123,6 +131,76 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         """Check if running in development."""
         return self.ENVIRONMENT == "development"
+
+    def get_habibi_tts_src(self) -> str:
+        """Get Habibi-TTS source path with auto-detection."""
+        if self.HABIBI_TTS_SRC:
+            return self.HABIBI_TTS_SRC
+        
+        # Try to find installed habibi-tts package
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec("habibi_tts")
+            if spec and spec.origin:
+                package_dir = os.path.dirname(spec.origin)
+                return package_dir
+        except ImportError:
+            pass
+        
+        # Fallback to common locations
+        common_paths = [
+            os.path.expanduser("~/habibi-tts/src"),
+            "/opt/habibi-tts/src",
+            "./habibi-tts/src"
+        ]
+        
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+        
+        # If nothing found, return empty (will cause error with helpful message)
+        return ""
+    
+    def get_habibi_model_path(self) -> str:
+        """Get Habibi-TTS model path with auto-detection."""
+        if self.HABIBI_MODEL_PATH:
+            return self.HABIBI_MODEL_PATH
+        
+        # Try HuggingFace cache locations
+        common_cache_paths = [
+            os.path.expanduser("~/.cache/huggingface/hub"),
+            os.path.expanduser("~/.cache/huggingface"),
+            "/tmp/huggingface_cache",
+            "./models"
+        ]
+        
+        for path in common_cache_paths:
+            if os.path.exists(path):
+                return path
+        
+        # Fallback to default HF cache
+        return os.path.expanduser("~/.cache/huggingface/hub")
+    
+    def get_habibi_reference_audio(self) -> str:
+        """Get Habibi-TTS MSA reference audio path with auto-detection."""
+        if self.HABIBI_REFERENCE_AUDIO:
+            return self.HABIBI_REFERENCE_AUDIO
+        
+        # Try to find in installed package
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec("habibi_tts")
+            if spec and spec.origin:
+                package_dir = os.path.dirname(spec.origin)
+                reference_path = os.path.join(package_dir, "assets", "MSA.mp3")
+                if os.path.exists(reference_path):
+                    return reference_path
+        except ImportError:
+            pass
+        
+        # Fallback to temp directory with generated silent audio
+        fallback_path = "/tmp/msa_reference.wav"
+        return fallback_path
 
 
 settings = Settings()

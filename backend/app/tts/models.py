@@ -40,7 +40,7 @@ class ArabicDialect(str, Enum):
 def _get_habibi_snapshot_path() -> str:
     """Get the HuggingFace snapshot path from settings or default."""
     from app.config import settings
-    base_path = settings.HABIBI_MODEL_PATH
+    base_path = settings.get_habibi_model_path()  # Use auto-detection method
     return os.path.join(
         base_path,
         "models--SWivid--Habibi-TTS",
@@ -54,17 +54,37 @@ def _get_dialect_config() -> dict:
     from app.config import settings
     snapshot_path = _get_habibi_snapshot_path()
     
+    # Use configurable reference audio path
+    ref_audio_path = settings.get_habibi_reference_audio()
+    
+    # If the configured path doesn't exist, try package assets
+    if not os.path.exists(ref_audio_path):
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec("habibi_tts")
+            if spec and spec.submodule_search_locations:
+                package_path = spec.submodule_search_locations[0]
+                ref_audio_candidate = os.path.join(package_path, "assets/MSA.mp3")
+                if os.path.exists(ref_audio_candidate):
+                    ref_audio_path = ref_audio_candidate
+        except (ImportError, AttributeError, TypeError, IndexError) as e:
+            logger.debug(f"Could not find habibi_tts package assets: {e}")
+    
+    # Final fallback to snapshot path
+    if not os.path.exists(ref_audio_path):
+        ref_audio_path = os.path.join(snapshot_path, "assets/MSA.mp3")
+    
     return {
         ArabicDialect.MSA: {
             "model_path": f"{snapshot_path}/Specialized/MSA/model_200000.safetensors",
             "vocab_path": f"{snapshot_path}/Specialized/MSA/vocab.txt",
-            "ref_audio": os.path.join(snapshot_path, "assets/MSA.mp3"),
+            "ref_audio": ref_audio_path,
             "ref_text": (
                 "كان اللعيب حاضرًا في العديد من الأنشطة والفعاليات المرتبطة بكأس العالم، "
                 "مما سمح للجماهير بالتفاعل معه والتقاط الصور التذكارية."
             ),
-            "default_speed": 0.8,
-            "default_cfg_strength": 3.0,
+            "default_speed": settings.TTS_DEFAULT_SPEED,  # Use configurable speed
+            "default_cfg_strength": settings.TTS_DEFAULT_CFG_STRENGTH,  # Use configurable CFG
         },
     }
 
@@ -233,13 +253,18 @@ class HabibiTTSModelManager(Task):
         if not os.path.exists(_ref_audio):
             logger.warning("Reference audio not found at %s, creating fallback", _ref_audio)
             # Create a simple 1-second silent audio as fallback
+            import tempfile
             import numpy as np
-            import soundfile as sf
-            fallback_path = "/tmp/msa_reference.wav"
+            from app.config import settings
+            
+            # Use configurable temp directory or system temp
+            temp_dir = os.environ.get('TTS_TEMP_DIR', tempfile.gettempdir())
+            os.makedirs(temp_dir, exist_ok=True)
+            fallback_path = os.path.join(temp_dir, "msa_reference.wav")
+            
             sample_rate = 24000
             samples = np.zeros(int(sample_rate * 1.0))
-            os.makedirs("/tmp", exist_ok=True)
-            sf.write(fallback_path, samples, sample_rate)
+            sf.write(fallback_path, samples, sample_rate)  # uses module-level sf import
             _ref_audio = fallback_path
             # Use short valid Arabic text for reference (empty string causes error in habibi_tts)
             _ref_text = "مرحبا"
