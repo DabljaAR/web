@@ -1,0 +1,67 @@
+# =============================================================================
+# DabljaAR Terraform Configuration Example
+# =============================================================================
+# Copy this file to terraform.tfvars and fill in your values
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Required: GCP Project Configuration
+# -----------------------------------------------------------------------------
+project_id   = "your-gcp-project-id"    # Your GCP project ID
+project_name = "dabljaar"                # Short name for resources
+environment  = "dev"                     # dev, staging, or prod
+
+# -----------------------------------------------------------------------------
+# Required: Region & Zone
+# -----------------------------------------------------------------------------
+# Choose a region with T4 GPUs available
+# See: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones
+region = "us-central1"
+zone   = "us-central1-a"
+
+# -----------------------------------------------------------------------------
+# Required: Secrets (DO NOT commit actual values!)
+# -----------------------------------------------------------------------------
+# Option 1: Set via environment variables
+#   export TF_VAR_db_password="your-password"
+#   export TF_VAR_secret_key="your-secret-key"
+#   export TF_VAR_minio_access_key="your-minio-key"
+#   export TF_VAR_minio_secret_key="your-minio-secret"
+#
+# Option 2: Enter when prompted (don't store in file)
+#
+# Option 3: Use a secrets file (add to .gitignore!)
+#   -var-file="secrets.tfvars"
+
+db_password      = ""  # PostgreSQL password
+secret_key       = ""  # JWT signing key
+minio_access_key = ""  # MinIO access key
+minio_secret_key = ""  # MinIO secret key
+
+# -----------------------------------------------------------------------------
+# Optional: Network Configuration
+# -----------------------------------------------------------------------------
+subnet_cidr = "10.0.0.0/24"
+
+# Admin access (SSH, Flower, MinIO console)
+# Add your IP: curl ifconfig.me
+admin_cidr_blocks = [
+  # "YOUR_IP/32",     # Your home IP
+  # "OFFICE_IP/32",   # Office IP
+]
+
+# -----------------------------------------------------------------------------
+# Optional: Compute Configuration
+# -----------------------------------------------------------------------------
+machine_type   = "n1-standard-4"     # 4 vCPU, 15GB RAM
+gpu_type       = "nvidia-tesla-t4"   # 16GB VRAM
+gpu_count      = 1
+enable_spot    = true                # ~70% cost savings
+boot_disk_size = 50                  # GB
+data_disk_size = 100                 # GB (persistent)
+
+# -----------------------------------------------------------------------------
+# Optional: Application Configuration
+# -----------------------------------------------------------------------------
+app_repo_url    = "https://github.com/your-org/dabljaar.git"
+app_repo_branch = "main"
