@@ -13,6 +13,23 @@ The DabljaAR site frontend. built with React and Vite.
 
 ### Getting Started
 
+### Preferred (Ubuntu 22.04)
+
+From the repository root, use the bootstrap script to prepare and run the stack:
+
+```bash
+./start.sh setup
+./start.sh run
+```
+
+To work with frontend logs and lifecycle:
+
+```bash
+./start.sh logs frontend
+./start.sh status
+./start.sh stop
+```
+
 **Prerequisites**:
 - Node.js (version 20 or later): Node 24.x is recommended.
 - npm (comes with Node.js)
