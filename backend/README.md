@@ -60,6 +60,23 @@ backend/
 
 ## Setup Instructions
 
+### Preferred (Ubuntu 22.04)
+
+From the repository root, use the bootstrap script to install dependencies, create env files, and run services:
+
+```bash
+./start.sh setup
+./start.sh run
+```
+
+Useful lifecycle commands:
+
+```bash
+./start.sh status
+./start.sh logs backend
+./start.sh stop
+```
+
 **Prerequisites**
 - Python 3.10+
 - PostgreSQL database

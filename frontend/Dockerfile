@@ -1,5 +1,5 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -12,11 +12,15 @@ RUN npm install --legacy-peer-deps
 # Copy source code
 COPY . .
 
+# Vite reads env vars at build time, so pass API base URL into the build stage.
+ARG VITE_API_BASE_URL=http://136.112.92.233:8000/api
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 # Build the application
 RUN npm run build --legacy-peer-deps
 
 # Production stage
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 
