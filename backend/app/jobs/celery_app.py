@@ -1,4 +1,29 @@
 """Celery application factory for DabljaAR async job processing."""
+import os
+
+# Pre-import guard: configure GPU/CPU before any AI libraries load
+# This must be BEFORE importing any AI modules (torch, torchaudio, f5_tts, etc.)
+def _configure_device():
+    """Configure CUDA/CPU device based on HABIBI_DEVICE setting."""
+    # Load settings early to get HABIBI_DEVICE
+    from app.config import settings
+    habibi_device = settings.HABIBI_DEVICE.lower()
+    
+    if habibi_device == "cpu":
+        # Disable CUDA before any AI library loads
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        os.environ["TORCH_CUDA_ARCH_LIST"] = ""
+        return "cpu"
+    elif habibi_device == "cuda":
+        # Explicitly enable CUDA
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        return "cuda"
+    else:  # "auto"
+        # Let torch detect automatically
+        return "auto"
+
+_device_mode = _configure_device()
+
 from celery import Celery
 from app.config import settings
 from app.jobs.models import JobStatus
@@ -37,6 +62,7 @@ celery_app.conf.update(
         "app.jobs.tasks.pipeline.tts_synthesize": {"queue": "ai_tts"},
         "app.jobs.tasks.pipeline.dubbing_merge":  {"queue": "pipeline"},
         "app.jobs.tasks.nmt.*":      {"queue": "ai_nmt"},
+        "app.jobs.tasks.tts.synthesize": {"queue": "ai_tts"},
     },
 
     # Autodiscovery target packages
@@ -45,5 +71,10 @@ celery_app.conf.update(
         "app.jobs.tasks.pipeline",
         "app.jobs.tasks.nmt",
         "app.stt.models",
+        "app.tts.models",
     ],
 )
+
+# Register TTS task
+from app.tts.models import register_tts_task
+synthesize_tts = register_tts_task(celery_app)

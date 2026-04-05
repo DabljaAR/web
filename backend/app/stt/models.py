@@ -437,61 +437,30 @@ def _run_stt_job(
                 job.updated_at = datetime.utcnow()
                 db.commit()
 
-                # 3. Transcribe and dispatch segments progressively
-                segments_generator, info = task.model.transcribe(
-                    str(local_path), 
-                    language=language,
-                    vad_filter=True,
-                    vad_parameters={"min_silence_duration_ms": 50}
-                )
-                
-                structured_segments = []
-                nmt_tasks_submitted = 0
-                
-                for idx, seg in enumerate(segments_generator):
-                    segment_dict = {
-                        "start": round(seg.start, 2),
-                        "end":   round(seg.end,   2),
-                        "text":  clean_text(seg.text),
-                    }
-                    structured_segments.append(segment_dict)
-                    
-                    # 4. Dispatch segments to NMT queue for parallel translation
+                # 3. Transcribe — direct blocking call (sync worker context)
+                result = task.transcribe(str(local_path), language=language)
+
+            # 4. Dispatch segments to NMT queue for parallel translation
+            segments = result.get("segments", [])
+            nmt_tasks_submitted = 0
+            
+            if segments:
+                logger.info(f"[STT] Dispatching {len(segments)} segments to NMT queue for job {job_id}")
+                for idx, segment in enumerate(segments):
                     nmt_translate_segment.apply_async(
                         kwargs={
                             "segment_id": idx,
                             "job_id": job_id,
-                            "text": segment_dict["text"],
-                            "start": segment_dict["start"],
-                            "end": segment_dict["end"],
-                            "source_lang": language or info.language,
+                            "text": segment.get("text", ""),
+                            "start": segment.get("start", 0.0),
+                            "end": segment.get("end", 0.0),
+                            "source_lang": language,
                             "target_lang": target_lang,
                         },
                         queue="ai_nmt"
                     )
                     nmt_tasks_submitted += 1
-                    
-                    # Update progress linearly (from 25% to 90%)
-                    current_time = segment_dict["end"]
-                    prog = 20.0 + (70.0 * current_time / max(info.duration, 0.1))
-                    job.progress = min(prog, 90.0)
-                    job.updated_at = datetime.utcnow()
-                    db.commit()
-
-                result = {
-                    "transcript": " ".join(s["text"] for s in structured_segments),
-                    "segments":   structured_segments,
-                    "metadata": {
-                        "language":        info.language,
-                        "duration":        round(info.duration, 2),
-                        "model_size":      task.model_size,
-                        "device":          task.device,
-                        "compute_type":    task.compute_type,
-                        "processing_time": 0.0, # Will be set soon
-                        "segment_count":   len(structured_segments),
-                    },
-                }
-                
+            
             result["nmt_tasks_submitted"] = nmt_tasks_submitted
 
             # 5. COMPLETED

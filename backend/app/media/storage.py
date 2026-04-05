@@ -40,6 +40,18 @@ class StorageService(Protocol):
         """Upload a local directory to storage."""
         ...
 
+    async def upload_bytes(self, data: bytes, key: str, content_type: str = "audio/wav") -> str:
+        """Upload raw bytes to storage."""
+        ...
+
+    async def download(self, path: str, local_path: str) -> bool:
+        """Download a file from storage to a local path."""
+        ...
+
+    async def upload_bytes(self, data: bytes, key: str, content_type: str = "audio/wav") -> str:
+        """Upload raw bytes to storage."""
+        ...
+
     async def download(self, path: str, local_path: str) -> bool:
         """Download a file from storage to a local path."""
         ...
@@ -154,6 +166,15 @@ class LocalStorageService:
         except Exception as e:
             logger.error(f"Error uploading directory locally: {e}")
             raise e
+
+    async def upload_bytes(self, data: bytes, key: str, content_type: str = "audio/wav") -> str:
+        """Upload raw bytes to local storage."""
+        from pathlib import Path
+        file_path = self.base_dir / key
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "wb") as f:
+            f.write(data)
+        return key
 
     async def download(self, path: str, local_path: str) -> bool:
         src_path = self.base_dir / path
@@ -323,6 +344,23 @@ class S3StorageService:
                     await s3.upload_file(str(item), self.bucket_name, key)
                     
         return remote_prefix
+
+    async def upload_bytes(self, data: bytes, key: str, content_type: str = "audio/wav") -> str:
+        """Upload raw bytes to S3/MinIO."""
+        from io import BytesIO
+        async with self.session.client("s3",
+            endpoint_url=self.endpoint_url,
+            aws_access_key_id=self.access_key,
+            aws_secret_access_key=self.secret_key
+        ) as s3:
+            await self._ensure_bucket(s3)
+            await s3.upload_fileobj(
+                BytesIO(data),
+                self.bucket_name,
+                key,
+                ExtraArgs={"ContentType": content_type}
+            )
+        return key
 
     async def download(self, path: str, local_path: str) -> bool:
         try:

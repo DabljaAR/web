@@ -198,6 +198,7 @@ def stt_transcribe(
                 # Use as_completed to process results as they arrive (out of order)
                 from celery.result import AsyncResult
                 async_results = [AsyncResult(r.id) for r in nmt_results]
+                processed_result_ids = set()  # Track which results we've already processed
 
                 start_wait = time.time()
                 timeout = 600
@@ -210,17 +211,39 @@ def stt_transcribe(
 
                     # Check each result (polling approach - in production could use callback)
                     for res in async_results:
-                        if res.ready() and not res.info.get("_checked", False):
-                            res.info["_checked"] = True
+                        if res.ready() and res.id not in processed_result_ids:
+                            processed_result_ids.add(res.id)  # Mark as processed
                             try:
-                                task_result = res.get(timeout=1)
+                                task_result = res.result  # Use .result instead of .get()
+                                logger.debug(f"[STT] Got NMT result: {task_result} | job={job_id}")
                                 if task_result and "segment_id" in task_result:
                                     idx = task_result["segment_id"]
                                     start_time = task_result.get("start", 0)
                                     txt = task_result.get("translated_text")
 
                                     if 0 <= idx < len(structured_segments) and txt:
-                                        # Push to priority queue for ordered processing
+                                        # Update segment with translation immediately
+                                        structured_segments[idx]["translated_text"] = txt
+                                        logger.info(f"[STT] Received translation for segment {idx}: '{txt[:50]}...' | job={job_id}")
+                                        
+                                        # PROGRESSIVE TTS: Dispatch TTS immediately for this segment
+                                        from app.jobs.celery_app import synthesize_tts
+                                        if txt.strip():  # Only if there's actual text
+                                            tts_result = synthesize_tts.apply_async(
+                                                kwargs={
+                                                    "text": txt,
+                                                    "dialect": "MSA",
+                                                    "job_id": f"{job_id}_segment_{idx}",
+                                                    "upload_to_minio": True,
+                                                    "minio_key": f"tts/{video_id}/segment_{idx}.wav",
+                                                },
+                                                queue="ai_tts",
+                                            )
+                                            # Store reference for later checking
+                                            structured_segments[idx]["tts_task_id"] = tts_result.id
+                                            logger.info(f"[STT] Progressive TTS dispatched for segment {idx} | job={job_id}")
+                                        
+                                        # Push to priority queue for ordering verification
                                         segment_buffer.push(
                                             segment_id=idx,
                                             start=start_time,
@@ -228,7 +251,7 @@ def stt_transcribe(
                                         )
                                         completed_count += 1
                                         logger.debug(
-                                            f"[STT] NMT result received segment_id={idx} start={start_time:.2f} | job={job_id}"
+                                            f"[STT] NMT+TTS result processed segment_id={idx} start={start_time:.2f} | job={job_id}"
                                         )
                             except Exception as e:
                                 failed_count += 1
@@ -237,20 +260,19 @@ def stt_transcribe(
                     # Small sleep to avoid busy-waiting
                     time.sleep(0.1)
 
-                # Pop all results in sequence order and merge into segments
-                for i in range(len(structured_segments)):
-                    item = segment_buffer.pop_next(i)
-                    if item and item.get("translated_text"):
-                        structured_segments[i]["translated_text"] = item["translated_text"]
+            # Pop all results in sequence order (no longer needed for TTS dispatch since progressive)
+            for i in range(len(structured_segments)):
+                item = segment_buffer.pop_next(i)
+                # Translation already applied in progressive loop above
+                
+            # Validate NMT count
+            successful_translations = completed_count
+            if successful_translations != nmt_tasks_submitted:
+                logger.warning(
+                    f"[STT] NMT+TTS dispatch incomplete: {successful_translations}/{nmt_tasks_submitted} segments processed | job={job_id}"
+                )
 
-                # Validate NMT count
-                successful_translations = completed_count
-                if successful_translations != nmt_tasks_submitted:
-                    logger.warning(
-                        f"[STT] NMT translation incomplete: {successful_translations}/{nmt_tasks_submitted} segments translated | job={job_id}"
-                    )
-
-                logger.info(f"[STT] NMT complete: {completed_count} success, {failed_count} failed | job={job_id}")
+            logger.info(f"[STT] Progressive NMT+TTS complete: {completed_count} segments processed, {failed_count} failed | job={job_id}")
 
             # Combine individual translated segments into a full translated transcript
             if target_lang and target_lang != info.language:
@@ -260,13 +282,24 @@ def stt_transcribe(
             else:
                 result["translated_transcript"] = result["transcript"]
 
+            # ── 6. Final result with progressive TTS metadata ──────────────────────
+            tts_segments_dispatched = sum(1 for s in structured_segments if s.get("tts_task_id"))
+            result.update({
+                "job_id": job_id,
+                "video_id": video_id,
+                "transcript_key": file_key,
+                "segments": structured_segments,
+                "nmt_tasks_submitted": nmt_tasks_submitted,
+                "tts_segments_dispatched": tts_segments_dispatched,
+            })
+
         except Exception as exc:
             logger.error("[STT pipeline] transcription error job=%s: %s", job_id, exc)
             raise self.retry(exc=exc)
 
         self.update_progress(job_id, 95.0)
 
-        # ── 6. Persist output_data — on_success hook will set COMPLETED ──────────
+        # ── 7. Persist output_data — on_success hook will set COMPLETED ──────────
         output = {
             "job_id":         job_id,
             "video_id":       video_id,
@@ -276,17 +309,19 @@ def stt_transcribe(
             "segments":       structured_segments,
             "metadata":       result["metadata"],
             "nmt_tasks_submitted": nmt_tasks_submitted,
+            "tts_segments_dispatched": tts_segments_dispatched,
         }
 
         self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
         # Note: BaseJobTask.on_success will set it to COMPLETED immediately after return
 
         logger.info(
-            "[STT pipeline] job=%s done | duration=%.1fs | segments=%d | nmt_tasks=%d",
+            "[STT pipeline] PROGRESSIVE job=%s done | duration=%.1fs | segments=%d | nmt_tasks=%d | tts_dispatched=%d",
             job_id,
             result["metadata"].get("duration", 0),
             result["metadata"].get("segment_count", 0),
             nmt_tasks_submitted,
+            tts_segments_dispatched,
         )
 
         return output

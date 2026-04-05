@@ -17,7 +17,6 @@ from app.shared.enums import (
 from app.media.models import Video
 
 # Import Video to avoid SQLAlchemy mapper errors when resolving User.videos
-from app.media.models import Video
 
 class Role(Base):
     __tablename__ = "roles"
