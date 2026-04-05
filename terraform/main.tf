@@ -99,7 +99,7 @@ module "iam" {
   gcs_bucket  = module.storage.bucket_name
   secret_ids  = module.secrets.secret_ids
 
-  depends_on = [google_project_service.apis]
+  depends_on = [google_project_service.apis, module.storage]
 }
 
 # =============================================================================
@@ -116,6 +116,7 @@ module "compute" {
   gpu_type              = var.gpu_type
   gpu_count             = var.gpu_count
   spot                  = var.enable_spot
+  boot_disk_image       = var.boot_disk_image
   boot_disk_size        = var.boot_disk_size
   data_disk_size        = var.data_disk_size
   subnet_self_link      = module.network.subnet_self_link

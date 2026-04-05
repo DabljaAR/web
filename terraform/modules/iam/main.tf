@@ -19,7 +19,6 @@ resource "google_project_iam_member" "vm_roles" {
 
 # Grant access to GCS bucket
 resource "google_storage_bucket_iam_member" "vm_bucket_access" {
-  count  = var.gcs_bucket != null ? 1 : 0
   bucket = var.gcs_bucket
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${google_service_account.vm.email}"

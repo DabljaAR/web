@@ -103,8 +103,8 @@ variable "gpu_count" {
   default     = 1
 
   validation {
-    condition     = var.gpu_count >= 1 && var.gpu_count <= 4
-    error_message = "GPU count must be between 1 and 4."
+    condition     = var.gpu_count >= 0 && var.gpu_count <= 4
+    error_message = "GPU count must be between 0 and 4."
   }
 }
 
@@ -112,6 +112,17 @@ variable "enable_spot" {
   description = "Use Spot VM for ~70% cost savings (can be preempted)"
   type        = bool
   default     = true
+}
+
+variable "boot_disk_image" {
+  description = "Boot disk image family path for the VM"
+  type        = string
+  default     = "projects/deeplearning-platform-release/global/images/family/common-cu128-ubuntu-2204-nvidia-570"
+
+  validation {
+    condition     = can(regex("^projects/[a-z0-9-]+/global/images/family/[a-z0-9-]+$", var.boot_disk_image))
+    error_message = "boot_disk_image must be in the form: projects/<project>/global/images/family/<family>."
+  }
 }
 
 variable "boot_disk_size" {

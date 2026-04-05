@@ -45,10 +45,13 @@ resource "google_compute_instance" "vm" {
     device_name = "data"
   }
 
-  # GPU configuration
-  guest_accelerator {
-    type  = var.gpu_type
-    count = var.gpu_count
+  # GPU configuration (optional for CPU-only mode)
+  dynamic "guest_accelerator" {
+    for_each = var.gpu_count > 0 ? [1] : []
+    content {
+      type  = var.gpu_type
+      count = var.gpu_count
+    }
   }
 
   # Required for GPU instances
@@ -79,6 +82,7 @@ resource "google_compute_instance" "vm" {
       app_repo_url    = var.app_repo_url
       app_repo_branch = var.app_repo_branch
       project_id      = var.project_id
+      gpu_enabled     = var.gpu_count > 0 ? "true" : "false"
     })
     enable-oslogin = "TRUE"
   }

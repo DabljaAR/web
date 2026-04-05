@@ -21,7 +21,6 @@ variable "roles" {
 variable "gcs_bucket" {
   description = "GCS bucket name to grant access to"
   type        = string
-  default     = null
 }
 
 variable "secret_ids" {
