@@ -86,7 +86,7 @@ const Profile = () => {
     const formData = new FormData();
     formData.append('file', file);
 
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://136.112.92.233:8000/api';
     const response = await fetch(`${API_BASE_URL}/upload/avatar`, {
       method: 'POST',
       body: formData,
