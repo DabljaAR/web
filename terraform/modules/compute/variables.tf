@@ -45,7 +45,7 @@ variable "spot" {
 variable "boot_disk_image" {
   description = "Boot disk image"
   type        = string
-  default     = "projects/ml-images/global/images/family/common-gpu"
+  default     = "projects/deeplearning-platform-release/global/images/family/common-cu128-ubuntu-2204-nvidia-570"
 }
 
 variable "boot_disk_size" {

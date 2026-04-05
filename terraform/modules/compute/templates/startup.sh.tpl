@@ -11,23 +11,29 @@ echo "=========================================="
 echo "Startup script started at $(date)"
 echo "=========================================="
 
+GPU_ENABLED="${gpu_enabled}"
+
 # =============================================================================
-# 1. Wait for GPU driver to be ready
+# 1. Wait for GPU driver to be ready (GPU mode only)
 # =============================================================================
-echo "Waiting for GPU driver..."
-MAX_RETRIES=30
-RETRY_COUNT=0
-until nvidia-smi > /dev/null 2>&1; do
+if [ "$GPU_ENABLED" = "true" ]; then
+  echo "Waiting for GPU driver..."
+  MAX_RETRIES=30
+  RETRY_COUNT=0
+  until nvidia-smi > /dev/null 2>&1; do
     RETRY_COUNT=$((RETRY_COUNT + 1))
     if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
-        echo "ERROR: GPU driver not ready after $MAX_RETRIES attempts"
-        exit 1
+      echo "ERROR: GPU driver not ready after $MAX_RETRIES attempts"
+      exit 1
     fi
     echo "Waiting for GPU... (attempt $RETRY_COUNT/$MAX_RETRIES)"
     sleep 10
-done
-echo "GPU driver ready!"
-nvidia-smi
+  done
+  echo "GPU driver ready!"
+  nvidia-smi
+else
+  echo "GPU disabled, running in CPU-only mode"
+fi
 
 # =============================================================================
 # 2. Install Docker and Docker Compose (if not present)
@@ -43,16 +49,20 @@ if ! docker compose version &> /dev/null; then
     apt-get update && apt-get install -y docker-compose-plugin
 fi
 
-# Install NVIDIA Container Toolkit for GPU support in Docker
-if ! dpkg -l | grep -q nvidia-container-toolkit; then
+# Install NVIDIA Container Toolkit for GPU support in Docker (GPU mode only)
+if [ "$GPU_ENABLED" = "true" ]; then
+  if ! dpkg -l | grep -q nvidia-container-toolkit; then
     echo "Installing NVIDIA Container Toolkit..."
     distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
     curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | apt-key add -
     curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | \
-        tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
     apt-get update && apt-get install -y nvidia-container-toolkit
     nvidia-ctk runtime configure --runtime=docker
     systemctl restart docker
+  fi
+else
+  echo "Skipping NVIDIA Container Toolkit (CPU-only mode)"
 fi
 
 # =============================================================================
@@ -189,11 +199,17 @@ services:
   minio:
     volumes:
       - /mnt/data/minio:/data
+EOF
 
+cat >> $APP_DIR/docker-compose.override.yml <<EOF
   celery-worker-ai:
     volumes:
       - ./backend:/app
       - /opt/models:/opt/models:ro
+EOF
+
+if [ "$GPU_ENABLED" = "true" ]; then
+cat >> $APP_DIR/docker-compose.override.yml <<EOF
     deploy:
       resources:
         reservations:
@@ -202,6 +218,7 @@ services:
               count: 1
               capabilities: [gpu]
 EOF
+fi
 
 # =============================================================================
 # 9. Start Docker Compose services
