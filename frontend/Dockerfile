@@ -12,6 +12,10 @@ RUN npm install --legacy-peer-deps
 # Copy source code
 COPY . .
 
+# Vite reads env vars at build time, so pass API base URL into the build stage.
+ARG VITE_API_BASE_URL=http://localhost:8000/api
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 # Build the application
 RUN npm run build --legacy-peer-deps
 
