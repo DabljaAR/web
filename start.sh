@@ -20,6 +20,7 @@ FRONTEND_ENV_EXAMPLE="$FRONTEND_DIR/.env.example"
 FRONTEND_ENV_FILE="$FRONTEND_DIR/.env"
 
 BACKEND_VENV="$BACKEND_DIR/.venv"
+SELECTED_PYTHON_BIN=""
 
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
@@ -226,7 +227,7 @@ install_apt_packages_if_missing() {
         postgresql-client
         lsof
         psmisc
-        ss
+          iproute2
     )
 
     local -a missing=()
@@ -251,6 +252,64 @@ install_apt_packages_if_missing() {
     fi
     
     log_ok "All required packages installed."
+}
+
+select_python_bin() {
+    if [[ -n "$SELECTED_PYTHON_BIN" ]]; then
+        return
+    fi
+
+    local -a candidates=(
+        python3.12
+        python3.11
+        /usr/bin/python3
+        python3
+    )
+
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if ! command -v "$candidate" >/dev/null 2>&1; then
+            continue
+        fi
+
+        local version
+        version="$($candidate -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true)"
+        if [[ -z "$version" ]]; then
+            continue
+        fi
+
+        local major minor
+        major="${version%%.*}"
+        minor="${version##*.}"
+        if [[ "$major" -eq 3 && "$minor" -ge 10 && "$minor" -le 12 ]]; then
+            SELECTED_PYTHON_BIN="$candidate"
+            log_ok "Using Python $version from $candidate"
+            return
+        fi
+    done
+
+    die "No supported Python version found (need Python 3.10-3.12 for local deps like torch). Install python3.12 or python3.11 and rerun setup."
+}
+
+venv_healthy() {
+    [[ -x "$BACKEND_VENV/bin/python" ]] || return 1
+    "$BACKEND_VENV/bin/python" -c "import sys; print(sys.executable)" >/dev/null 2>&1 || return 1
+    "$BACKEND_VENV/bin/python" -m pip --version >/dev/null 2>&1 || return 1
+    return 0
+}
+
+ensure_backend_runtime_deps() {
+    if ! "$BACKEND_VENV/bin/python" -c "import uvicorn" >/dev/null 2>&1; then
+        die "uvicorn is missing in backend virtualenv. Run './start.sh setup' to repair dependencies."
+    fi
+
+    if ! "$BACKEND_VENV/bin/python" -c "import torch" >/dev/null 2>&1; then
+        log_warn "torch is missing in backend virtualenv. Attempting targeted install."
+        if ! "$BACKEND_VENV/bin/pip" install "torch>=2.6.0,<3"; then
+            die "Failed to install torch in backend virtualenv. Ensure selected Python is 3.10-3.12 and rerun './start.sh setup'."
+        fi
+        "$BACKEND_VENV/bin/python" -c "import torch" >/dev/null 2>&1 || die "torch still unavailable after install. Recreate env with './start.sh setup'."
+    fi
 }
 
 install_node_if_needed() {
@@ -369,11 +428,16 @@ normalize_frontend_env_key() {
 }
 
 ensure_python_env() {
-    require_cmd python3
+    select_python_bin
+
+    if [[ -d "$BACKEND_VENV" ]] && ! venv_healthy; then
+        log_warn "Detected broken backend virtualenv at $BACKEND_VENV. Recreating it."
+        rm -rf "$BACKEND_VENV"
+    fi
 
     if [[ ! -x "$BACKEND_VENV/bin/python" ]]; then
-        log_info "Creating backend virtual environment at $BACKEND_VENV..."
-        if ! python3 -m venv "$BACKEND_VENV"; then
+        log_info "Creating backend virtual environment at $BACKEND_VENV using $SELECTED_PYTHON_BIN..."
+        if ! "$SELECTED_PYTHON_BIN" -m venv "$BACKEND_VENV"; then
             die "Failed to create Python virtual environment. Check disk space and permissions."
         fi
     fi
@@ -390,6 +454,8 @@ ensure_python_env() {
     if ! "$BACKEND_VENV/bin/pip" install -r "$BACKEND_DIR/requirements.txt"; then
         die "Failed to install backend dependencies. Check requirements.txt and internet connection."
     fi
+
+    ensure_backend_runtime_deps
     
     log_ok "Backend Python environment ready."
 }
@@ -610,7 +676,13 @@ cmd_run() {
     ensure_runtime_dirs
     ensure_system_services
 
-    [[ -x "$BACKEND_VENV/bin/python" ]] || die "Missing backend venv. Run './start.sh setup' first."
+    if [[ ! -x "$BACKEND_VENV/bin/python" ]] || ! venv_healthy; then
+        log_warn "Backend virtualenv missing or invalid. Repairing it now."
+        ensure_python_env
+    fi
+
+    ensure_backend_runtime_deps
+
     [[ -f "$BACKEND_ENV_FILE" ]] || die "Missing backend .env. Run './start.sh setup' first."
     [[ -f "$FRONTEND_ENV_FILE" ]] || die "Missing frontend .env. Run './start.sh setup' first."
 

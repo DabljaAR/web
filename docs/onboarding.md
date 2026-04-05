@@ -22,6 +22,25 @@ git clone <repo-url> web
 cd web
 ```
 
+## 1.5 Preferred Ubuntu 22.04 Path (Native)
+
+If you are on Ubuntu 22.04, use the project bootstrap script:
+
+```bash
+./start.sh setup
+./start.sh run
+```
+
+Management commands:
+
+```bash
+./start.sh status
+./start.sh logs backend
+./start.sh stop
+```
+
+This path installs missing host dependencies, bootstraps env/config files, and starts local services with managed PID/log files.
+
 ---
 
 ## 2. Backend Setup

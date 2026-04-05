@@ -11,6 +11,34 @@ Please refer to the README files in the `backend/` and `frontend/` directories f
 - `backend/README.md`: Instructions for setting up and running the backend server.
 - `frontend/README.md`: Instructions for setting up and running the frontend client.
 
+## Quick Start (Ubuntu 22.04 Native Dev)
+
+Use the root `start.sh` script to bootstrap and run the local stack natively:
+
+```bash
+# From project root
+./start.sh setup
+./start.sh run
+```
+
+Useful commands:
+
+```bash
+./start.sh status
+./start.sh logs backend
+./start.sh logs all
+./start.sh stop
+```
+
+Optional flags:
+
+```bash
+./start.sh setup --skip-migrations
+./start.sh run --no-frontend --no-flower
+```
+
+The script is idempotent and manages local runtime files under `.runtime/`.
+
 ## Technologies Used
 - Backend: Python, FastAPI, dbmate, PostgreSQL
 - Frontend: Typescript, React, Vite, Tailwind CSS
