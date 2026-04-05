@@ -140,3 +140,13 @@ vite.config.ts.timestamp-*
 
 # minio
 data/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/crash.log
+terraform/override.tf
+terraform/override.tf.json
+terraform/*.tfvars
+!terraform/*.tfvars.example
