@@ -1,20 +1,23 @@
 """Celery application factory for DabljaAR async job processing."""
+import logging
 import os
 
+logger = logging.getLogger(__name__)
+
 # Pre-import guard: configure GPU/CPU before any AI libraries load
-# This must be BEFORE importing any AI modules (torch, torchaudio, f5_tts, etc.)
+# This must be BEFORE importing any AI modules (torch, torchaudio, etc.)
 def _configure_device():
-    """Configure CUDA/CPU device based on HABIBI_DEVICE setting."""
-    # Load settings early to get HABIBI_DEVICE
+    """Configure CUDA/CPU device based on SILMA_DEVICE setting."""
+    # Load settings early to get SILMA_DEVICE
     from app.config import settings
-    habibi_device = settings.HABIBI_DEVICE.lower()
+    silma_device = settings.SILMA_DEVICE.lower()
     
-    if habibi_device == "cpu":
+    if silma_device == "cpu":
         # Disable CUDA before any AI library loads
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         os.environ["TORCH_CUDA_ARCH_LIST"] = ""
         return "cpu"
-    elif habibi_device == "cuda":
+    elif silma_device == "cuda":
         # Explicitly enable CUDA
         os.environ.pop("CUDA_VISIBLE_DEVICES", None)
         return "cuda"
@@ -75,6 +78,12 @@ celery_app.conf.update(
     ],
 )
 
-# Register TTS task
-from app.tts.models import register_tts_task
-synthesize_tts = register_tts_task(celery_app)
+# Register TTS task (with graceful fallback if silma-tts not installed)
+try:
+    from app.tts.models import register_tts_task
+    synthesize_tts = register_tts_task(celery_app)
+    logger.info("✅ SILMA-TTS task registered successfully")
+except ImportError as e:
+    logger.warning(f"⚠️  SILMA-TTS task not registered: {e}")
+    logger.warning("Install silma-tts to enable TTS functionality: pip install silma-tts")
+    synthesize_tts = None

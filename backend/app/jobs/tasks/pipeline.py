@@ -75,17 +75,17 @@ def stt_transcribe(
     )
 
     # ── 2. Look up the Video row to get the MinIO key ────────────────────────
-    async def _get_file_key() -> str:
-        from app.core.db import AsyncSessionLocal
-        from app.media.models import Video
-        async with AsyncSessionLocal() as db:
-            video = await db.get(Video, video_id)
+    def _get_file_key() -> str:
+        from app.media.models import Video  # noqa: F401 - needed for SQLAlchemy mapper resolution
+        engine, SessionLocal = self._make_db()
+        with SessionLocal() as db:
+            video = db.get(Video, video_id)
             if not video:
                 raise ValueError(f"Video {video_id} not found.")
             # Prefer the extracted audio track; fall back to the raw file
             return video.audio_path or video.file_path
 
-    file_key: str = self._run_sync(_get_file_key())
+    file_key: str = _get_file_key()
     logger.info("[STT pipeline] job=%s video=%s file_key=%s", job_id, video_id, file_key)
 
     self.update_progress(job_id, 10.0)
@@ -232,7 +232,6 @@ def stt_transcribe(
                                             tts_result = synthesize_tts.apply_async(
                                                 kwargs={
                                                     "text": txt,
-                                                    "dialect": "MSA",
                                                     "job_id": f"{job_id}_segment_{idx}",
                                                     "upload_to_minio": True,
                                                     "minio_key": f"tts/{video_id}/segment_{idx}.wav",
