@@ -78,12 +78,15 @@ def stt_transcribe(
     def _get_file_key() -> str:
         from app.media.models import Video  # noqa: F401 - needed for SQLAlchemy mapper resolution
         engine, SessionLocal = self._make_db()
-        with SessionLocal() as db:
-            video = db.get(Video, video_id)
-            if not video:
-                raise ValueError(f"Video {video_id} not found.")
-            # Prefer the extracted audio track; fall back to the raw file
-            return video.audio_path or video.file_path
+        try:
+            with SessionLocal() as db:
+                video = db.get(Video, video_id)
+                if not video:
+                    raise ValueError(f"Video {video_id} not found.")
+                # Prefer the extracted audio track; fall back to the raw file
+                return video.audio_path or video.file_path
+        finally:
+            engine.dispose()
 
     file_key: str = _get_file_key()
     logger.info("[STT pipeline] job=%s video=%s file_key=%s", job_id, video_id, file_key)
