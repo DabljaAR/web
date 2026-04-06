@@ -63,9 +63,6 @@ class TTSService:
         if not job_id:
             job_id = str(uuid.uuid4())
         
-        # Generate ID for the Job record
-        job_id = str(uuid.uuid4())
-        
         job = Job(
             id=job_id,
             job_type=JobType.TTS_SYNTHESIZE,
