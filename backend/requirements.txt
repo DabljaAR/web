@@ -89,6 +89,6 @@ celery[redis]==5.4.0
 flower==2.0.1
 redis==5.0.8
 aiosqlite==0.20.0
-habibi-tts>=0.1.1
+silma-tts>=0.1.0
 soundfile
 hf-xet
