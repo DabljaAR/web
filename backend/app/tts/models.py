@@ -38,15 +38,35 @@ class ArabicDialect(str, Enum):
 # ---------------------------------------------------------------------------
 
 def _get_habibi_snapshot_path() -> str:
-    """Get the HuggingFace snapshot path from settings or default."""
+    """Get the HuggingFace snapshot path, downloading the model if needed."""
     from app.config import settings
-    base_path = settings.get_habibi_model_path()  # Use auto-detection method
-    return os.path.join(
+
+    base_path = settings.get_habibi_model_path()  # ~/.cache/huggingface/hub
+    snapshot_path = os.path.join(
         base_path,
         "models--SWivid--Habibi-TTS",
         "snapshots",
-        "3ad11a152851245c002156526c5e1d0b12f2b9d5"
+        "3ad11a152851245c002156526c5e1d0b12f2b9d5",
     )
+
+    # Auto-download if not present
+    if not os.path.exists(os.path.join(snapshot_path, "Specialized", "MSA", "vocab.txt")):
+        logger.info("Habibi-TTS model not found at %s — downloading from HuggingFace…", snapshot_path)
+        try:
+            from huggingface_hub import snapshot_download
+            snapshot_download(
+                repo_id="SWivid/Habibi-TTS",
+                revision="3ad11a152851245c002156526c5e1d0b12f2b9d5",
+                cache_dir=base_path,
+            )
+            logger.info("Habibi-TTS model downloaded to %s", snapshot_path)
+        except Exception as exc:
+            logger.error("Failed to download Habibi-TTS model: %s", exc)
+            raise RuntimeError(
+                f"Habibi-TTS model not found at {snapshot_path} and download failed: {exc}"
+            ) from exc
+
+    return snapshot_path
 
 
 def _get_dialect_config() -> dict:
@@ -130,7 +150,7 @@ class HabibiTTSModelManager(Task):
     def _ensure_habibi_path(self) -> None:
         """Add Habibi-TTS src to sys.path if not already present."""
         from app.config import settings
-        habibi_src = settings.HABIBI_TTS_SRC
+        habibi_src = settings.get_habibi_tts_src()
         if habibi_src and habibi_src not in sys.path:
             sys.path.insert(0, habibi_src)
 

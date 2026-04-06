@@ -698,7 +698,7 @@ cmd_run() {
         die "Backend failed to become ready on port $BACKEND_PORT. Check log: $LOG_DIR/backend.log"
     fi
 
-    start_managed_process "worker_stt" "$BACKEND_DIR" "'$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
+    start_managed_process "worker_stt" "$BACKEND_DIR" "'$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
     start_managed_process "worker_nmt" "$BACKEND_DIR" "'$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app worker --loglevel=info -Q ai_nmt,ai_tts,pipeline --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
 
     if [[ "$ENABLE_FLOWER" -eq 1 ]]; then

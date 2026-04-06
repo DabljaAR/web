@@ -101,6 +101,42 @@ class BaseJobTask(celery.Task):
     # Public helpers for sub-tasks
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _create_next_job(
+        parent_job_id: str,
+        job_type: "JobType",
+        *,
+        input_data: Optional[dict] = None,
+    ) -> str:
+        """Create one child job row inheriting user_id/video_id from parent.
+
+        Returns the new job's ID (UUID string).
+        """
+        from uuid import uuid4
+        from app.jobs.models import Job, JobStatus
+
+        new_id = str(uuid4())
+        engine, SessionLocal = BaseJobTask._make_db()
+        try:
+            with SessionLocal() as db:
+                parent = db.get(Job, parent_job_id)
+                if not parent:
+                    raise ValueError(f"Parent job {parent_job_id} not found")
+                child = Job(
+                    id=new_id,
+                    parent_job_id=parent_job_id,
+                    job_type=job_type,
+                    status=JobStatus.QUEUED,
+                    user_id=parent.user_id,
+                    video_id=parent.video_id,
+                    input_data=input_data or {},
+                )
+                db.add(child)
+                db.commit()
+        finally:
+            engine.dispose()
+        return new_id
+
     def update_progress(self, job_id: str, progress: float) -> None:
         """Persist a progress update (0–100) for the given job."""
         self._patch_job(job_id, JobStatus.PROCESSING, progress=progress)
@@ -138,10 +174,15 @@ class BaseJobTask(celery.Task):
 
     def on_success(self, retval, task_id, args, kwargs) -> None:
         """Called by Celery when the task succeeds."""
+        # If the task delegates final completion to a downstream chord callback,
+        # it signals this by returning a dict with _skip_completion=True.
+        if isinstance(retval, dict) and retval.get("_skip_completion"):
+            return
+
         job_id: Optional[str] = args[0] if args else kwargs.get("job_id")
         if isinstance(job_id, dict):
             job_id = job_id.get("job_id")
-            
+
         if not job_id:
             return
         logger.info("Task %s succeeded for job %s", task_id, job_id)

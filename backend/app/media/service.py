@@ -264,7 +264,8 @@ class VideoService:
         options: dict = None
     ) -> Video:
         # 1. Validation
-        if not file.content_type.startswith("video/"):
+        content_type = file.content_type or ""
+        if not content_type.startswith("video/"):
             raise HTTPException(status_code=400, detail="Invalid file type. Expected video.")
             
         # 2. Upload
@@ -303,25 +304,9 @@ class VideoService:
         options: dict = None
     ) -> Video:
         # 1. Validation
-        # Strict check: Must be audio MIME type AND not be a video disguised
-        if not file.content_type.startswith("audio/"):
-            # Check for specific edge cases where browser might send application/octet-stream for audio
-            # But here we want to STRICTLY forbid video/text
-            if file.content_type.startswith("video/") or file.content_type.startswith("text/"):
-                 raise HTTPException(status_code=400, detail="Invalid file type. Expected audio.")
-            
-            # If completely unknown, maybe check extension?
-            # But let's enforce audio/ for now as per requirement.
-            # Actually, user asked "if send file audio as type but the file found other like mp4".
-            # This implies content-type says "audio/..." but extension is ".mp4".
-            # Browsers set content-type based on extension mostly.
-            # If a user manually renames .mp4 to .mp3, browser might send audio/mp3.
-            # Backend validation usually inspects file header (magic bytes) which is expensive/complex here without magic library.
-            # But we can check extension + MIME consistency.
-            pass
-
-        if not file.content_type.startswith("audio/"):
-             raise HTTPException(status_code=400, detail="Invalid file type. Expected audio.")
+        content_type = file.content_type or ""
+        if not content_type.startswith("audio/"):
+            raise HTTPException(status_code=400, detail="Invalid file type. Expected audio.")
 
         # Extra Check: Reject if extension is clearly video
         filename = (file.filename or "").lower()
@@ -357,10 +342,11 @@ class VideoService:
         return new_audio
 
     async def upload_text(
-        self, 
-        user_id: int, 
-        file: UploadFile, 
-        background_tasks: BackgroundTasks
+        self,
+        user_id: int,
+        file: UploadFile,
+        background_tasks: BackgroundTasks,
+        options: dict = None
     ) -> Video:
         # 1. Validation
         if file.content_type.startswith("video/") or file.content_type.startswith("audio/"):
