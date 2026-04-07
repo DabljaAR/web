@@ -4,6 +4,7 @@ import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
 import MediaPreviewModal from '../../components/common/MediaPreviewModal';
+import VideoTasksModal from '../../components/common/VideoTasksModal';
 import { mediaService } from '../../services/mediaService';
 import '../../styles/history.css';
 
@@ -40,6 +41,10 @@ const History = () => {
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewJob, setPreviewJob] = useState(null);
   const [comparisonPreview, setComparisonPreview] = useState(null);
+
+  // Tasks Modal State
+  const [tasksModalOpen, setTasksModalOpen] = useState(false);
+  const [tasksModalVideo, setTasksModalVideo] = useState(null); // { id, title }
 
   // Track deleting items
   const deletingIds = React.useRef(new Set());
@@ -697,6 +702,18 @@ const History = () => {
                     </div>
 
                     <div className="item-actions">
+                      {/* Tasks button — always visible so user can see task history */}
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          setTasksModalVideo({ id: item.id, title: item.title });
+                          setTasksModalOpen(true);
+                        }}
+                      >
+                        <span>📋</span>
+                        <span>Tasks</span>
+                      </button>
+
                       {item.status === 'completed' && (
                         <>
                           {item.transcriptUrl && item.translationUrl && (
@@ -809,6 +826,17 @@ const History = () => {
         primaryTitle={t('dashboard.previewTranscript') || 'Original Transcript'}
         type={previewJob?.mediaType}
         title={previewJob?.name}
+      />
+
+      {/* Tasks Modal */}
+      <VideoTasksModal
+        isOpen={tasksModalOpen}
+        onClose={() => {
+          setTasksModalOpen(false);
+          setTasksModalVideo(null);
+        }}
+        videoId={tasksModalVideo?.id}
+        videoTitle={tasksModalVideo?.title}
       />
     </div >
   );

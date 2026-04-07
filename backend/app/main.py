@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 
 from app.api.job_router import router as job_router
+from app.tasks.router import router as tasks_router
 from app.api.media_routers import router as media_router
 from app.config import settings
 from app.core import init_db
@@ -130,6 +131,7 @@ app.add_middleware(
 app.include_router(core_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 app.include_router(job_router, prefix="/api")
+app.include_router(tasks_router, prefix="/api")
 app.include_router(stt_router)  # already has prefix="/api/transcription"
 app.include_router(nmt_router, prefix="/api")
 app.include_router(tts_router, prefix="/api/tts")

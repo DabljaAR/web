@@ -137,6 +137,52 @@ class BaseJobTask(celery.Task):
             engine.dispose()
         return new_id
 
+    @staticmethod
+    def _patch_task(
+        task_id: str,
+        status,
+        *,
+        progress: Optional[float] = None,
+        transcript: Optional[str] = None,
+        translated_transcript: Optional[str] = None,
+        segments: Optional[list] = None,
+        stt_metadata: Optional[dict] = None,
+        error_message: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+    ) -> None:
+        """Update a video_tasks row — mirrors _patch_job but targets VideoTask."""
+        from app.tasks.models import VideoTask
+
+        engine, SessionLocal = BaseJobTask._make_db()
+        try:
+            with SessionLocal() as db:
+                task = db.get(VideoTask, task_id)
+                if task is None:
+                    logger.warning("BaseJobTask: task %s not found, skipping patch", task_id)
+                    return
+                task.status = status
+                if progress is not None:
+                    task.progress = progress
+                if transcript is not None:
+                    task.transcript = transcript
+                if translated_transcript is not None:
+                    task.translated_transcript = translated_transcript
+                if segments is not None:
+                    task.segments = segments
+                if stt_metadata is not None:
+                    task.stt_metadata = stt_metadata
+                if error_message is not None:
+                    task.error_message = error_message
+                if started_at is not None:
+                    task.started_at = started_at
+                if completed_at is not None:
+                    task.completed_at = completed_at
+                task.updated_at = datetime.utcnow()
+                db.commit()
+        finally:
+            engine.dispose()
+
     def update_progress(self, job_id: str, progress: float) -> None:
         """Persist a progress update (0–100) for the given job."""
         self._patch_job(job_id, JobStatus.PROCESSING, progress=progress)

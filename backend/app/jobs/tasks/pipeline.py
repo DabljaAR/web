@@ -79,6 +79,7 @@ def stt_transcribe(
     finally:
         engine.dispose()
     output_type = _input_data.get("output_type", "fullDubbing")
+    task_id     = _input_data.get("task_id")
 
     # ── 2. Resolve the MinIO key ─────────────────────────────────────────────
     async def _get_file_key() -> str:
@@ -179,7 +180,21 @@ def stt_transcribe(
 
         self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
 
-        # ── 5. Conditionally dispatch NMT based on output_type ───────────────
+        # ── 5. Write STT result to VideoTask ─────────────────────────────────
+        if task_id:
+            from app.tasks.models import TaskStatus
+            captions_only = output_type == "captionsOnly"
+            self._patch_task(
+                task_id,
+                TaskStatus.COMPLETED if captions_only else TaskStatus.PROCESSING,
+                transcript=full_transcript,
+                stt_metadata=metadata,
+                progress=100.0 if captions_only else 10.0,
+                started_at=datetime.utcnow(),
+                completed_at=datetime.utcnow() if captions_only else None,
+            )
+
+        # ── 6. Conditionally dispatch NMT based on output_type ───────────────
         NMT_REQUIRED = {"captionsAndTranslation", "translationAndTTS", "fullDubbing"}
         if structured_segments and output_type in NMT_REQUIRED:
             from app.jobs.tasks.nmt import nmt_translate
@@ -188,6 +203,7 @@ def stt_transcribe(
                 job_id,
                 JobType.NMT_TRANSLATE,
                 input_data={
+                    "task_id":    task_id,
                     "source_lang": language or "auto",
                     "target_lang": target_lang,
                     "output_type": output_type,
@@ -260,8 +276,11 @@ def tts_pipeline(self, job_id: str) -> dict:
                 raise ValueError(f"TTS job {job_id} has no parent NMT output")
             nmt_output = dict(parent.output_data)
             video_id = tts_job.video_id
+            tts_input = dict(tts_job.input_data or {})
     finally:
         engine.dispose()
+
+    task_id = tts_input.get("task_id")
 
     segments: list = nmt_output.get("segments", [])
     metadata: dict = nmt_output.get("metadata", {})
@@ -308,6 +327,17 @@ def tts_pipeline(self, job_id: str) -> dict:
         "metadata": {**metadata, "tts_segments": len(result_segments)},
     }
     self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
+
+    # ── Write final merged result to VideoTask and mark COMPLETED ────────────
+    if task_id:
+        from app.tasks.models import TaskStatus
+        self._patch_task(
+            task_id,
+            TaskStatus.COMPLETED,
+            segments=result_segments,
+            progress=100.0,
+            completed_at=datetime.utcnow(),
+        )
 
     logger.info("[TTS] done | job=%s | segments=%d", job_id, len(result_segments))
     return output

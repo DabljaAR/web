@@ -109,6 +109,22 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                     logger.info(f"Triggering pipeline with output_type={output_type} for {video_id}")
                     
 
+                    # Create VideoTask (single result record for this pipeline run)
+                    from app.tasks.models import VideoTask, TaskStatus
+                    video_task_id = str(uuid.uuid4())
+                    video_task = VideoTask(
+                        id=video_task_id,
+                        video_id=video_id,
+                        user_id=video.user_id,
+                        source_lang=options.get("source_lang", "auto"),
+                        target_lang=options.get("target_lang", "arb_Arab"),
+                        output_type=output_type,
+                        num_beams=int(options.get("num_beams", 5)),
+                        english_ratio_threshold=float(options.get("english_ratio_threshold", 0.5)),
+                        status=TaskStatus.QUEUED,
+                    )
+                    db.add(video_task)
+
                     # Create the initial STT job
                     stt_job_id = str(uuid.uuid4())
                     stt_job = Job(
@@ -119,13 +135,15 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                         status=JobStatus.QUEUED,
                         input_data={
                             **options,
-                            "audio_key": audio_key or file_path_key, # Use extracted audio if video
-                            "target_lang": "ar" # Default for now
+                            "task_id": video_task_id,
+                            "audio_key": audio_key or file_path_key,
+                            "target_lang": "ar",
                         }
                     )
+                    video_task.root_job_id = stt_job_id
                     db.add(stt_job)
                     await db.commit()
-                    
+
                     # Enqueue the STT task directly
                     from app.jobs.tasks.pipeline import stt_transcribe
                     celery_result = stt_transcribe.apply_async(
@@ -438,6 +456,24 @@ class VideoService:
             "audio_key": media.audio_path or media.file_path,
         }
 
+        # Create VideoTask (single result record for this pipeline run)
+        from app.tasks.models import VideoTask, TaskStatus
+        video_task = VideoTask(
+            id=str(uuid.uuid4()),
+            video_id=media.id,
+            user_id=media.user_id,
+            source_lang=selected_options.get("source_lang", "auto"),
+            target_lang=input_options["target_lang"],
+            output_type=input_options["output_type"],
+            num_beams=int(selected_options.get("num_beams", 5)),
+            english_ratio_threshold=float(selected_options.get("english_ratio_threshold", 0.5)),
+            status=TaskStatus.QUEUED,
+        )
+        self.db.add(video_task)
+        await self.db.flush()   # get video_task.id without committing
+
+        input_options["task_id"] = video_task.id
+
         stt_job = Job(
             id=str(uuid.uuid4()),
             video_id=media.id,
@@ -446,10 +482,11 @@ class VideoService:
             status=JobStatus.QUEUED,
             input_data=input_options,
         )
+        video_task.root_job_id = stt_job.id
         self.db.add(stt_job)
         await self.db.commit()
         await self.db.refresh(stt_job)
- 
+
         # Enqueue the STT task directly
         from app.jobs.tasks.pipeline import stt_transcribe
         celery_result = stt_transcribe.apply_async(

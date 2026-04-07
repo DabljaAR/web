@@ -81,6 +81,7 @@ def nmt_translate(
     output_type               = input_data.get("output_type", "fullDubbing")
     num_beams                 = int(input_data.get("num_beams", 5))
     english_ratio_threshold   = float(input_data.get("english_ratio_threshold", 0.5))
+    task_id                   = input_data.get("task_id")
 
     logger.info(
         "[NMT] job=%s | segments=%d | %s → %s",
@@ -126,6 +127,7 @@ def nmt_translate(
     chord(group(segment_tasks))(
         nmt_combine_results.s(
             job_id=job_id,
+            task_id=task_id,
             video_id=nmt_job.video_id,
             full_transcript=full_transcript,
             resolved_source_lang=resolved_source_lang,
@@ -217,6 +219,7 @@ def nmt_combine_results(
     segment_results: list,
     *,
     job_id: Any,
+    task_id: Optional[str] = None,
     video_id: Any,
     full_transcript: str,
     resolved_source_lang: str,
@@ -257,7 +260,7 @@ def nmt_combine_results(
         },
     }
 
-    # Single DB write: store combined output and mark the job done
+    # ── Write to Job row ─────────────────────────────────────────────────────
     BaseJobTask._patch_job(
         job_id,
         JobStatus.COMPLETED,
@@ -265,6 +268,19 @@ def nmt_combine_results(
         progress=100.0,
         completed_at=datetime.utcnow(),
     )
+
+    # ── Write translated result to VideoTask ─────────────────────────────────
+    if task_id:
+        from app.tasks.models import TaskStatus
+        captions_and_translation = output_type == "captionsAndTranslation"
+        BaseJobTask._patch_task(
+            task_id,
+            TaskStatus.COMPLETED if captions_and_translation else TaskStatus.PROCESSING,
+            translated_transcript=translated_transcript,
+            segments=translated_segments,
+            progress=100.0 if captions_and_translation else 50.0,
+            completed_at=datetime.utcnow() if captions_and_translation else None,
+        )
 
     logger.info(
         "[NMT] combined | job=%s | segments=%d | failed=%d",
@@ -281,7 +297,11 @@ def nmt_combine_results(
         tts_job_id = BaseJobTask._create_next_job(
             job_id,
             JobType.TTS_SYNTHESIZE,
-            input_data={"target_lang": resolved_target_lang, "output_type": output_type},
+            input_data={
+                "task_id":    task_id,
+                "target_lang": resolved_target_lang,
+                "output_type": output_type,
+            },
         )
         tts_pipeline.apply_async(args=[tts_job_id], queue="ai_tts")
         logger.info(
