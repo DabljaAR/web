@@ -238,7 +238,48 @@ class NLLBTranslatorWrapper:
         "ko": "kor_Hang",
     }
 
-    def _run_inference(self, text: str, src_lang: str, tgt_lang: str, max_length: int) -> str:
+    # ------------------------------------------------------------------
+    # Quality-check helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_english_word(word: str) -> bool:
+        return any(c.isascii() and c.isalpha() for c in word)
+
+    @staticmethod
+    def _english_ratio(text: str) -> float:
+        words = text.split()
+        if not words:
+            return 0.0
+        return sum(NLLBTranslatorWrapper._is_english_word(w) for w in words) / len(words)
+
+    def _translate_word_by_word(self, text: str, src_lang: str, tgt_lang: str) -> str:
+        """Last-resort fallback: translate each word individually and join."""
+        translated_words = []
+        for word in text.split():
+            self.tokenizer.src_lang = src_lang
+            inputs = self.tokenizer(word, return_tensors="pt").to(self.device)
+            outputs = self.model.generate(
+                **inputs,
+                forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(tgt_lang),
+                max_length=20,
+                num_beams=1,
+            )
+            translated_words.append(self.tokenizer.decode(outputs[0], skip_special_tokens=True))
+        return " ".join(translated_words)
+
+    # ------------------------------------------------------------------
+    # Inference
+    # ------------------------------------------------------------------
+
+    def _run_inference(
+        self,
+        text: str,
+        src_lang: str,
+        tgt_lang: str,
+        max_length: int,
+        num_beams: int = 5,
+    ) -> str:
         """Performs model inference for a single text string."""
         self.tokenizer.src_lang = src_lang
         inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
@@ -246,13 +287,26 @@ class NLLBTranslatorWrapper:
             **inputs,
             forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(tgt_lang),
             max_length=max_length,
-            num_beams=5,
-            early_stopping=True
+            num_beams=num_beams,
+            early_stopping=True,
         )
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-    def _translate_item(self, text: str, src_lang: Optional[str] = None, tgt_lang: str = "arb_Arab", max_length: int = 512) -> str:
-        """Translates a single string after detecting its language."""
+    def _translate_item(
+        self,
+        text: str,
+        src_lang: Optional[str] = None,
+        tgt_lang: str = "arb_Arab",
+        max_length: int = 512,
+        num_beams: int = 5,
+        english_ratio_threshold: float = 0.5,
+    ) -> str:
+        """
+        Translates a single string with a 3-stage quality fallback:
+          Stage 1 — translate with num_beams (default 5)
+          Stage 2 — if >english_ratio_threshold of output is still English → retry num_beams=1
+          Stage 3 — still above threshold → translate word by word
+        """
         # 0. Robust language mapping (ensures "ar" -> "arb_Arab")
         tgt_lang = self.LANG_MAP.get(tgt_lang, tgt_lang)
         if src_lang:
@@ -266,12 +320,12 @@ class NLLBTranslatorWrapper:
         try:
             detected_code = detect(stripped)
             item_src_lang = self.LANG_MAP.get(detected_code)
-            
+
             # Prevent misdetecting English as Arabic if Latin chars exist
             has_latin = any('a' <= c <= 'z' or 'A' <= c <= 'Z' for c in stripped)
             if has_latin and item_src_lang == "arb_Arab":
                 item_src_lang = "eng_Latn"
-            
+
             if not item_src_lang:
                 item_src_lang = src_lang or "eng_Latn"
         except Exception:
@@ -281,8 +335,21 @@ class NLLBTranslatorWrapper:
         if item_src_lang == tgt_lang:
             return text
 
-        # 3. Translate
-        return self._run_inference(stripped, item_src_lang, tgt_lang, max_length)
+        # 3. Stage 1 — primary translation
+        result = self._run_inference(stripped, item_src_lang, tgt_lang, max_length, num_beams)
+        logger.debug("[NMT] stage-1 beams=%d english_ratio=%.2f | %r", num_beams, self._english_ratio(result), stripped[:60])
+
+        # 4. Stage 2 — too many untranslated English words → lower beam search pressure
+        if num_beams != 1 and self._english_ratio(result) > english_ratio_threshold:
+            logger.info("[NMT] stage-2: english_ratio high (%.2f) → retrying num_beams=1", self._english_ratio(result))
+            result = self._run_inference(stripped, item_src_lang, tgt_lang, max_length, num_beams=1)
+
+        # 5. Stage 3 — still too many English words → word-by-word fallback
+        if self._english_ratio(result) > english_ratio_threshold:
+            logger.info("[NMT] stage-3: english_ratio still high (%.2f) → word-by-word", self._english_ratio(result))
+            result = self._translate_word_by_word(stripped, item_src_lang, tgt_lang)
+
+        return result
 
     def _translate_segments(self, segments: List[dict], src_lang: Optional[str] = None, tgt_lang: str = "arb_Arab", max_length: int = 512):
         """Translates list of segments one by one in a simple loop."""

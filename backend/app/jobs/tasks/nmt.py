@@ -74,11 +74,13 @@ def nmt_translate(
     stt_segments     = parent_output.get("segments") or []
     full_transcript  = parent_output.get("transcript", "")
 
-    input_data           = nmt_job.input_data or {}
-    resolved_source_lang = input_data.get("source_lang", source_lang)
-    resolved_target_lang = input_data.get("target_lang", target_lang)
-    actual_src_lang      = None if resolved_source_lang == "auto" else resolved_source_lang
-    output_type          = input_data.get("output_type", "fullDubbing")
+    input_data                = nmt_job.input_data or {}
+    resolved_source_lang      = input_data.get("source_lang", source_lang)
+    resolved_target_lang      = input_data.get("target_lang", target_lang)
+    actual_src_lang           = None if resolved_source_lang == "auto" else resolved_source_lang
+    output_type               = input_data.get("output_type", "fullDubbing")
+    num_beams                 = int(input_data.get("num_beams", 5))
+    english_ratio_threshold   = float(input_data.get("english_ratio_threshold", 0.5))
 
     logger.info(
         "[NMT] job=%s | segments=%d | %s → %s",
@@ -115,6 +117,8 @@ def nmt_translate(
             seg.get("end"),
             actual_src_lang,
             resolved_target_lang,
+            num_beams,
+            english_ratio_threshold,
         )
         for idx, seg in enumerate(stt_segments)
     ]
@@ -159,11 +163,17 @@ def nmt_translate_segment(
     end: float,
     source_lang: Optional[str] = None,
     target_lang: str = "arb_Arab",
+    num_beams: int = 5,
+    english_ratio_threshold: float = 0.5,
 ) -> dict:
     """Translate a single segment. Used both by the chord and standalone."""
     actual_src_lang = None if (source_lang in {None, "auto"}) else source_lang
     try:
-        translated_text = translator._translate_item(text, actual_src_lang, target_lang, 512)
+        translated_text = translator._translate_item(
+            text, actual_src_lang, target_lang, 512,
+            num_beams=num_beams,
+            english_ratio_threshold=english_ratio_threshold,
+        )
         return {
             "segment_id":      segment_id,
             "job_id":          job_id,
