@@ -1,0 +1,25 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+    encode zstd gzip
+
+    # Reverse proxy API traffic to FastAPI backend
+    @api path /api/*
+    reverse_proxy @api backend:8000
+
+    # Serve frontend static files with SPA fallback
+    root * /srv
+    try_files {path} /index.html
+    file_server
+
+    # Basic hardening headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}

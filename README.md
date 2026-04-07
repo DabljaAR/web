@@ -52,3 +52,20 @@ The script is idempotent and manages local runtime files under `.runtime/`.
    docker-compose up --build
    ```
 4. Access the frontend at `http://localhost:5173` and the backend API at `http://localhost:3000`.
+
+## Production (Docker Compose + Caddy)
+
+```bash
+cp .env.production.example .env.production
+# Edit .env.production and set DOMAIN and secrets
+
+docker compose --env-file .env.production \
+   -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
+```
+
+Optional GPU overlay for AI worker:
+
+```bash
+docker compose --env-file .env.production \
+   -f docker-compose.yaml -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d --build
+```
