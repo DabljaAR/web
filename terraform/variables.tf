@@ -76,6 +76,18 @@ variable "admin_cidr_blocks" {
   }
 }
 
+variable "public_ports" {
+  description = "Ports exposed publicly (typically Caddy 80/443 only in production)"
+  type        = list(number)
+  default     = [80, 443]
+}
+
+variable "admin_ports" {
+  description = "Ports exposed to admin_cidr_blocks only"
+  type        = list(number)
+  default     = [5555, 9001]
+}
+
 # =============================================================================
 # Compute Configuration
 # =============================================================================
@@ -147,46 +159,3 @@ variable "data_disk_size" {
   }
 }
 
-# =============================================================================
-# Application Configuration
-# =============================================================================
-
-variable "app_repo_url" {
-  description = "Git repository URL for the application"
-  type        = string
-  default     = "https://github.com/your-org/dabljaar.git"
-}
-
-variable "app_repo_branch" {
-  description = "Git branch to deploy"
-  type        = string
-  default     = "main"
-}
-
-# =============================================================================
-# Secrets (Sensitive)
-# =============================================================================
-
-variable "db_password" {
-  description = "PostgreSQL database password"
-  type        = string
-  sensitive   = true
-}
-
-variable "secret_key" {
-  description = "Application secret key for JWT signing"
-  type        = string
-  sensitive   = true
-}
-
-variable "minio_access_key" {
-  description = "MinIO access key"
-  type        = string
-  sensitive   = true
-}
-
-variable "minio_secret_key" {
-  description = "MinIO secret key"
-  type        = string
-  sensitive   = true
-}

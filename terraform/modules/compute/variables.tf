@@ -77,31 +77,10 @@ variable "subnet_self_link" {
   type        = string
 }
 
-variable "service_account_email" {
-  description = "Service account email"
-  type        = string
-}
-
 variable "network_tag" {
   description = "Network tag for firewall rules"
   type        = string
   default     = "dabljaar-vm"
-}
-
-variable "gcs_model_bucket" {
-  description = "GCS bucket containing AI models"
-  type        = string
-}
-
-variable "app_repo_url" {
-  description = "Git repository URL"
-  type        = string
-}
-
-variable "app_repo_branch" {
-  description = "Git branch to deploy"
-  type        = string
-  default     = "main"
 }
 
 variable "labels" {

@@ -27,13 +27,13 @@ variable "instance_tag" {
 variable "public_ports" {
   description = "Ports to allow from anywhere (web services)"
   type        = list(number)
-  default     = [80, 443, 5173, 8000]
+  default     = [80, 443]
 }
 
 variable "admin_ports" {
-  description = "Ports to allow from admin CIDRs only"
+  description = "Ports to allow from admin CIDRs only (optional admin UIs)"
   type        = list(number)
-  default     = [22, 5555, 9000, 9001]
+  default     = [5555, 9001]
 }
 
 variable "admin_cidrs" {

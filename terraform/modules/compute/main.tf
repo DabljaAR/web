@@ -1,5 +1,5 @@
 # =============================================================================
-# Compute Module - Spot VM with GPU for AI Workloads
+# Compute Module - VM with optional GPU
 # =============================================================================
 
 # External IP address
@@ -69,32 +69,11 @@ resource "google_compute_instance" "vm" {
     }
   }
 
-  service_account {
-    email  = var.service_account_email
-    scopes = ["cloud-platform"]
-  }
-
   metadata = {
-    startup-script = templatefile("${path.module}/templates/startup.sh.tpl", {
-      name_prefix     = var.name_prefix
-      data_disk_name  = "data"
-      model_bucket    = var.gcs_model_bucket
-      app_repo_url    = var.app_repo_url
-      app_repo_branch = var.app_repo_branch
-      project_id      = var.project_id
-      gpu_enabled     = var.gpu_count > 0 ? "true" : "false"
-    })
     enable-oslogin = "TRUE"
   }
 
   labels = var.labels
 
   allow_stopping_for_update = true
-
-  lifecycle {
-    ignore_changes = [
-      # Ignore changes to metadata startup-script during updates
-      metadata["startup-script"]
-    ]
-  }
 }
