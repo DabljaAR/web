@@ -18,35 +18,6 @@ output "external_ip" {
 }
 
 # =============================================================================
-# Application URLs
-# =============================================================================
-
-output "frontend_url" {
-  description = "Frontend application URL"
-  value       = "http://${module.compute.external_ip}:5173"
-}
-
-output "backend_url" {
-  description = "Backend API URL"
-  value       = "http://${module.compute.external_ip}:8000"
-}
-
-output "api_docs_url" {
-  description = "API documentation (Swagger UI)"
-  value       = "http://${module.compute.external_ip}:8000/docs"
-}
-
-output "flower_url" {
-  description = "Celery Flower monitoring URL (admin access only)"
-  value       = "http://${module.compute.external_ip}:5555"
-}
-
-output "minio_console_url" {
-  description = "MinIO console URL (admin access only)"
-  value       = "http://${module.compute.external_ip}:9001"
-}
-
-# =============================================================================
 # Access Commands
 # =============================================================================
 
@@ -56,23 +27,13 @@ output "ssh_command" {
 }
 
 output "ssh_tunnel_command" {
-  description = "SSH tunnel for admin services (Flower, MinIO console)"
+  description = "SSH tunnel for admin-only services"
   value       = "gcloud compute ssh ${module.compute.instance_name} --zone=${var.zone} --project=${var.project_id} -- -L 5555:localhost:5555 -L 9001:localhost:9001"
 }
 
 # =============================================================================
-# Troubleshooting Commands
+# Troubleshooting
 # =============================================================================
-
-output "view_startup_logs" {
-  description = "Command to view startup script logs"
-  value       = "gcloud compute ssh ${module.compute.instance_name} --zone=${var.zone} --project=${var.project_id} --command='sudo tail -f /var/log/startup.log'"
-}
-
-output "view_docker_logs" {
-  description = "Command to view Docker Compose logs"
-  value       = "gcloud compute ssh ${module.compute.instance_name} --zone=${var.zone} --project=${var.project_id} --command='cd /opt/app && docker compose logs -f'"
-}
 
 output "check_gpu_status" {
   description = "Command to check GPU status"
@@ -93,12 +54,17 @@ output "subnet_id" {
   value       = module.network.subnet_id
 }
 
-output "model_bucket" {
-  description = "GCS bucket for AI models"
+output "storage_bucket_name" {
+  description = "Provisioned GCS bucket name"
   value       = module.storage.bucket_name
 }
 
-output "service_account_email" {
-  description = "Service account email used by the VM"
-  value       = module.iam.service_account_email
+output "firewall_rule_ids" {
+  description = "Created firewall rule IDs"
+  value = {
+    public   = module.firewall.public_firewall_id
+    admin    = module.firewall.admin_firewall_id
+    internal = module.firewall.internal_firewall_id
+    iap_ssh  = module.firewall.iap_ssh_firewall_id
+  }
 }

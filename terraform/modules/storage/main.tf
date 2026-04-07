@@ -1,5 +1,5 @@
 # =============================================================================
-# Storage Module - GCS Bucket for AI Models
+# Storage Module - GCS Bucket
 # =============================================================================
 
 # Random suffix for globally unique bucket name
@@ -7,7 +7,7 @@ resource "random_id" "bucket_suffix" {
   byte_length = 4
 }
 
-# GCS Bucket for AI models
+# GCS bucket
 resource "google_storage_bucket" "models" {
   name          = "${var.name_prefix}-models-${random_id.bucket_suffix.hex}"
   location      = var.location
