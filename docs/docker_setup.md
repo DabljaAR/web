@@ -51,6 +51,43 @@ docker-compose up --build -d
 - **API Documentation**: http://localhost:8000/docs
 - **PostgreSQL**: localhost:5433 (external access)
 
+## Production Setup (Caddy TLS)
+
+Use the production overlays from the project root:
+
+```bash
+cp .env.production.example .env.production
+# Fill required secrets and DOMAIN in .env.production
+docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
+```
+
+Default production behavior:
+- Public entrypoint is Caddy only on ports 80 and 443.
+- Backend, Postgres, Redis, and MinIO are internal-only.
+- Frontend is served as static assets by Caddy.
+
+Optional overlays:
+
+```bash
+# Enable GPU for AI worker
+docker compose --env-file .env.production \
+  -f docker-compose.yaml -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d --build
+
+# Start admin-only services (for example Flower)
+docker compose --env-file .env.production \
+  -f docker-compose.yaml -f docker-compose.prod.yml --profile admin up -d
+
+# Bind admin UIs to localhost only (SSH tunnel/VPN access)
+docker compose --env-file .env.production \
+  -f docker-compose.yaml -f docker-compose.prod.yml -f docker-compose.admin.yml up -d
+```
+
+Validate merged production config before deploy:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml config
+```
+
 ## Docker Commands Reference
 
 ### Starting Services
