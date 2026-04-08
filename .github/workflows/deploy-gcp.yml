@@ -1,0 +1,105 @@
+name: Deploy to GCP VM
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Deployment reason (optional)"
+        required: false
+        type: string
+  push:
+    branches: [production]
+    paths:
+      - backend/**
+      - frontend/**
+      - docker-compose.yaml
+      - docker-compose.prod.yml
+      - Caddyfile
+      - Dockerfile.caddy
+      - .github/workflows/deploy-gcp.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy-gcp
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          VM_HOST: ${{ secrets.GCP_VM_HOST }}
+          VM_USER: ${{ secrets.GCP_VM_USER }}
+          VM_PORT: ${{ secrets.GCP_VM_PORT }}
+          VM_SSH_KEY: ${{ secrets.GCP_VM_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$VM_HOST" ] || [ -z "$VM_USER" ] || [ -z "$VM_SSH_KEY" ]; then
+            echo "Missing required secrets: GCP_VM_HOST, GCP_VM_USER, GCP_VM_SSH_KEY"
+            exit 1
+          fi
+
+          VM_PORT="${VM_PORT:-22}"
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$VM_PORT" -H "$VM_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy on VM
+        env:
+          VM_HOST: ${{ secrets.GCP_VM_HOST }}
+          VM_USER: ${{ secrets.GCP_VM_USER }}
+          VM_PORT: ${{ secrets.GCP_VM_PORT }}
+        run: |
+          set -euo pipefail
+          VM_PORT="${VM_PORT:-22}"
+
+          ssh -p "$VM_PORT" "$VM_USER@$VM_HOST" 'bash -se' <<'EOF'
+          set -euo pipefail
+
+          cd /opt/web
+
+          git fetch --prune origin
+          git checkout main
+          git pull --ff-only origin main
+
+          COMPOSE_CMD="docker compose"
+          if ! docker compose version >/dev/null 2>&1; then
+            if command -v docker-compose >/dev/null 2>&1; then
+              COMPOSE_CMD="docker-compose"
+            else
+              echo "Neither docker compose nor docker-compose is available on VM"
+              exit 1
+            fi
+          fi
+
+          $COMPOSE_CMD --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
+          $COMPOSE_CMD --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml ps
+
+          curl -fsS http://localhost:8000/api/health >/dev/null
+          git rev-parse --short HEAD
+          EOF
+
+      - name: Deployment summary
+        run: |
+          {
+            echo "## Production Deployment"
+            echo "- Workflow: deploy-gcp"
+            echo "- Trigger: ${{ github.event_name }}"
+            echo "- Repository SHA: ${{ github.sha }}"
+            echo "- Target VM path: /opt/web"
+            echo "- Compose profile: docker-compose.yaml + docker-compose.prod.yml"
+          } >> "$GITHUB_STEP_SUMMARY"

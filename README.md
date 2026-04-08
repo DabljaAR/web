@@ -76,6 +76,7 @@ Two CI workflows are configured in `.github/workflows/`:
 
 - `backend-tests.yml`: Runs backend lint + tests + coverage artifact upload.
 - `frontend-tests.yml`: Runs frontend lint + tests + coverage artifact upload.
+- `deploy-gcp.yml`: Deploys to the production GCP VM over SSH.
 
 Both workflows trigger on `push` and `pull_request` to `main` and use path filters so only relevant changes run each pipeline.
 
@@ -89,11 +90,22 @@ Both workflows trigger on `push` and `pull_request` to `main` and use path filte
 
 ### Frontend Workflow Details
 
-- Uses Node.js 20.
+- Uses Node.js 24.
 - Installs dependencies with `npm ci`.
 - Runs `npm run lint`.
 - Runs `npm run test:coverage -- --run`.
 - Uploads the `frontend/coverage/` artifact.
+
+### Deployment Workflow Details
+
+- Triggers automatically on push to `main` for app/deploy-related paths.
+- Supports manual runs using `workflow_dispatch`.
+- Connects to the VM via SSH and deploys from `/opt/web`.
+- Updates code with `git fetch` + `git pull --ff-only origin main`.
+- Rebuilds and restarts production containers using:
+   - `docker-compose.yaml`
+   - `docker-compose.prod.yml`
+- Verifies deployment by checking container status and backend health endpoint.
 
 ### Manual GitHub Setup Required
 
@@ -108,6 +120,21 @@ After pushing workflows, configure branch protection for `main` in GitHub:
 5. Optional: enable "Require branches to be up to date before merging".
 
 No production secrets are required for these two CI test workflows.
+
+Deployment workflow requires these repository secrets:
+
+- `GCP_VM_HOST`: Public VM IP or hostname.
+- `GCP_VM_USER`: SSH user on the VM.
+- `GCP_VM_SSH_KEY`: Private SSH key content for that user.
+- `GCP_VM_PORT`: SSH port (optional, defaults to `22` if empty).
+
+One-time VM prerequisites for deployment:
+
+1. Repository is cloned at `/opt/web`.
+2. `.env.production` exists at `/opt/web/.env.production`.
+3. Docker and Docker Compose are installed and usable by the SSH user.
+4. The VM has network access to pull latest git changes.
+5. DNS and ports 80/443 are configured for production traffic.
 
 ### Local Reproduction
 
