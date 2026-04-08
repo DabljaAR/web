@@ -41,7 +41,8 @@ class DubbingMergeService:
         video_id: str,
         segments: List[SegmentTimingInfo],
         job_id: Optional[str] = None,
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None,
+        video_file_key: Optional[str] = None,
     ) -> DubbingMergeResponse:
         """
         Main orchestration method for dubbing merge.
@@ -134,7 +135,8 @@ class DubbingMergeService:
             output_path = await self._merge_with_video(
                 video_id,
                 final_audio_path,
-                session_dir
+                session_dir,
+                video_key=video_file_key,
             )
             
             # Update progress: 90%
@@ -585,40 +587,62 @@ class DubbingMergeService:
         self,
         video_id: str,
         audio_path: Path,
-        session_dir: Path
+        session_dir: Path,
+        video_key: Optional[str] = None,
     ) -> Path:
         """
         Merge final audio with original video.
-        
+
         Args:
-            video_id: Video ID
-            audio_path: Path to final audio
+            video_id: Video ID (used only as fallback for DB lookup)
+            audio_path: Path to final merged audio
             session_dir: Working directory
-        
+            video_key: MinIO key for the original video file.  Should always
+                be supplied by the caller (fetched via sync psycopg2 in the
+                Celery task) to avoid opening an asyncpg session on a
+                worker-owned event loop, which causes
+                "another operation is in progress" errors.
+
         Returns:
-            Path to output video
+            Path to output video file
         """
+        # Resolve the original video key.
+        # The caller (dubbing_merge task) must provide this via _make_db() so
+        # we never touch AsyncSessionLocal from a Celery worker event loop.
+        if not video_key:
+            # Last-resort fallback: only reached if the task layer failed to
+            # supply the key.  Creates a FRESH async engine with NullPool so
+            # we don't reuse connections from the FastAPI pool.
+            logger.warning(
+                f"[DubbingMerge] video_file_key not supplied for video {video_id}; "
+                f"falling back to in-service DB lookup (may fail in worker context)"
+            )
+            from app.media.models import Video
+            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+            from sqlalchemy.orm import sessionmaker
+            from sqlalchemy.pool import NullPool
+
+            _engine = create_async_engine(settings.ASYNC_DATABASE_URL, poolclass=NullPool)
+            _AsyncSession = sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with _AsyncSession() as db:
+                    video = await db.get(Video, video_id)
+                    if not video:
+                        raise ValueError(f"Video {video_id} not found")
+                    video_key = video.file_path
+            finally:
+                await _engine.dispose()
+
         # Download original video from MinIO
-        from app.media.models import Video
-        from app.core.db import AsyncSessionLocal
-        
-        async with AsyncSessionLocal() as db:
-            video = await db.get(Video, video_id)
-            if not video:
-                raise ValueError(f"Video {video_id} not found")
-            
-            video_key = video.file_path
-        
-        # Download video
         local_video = session_dir / "original_video.mp4"
         success = await self.storage.download(video_key, str(local_video))
-        
+
         if not success:
             raise RuntimeError(f"Failed to download video: {video_key}")
-        
+
         # Merge audio with video
         output_video = session_dir / "output_dubbed.mp4"
-        
+
         success = await self.ffmpeg.merge_audio_to_video(
             video_path=str(local_video),
             audio_path=str(audio_path),
@@ -627,10 +651,10 @@ class DubbingMergeService:
             audio_codec=settings.DUBBING_OUTPUT_AUDIO_CODEC,
             audio_bitrate=settings.DUBBING_OUTPUT_AUDIO_BITRATE
         )
-        
+
         if not success:
             raise RuntimeError("Failed to merge audio with video")
-        
+
         return output_video
 
     async def _upload_output(self, local_path: Path, output_key: str) -> str:

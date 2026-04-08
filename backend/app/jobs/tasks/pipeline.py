@@ -308,7 +308,7 @@ def stt_transcribe(
 
             for seg_idx, seg in enumerate(segments_generator):
                 segment_dict = {
-                    "segment_id": seg_idx,
+                    "segment_id": seg_idx,  # FIX: must be stored so dubbing_merge can reconstruct TTS keys
                     "start": round(seg.start, 2),
                     "end": round(seg.end, 2),
                     "text": " ".join(seg.text.split()),
@@ -332,7 +332,7 @@ def stt_transcribe(
                     )
                     nmt_results.append(res)
                     nmt_tasks_submitted += 1
-                    logger.debug(f"[STT] Dispatched segment {len(structured_segments)-1} to NMT | job={job_id}")
+                    logger.debug(f"[STT] Dispatched segment {seg_idx} to NMT | job={job_id}")
 
                 current_time = segment_dict["end"]
                 # Progress from 25% (start of transcription) to 90% (near completion of streaming)
@@ -399,6 +399,8 @@ def stt_transcribe(
                                         # PROGRESSIVE TTS: Dispatch TTS immediately for this segment
                                         from app.jobs.celery_app import synthesize_tts
                                         if txt.strip():  # Only if there's actual text
+                                            # FIX: use job_id (not video_id) + zero-padded index to match
+                                            # the standard key pattern used everywhere else
                                             tts_key = f"tts/{job_id}/segment_{idx:04d}.wav"
                                             tts_result = synthesize_tts.apply_async(
                                                 kwargs={
@@ -409,10 +411,11 @@ def stt_transcribe(
                                                 },
                                                 queue="ai_tts",
                                             )
-                                            # Store both task ID and audio key for later checking
+                                            # Store both task_id AND the resolved key so dubbing_merge
+                                            # can use it directly without reconstructing
                                             structured_segments[idx]["tts_task_id"] = tts_result.id
                                             structured_segments[idx]["tts_audio_key"] = tts_key
-                                            logger.info(f"[STT] Progressive TTS dispatched for segment {idx} | job={job_id}")
+                                            logger.info(f"[STT] Progressive TTS dispatched for segment {idx} | key={tts_key} | job={job_id}")
                                         
                                         # Push to priority queue for ordering verification
                                         segment_buffer.push(
@@ -625,40 +628,51 @@ def stt_transcribe_progressive(
 
             # ── 5. Initialize Progressive Timeline ──────────────────────────
             async def _initialize_progressive():
-                # Use async DB session for progressive builder
-                from app.core.db import AsyncSessionLocal
-                async with AsyncSessionLocal() as db:
-                    builder = ProgressiveVideoBuilder(db)
-                    
-                    # Get full video path from storage
-                    if isinstance(storage, S3StorageService):
-                        # Download original video temporarily to get full path
-                        video_suffix = Path(video_key).suffix or ".mp4"
-                        video_local_path = Path(tmp_dir) / f"video{video_suffix}"
+                # FIX: never use the global AsyncSessionLocal (FastAPI pool) from
+                # a Celery worker — asyncpg binds connections to the event loop
+                # they were created on.  Create a fresh engine with NullPool so
+                # each worker invocation gets its own isolated connection.
+                from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+                from sqlalchemy.orm import sessionmaker
+                from sqlalchemy.pool import NullPool
+
+                _engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+                _AsyncSession = sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+                try:
+                    async with _AsyncSession() as db:
+                        builder = ProgressiveVideoBuilder(db)
                         
-                        async with storage.session.client(
-                            "s3",
-                            endpoint_url=storage.endpoint_url,
-                            aws_access_key_id=storage.access_key,
-                            aws_secret_access_key=storage.secret_key,
-                        ) as s3:
-                            await s3.download_file(
-                                storage.bucket_name, video_key, str(video_local_path)
-                            )
-                        original_video_path = str(video_local_path)
-                    else:
-                        original_video_path = storage.get_absolute_path(video_key)
-                    
-                    # Initialize progressive timeline
-                    timeline = await builder.initialize_timeline(
-                        job_id=job_id,
-                        video_id=video_id,
-                        segments=structured_segments,
-                        original_video_path=original_video_path
-                    )
-                    
-                    logger.info(f"[STT-PROGRESSIVE] Timeline initialized | segments={len(structured_segments)} | job={job_id}")
-                    return timeline
+                        # Get full video path from storage
+                        if isinstance(storage, S3StorageService):
+                            # Download original video temporarily to get full path
+                            video_suffix = Path(video_key).suffix or ".mp4"
+                            video_local_path = Path(tmp_dir) / f"video{video_suffix}"
+                            
+                            async with storage.session.client(
+                                "s3",
+                                endpoint_url=storage.endpoint_url,
+                                aws_access_key_id=storage.access_key,
+                                aws_secret_access_key=storage.secret_key,
+                            ) as s3:
+                                await s3.download_file(
+                                    storage.bucket_name, video_key, str(video_local_path)
+                                )
+                            original_video_path = str(video_local_path)
+                        else:
+                            original_video_path = storage.get_absolute_path(video_key)
+                        
+                        # Initialize progressive timeline
+                        timeline = await builder.initialize_timeline(
+                            job_id=job_id,
+                            video_id=video_id,
+                            segments=structured_segments,
+                            original_video_path=original_video_path
+                        )
+                        
+                        logger.info(f"[STT-PROGRESSIVE] Timeline initialized | segments={len(structured_segments)} | job={job_id}")
+                        return timeline
+                finally:
+                    await _engine.dispose()
 
             # Run async initialization
             try:
@@ -853,7 +867,8 @@ def progressive_tts_step(
         # Use TTS model directly instead of calling another Celery task
         from app.tts.models import SilmaTTSModelManager
         
-        # Generate unique audio key
+        # FIX: key pattern must match what dubbing_merge expects:
+        # tts/{job_id}/segment_{idx:04d}.wav
         audio_key = f"tts/{job_id}/segment_{segment_id:04d}.wav"
         
         # Use TTS model directly
@@ -921,18 +936,27 @@ def progressive_merge_step(
     try:
         # Progressive Video Merge
         async def _merge_segment():
-            from app.core.db import AsyncSessionLocal
+            # FIX: use a fresh async engine with NullPool — never the global
+            # AsyncSessionLocal (FastAPI pool) from inside a Celery worker event loop
             from app.progressive.service import ProgressiveVideoBuilder
-            
-            async with AsyncSessionLocal() as db:
-                builder = ProgressiveVideoBuilder(db)
-                
-                return await builder.segment_ready_for_merge(
-                    job_id=job_id,
-                    segment_id=segment_id,
-                    tts_audio_key=tts_result["audio_key"],
-                    nmt_result=nmt_result
-                )
+            from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+            from sqlalchemy.orm import sessionmaker
+            from sqlalchemy.pool import NullPool
+            from app.config import settings
+
+            _engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+            _AsyncSession = sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with _AsyncSession() as db:
+                    builder = ProgressiveVideoBuilder(db)
+                    return await builder.segment_ready_for_merge(
+                        job_id=job_id,
+                        segment_id=segment_id,
+                        tts_audio_key=tts_result["audio_key"],
+                        nmt_result=nmt_result
+                    )
+            finally:
+                await _engine.dispose()
         
         # Run progressive merge
         merge_success = self._run_sync(_merge_segment())
@@ -1051,44 +1075,19 @@ def dubbing_merge(self, stt_output: dict, job_id: str) -> dict:
             "metadata": {...}
         }
     """
-    # Extract video_id and segments from previous task output
+    # Extract video_id, segments, and the originating STT job_id from upstream output
     if isinstance(stt_output, dict):
         video_id = stt_output.get("video_id")
         segments_data = stt_output.get("segments", [])
-        stt_job_id = stt_output.get("job_id", job_id)  # Get STT-side job_id for key reconstruction
+        # Use the job_id that STT used to name TTS files.  In the standard chain both
+        # are the same value, but pulling it from the payload makes this explicit and
+        # safe even if the chain is ever restructured.
+        stt_job_id = stt_output.get("job_id", job_id)
     else:
         raise ValueError("Invalid stt_output format")
     
     if not video_id:
         raise ValueError("video_id not found in stt_output")
-
-    # ── Wait for TTS tasks to complete before attempting downloads ──────────────────────
-    tts_task_ids = [seg.get("tts_task_id") for seg in segments_data if seg.get("tts_task_id")]
-    if tts_task_ids:
-        logger.info(f"[DubbingMerge] Waiting for {len(tts_task_ids)} TTS tasks to complete | job={job_id}")
-        from celery.result import AsyncResult
-        import time
-        
-        deadline = time.time() + 600  # 10 min max timeout
-        pending = set(tts_task_ids)
-        
-        while pending and time.time() < deadline:
-            for task_id in list(pending):
-                result = AsyncResult(task_id)
-                if result.ready():
-                    pending.discard(task_id)
-                    if result.failed():
-                        logger.warning(f"[DubbingMerge] TTS task {task_id} failed: {result.result}")
-            
-            if pending:
-                time.sleep(2)  # Poll every 2 seconds
-        
-        if pending:
-            logger.warning(f"[DubbingMerge] TTS tasks did not complete in time: {pending}")
-        else:
-            logger.info(f"[DubbingMerge] All TTS tasks completed | job={job_id}")
-    else:
-        logger.info(f"[DubbingMerge] No TTS tasks to wait for | job={job_id}")
     
     self._patch_job(
         job_id,
@@ -1101,7 +1100,71 @@ def dubbing_merge(self, stt_output: dict, job_id: str) -> dict:
         f"[DubbingMerge] Starting dubbing_merge | job={job_id} | "
         f"video={video_id} | segments={len(segments_data)}"
     )
-    
+
+    # ── RACE-CONDITION GUARD: wait for all TTS tasks to finish ──────────────
+    # stt_transcribe dispatches TTS tasks concurrently and returns before they
+    # complete.  Without this poll we would try to download files that do not
+    # yet exist in MinIO, causing every segment download to fail silently.
+    tts_task_ids = [
+        seg["tts_task_id"]
+        for seg in segments_data
+        if seg.get("tts_task_id")
+    ]
+
+    if tts_task_ids:
+        from celery.result import AsyncResult
+
+        logger.info(
+            f"[DubbingMerge] Waiting for {len(tts_task_ids)} TTS tasks to finish | job={job_id}"
+        )
+        pending = set(tts_task_ids)
+        deadline = time.time() + 600  # 10-minute hard cap
+        poll_interval = 2.0           # seconds between sweeps
+
+        while pending and time.time() < deadline:
+            for tid in list(pending):
+                r = AsyncResult(tid)
+                if r.ready():
+                    if r.failed():
+                        logger.warning(
+                            f"[DubbingMerge] TTS task {tid} failed: {r.result} | job={job_id}"
+                        )
+                    pending.discard(tid)
+            if pending:
+                time.sleep(poll_interval)
+
+        if pending:
+            # Some TTS tasks timed out — log which segments are affected and
+            # let the segment-level skip logic below handle missing keys.
+            logger.error(
+                f"[DubbingMerge] {len(pending)} TTS task(s) did not finish within "
+                f"600 s, proceeding with available segments | job={job_id} | "
+                f"timed_out={pending}"
+            )
+        else:
+            logger.info(f"[DubbingMerge] All TTS tasks complete | job={job_id}")
+    # ── end TTS wait ─────────────────────────────────────────────────────────
+
+    # ── Fetch video file key via sync psycopg2 (never AsyncSessionLocal here) ─
+    # DubbingMergeService._merge_with_video needs the original video path from
+    # MinIO.  Fetching it here — before the async event loop is created — keeps
+    # all DB access in the sync/psycopg2 layer and avoids the asyncpg
+    # "another operation is in progress" error.
+    def _get_video_file_key() -> str:
+        from app.media.models import Video  # noqa: F401
+        engine, SessionLocal = self._make_db()
+        try:
+            with SessionLocal() as db:
+                video = db.get(Video, video_id)
+                if not video:
+                    raise ValueError(f"Video {video_id} not found")
+                return video.file_path
+        finally:
+            engine.dispose()
+
+    video_file_key = _get_video_file_key()
+    logger.info(f"[DubbingMerge] Resolved video_file_key={video_file_key} | job={job_id}")
+
     try:
         # Convert segment dicts to SegmentTimingInfo objects
         from app.dubbing.schemas import SegmentTimingInfo
@@ -1109,24 +1172,30 @@ def dubbing_merge(self, stt_output: dict, job_id: str) -> dict:
         
         segments = []
         for seg_data in segments_data:
-            # Check if this segment has TTS audio (progressive TTS dispatched it)
+            segment_id = seg_data.get("segment_id")
+            if segment_id is None:
+                # Should never happen after Bug 1 fix, but guard anyway
+                logger.warning(
+                    f"[DubbingMerge] Segment missing segment_id field, skipping: {seg_data}"
+                )
+                continue
+
+            # Prefer the explicit key stored by stt_transcribe; fall back to
+            # reconstructing it from the known naming convention.
             tts_audio_key = seg_data.get("tts_audio_key")
-            
-            # If no tts_audio_key, check if we can construct it from task metadata
             if not tts_audio_key and seg_data.get("tts_task_id"):
-                # Construct expected MinIO key using standardized pattern
-                segment_id = seg_data.get("segment_id", 0)
+                # FIX: use stt_job_id + zero-padded index — must match the key
+                # written by synthesize_tts in stt_transcribe
                 tts_audio_key = f"tts/{stt_job_id}/segment_{segment_id:04d}.wav"
             
             if not tts_audio_key:
                 logger.warning(
-                    f"[DubbingMerge] Segment {seg_data.get('segment_id')} "
-                    f"missing tts_audio_key, skipping"
+                    f"[DubbingMerge] Segment {segment_id} has no TTS audio key, skipping"
                 )
                 continue
             
             seg_info = SegmentTimingInfo(
-                segment_id=seg_data.get("segment_id", 0),
+                segment_id=segment_id,
                 start=seg_data.get("start", 0.0),
                 end=seg_data.get("end", 0.0),
                 duration=seg_data.get("end", 0.0) - seg_data.get("start", 0.0),
@@ -1161,7 +1230,8 @@ def dubbing_merge(self, stt_output: dict, job_id: str) -> dict:
                     video_id=video_id,
                     segments=segments,
                     job_id=job_id,
-                    progress_callback=async_progress_callback
+                    progress_callback=async_progress_callback,
+                    video_file_key=video_file_key,  # pre-fetched via sync psycopg2
                 )
             )
         finally:
