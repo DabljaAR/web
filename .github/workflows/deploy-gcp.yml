@@ -33,7 +33,7 @@ jobs:
     environment: production
     env:
       TARGET_BRANCH: production
-      APP_DIR: /opt/web
+      APP_DIR: ~/web
 
     steps:
       - name: Checkout
@@ -84,6 +84,11 @@ jobs:
           fi
 
           REPO_URL="${REPO_SSH_URL:-$REPO_FALLBACK}"
+
+          # Expand leading ~ for user-owned deployment path.
+          case "$APP_DIR" in
+            "~"|"~/"*) APP_DIR="${HOME}${APP_DIR#\~}" ;;
+          esac
 
           # Bootstrap repository on first deploy if it does not exist yet.
           if [ ! -d "$APP_DIR/.git" ]; then
