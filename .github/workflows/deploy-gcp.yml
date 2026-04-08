@@ -31,6 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
+    env:
+      TARGET_BRANCH: production
+      APP_DIR: /opt/web
 
     steps:
       - name: Checkout
@@ -63,18 +66,40 @@ jobs:
           VM_HOST: ${{ secrets.GCP_VM_HOST }}
           VM_USER: ${{ secrets.GCP_VM_USER }}
           VM_PORT: ${{ secrets.GCP_VM_PORT }}
+          TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
+          APP_DIR: ${{ env.APP_DIR }}
+          REPO_SSH_URL: ${{ secrets.GIT_REPO_SSH_URL }}
+          REPO_FALLBACK: git@github.com:${{ github.repository }}.git
         run: |
           set -euo pipefail
           VM_PORT="${VM_PORT:-22}"
 
-          ssh -p "$VM_PORT" "$VM_USER@$VM_HOST" 'bash -se' <<'EOF'
+          ssh -p "$VM_PORT" "$VM_USER@$VM_HOST" \
+            "TARGET_BRANCH='$TARGET_BRANCH' APP_DIR='$APP_DIR' REPO_SSH_URL='$REPO_SSH_URL' REPO_FALLBACK='$REPO_FALLBACK' bash -se" <<'EOF'
           set -euo pipefail
 
-          cd /opt/web
+          if ! command -v git >/dev/null 2>&1; then
+            echo "git is not installed on VM"
+            exit 1
+          fi
+
+          REPO_URL="${REPO_SSH_URL:-$REPO_FALLBACK}"
+
+          # Bootstrap repository on first deploy if it does not exist yet.
+          if [ ! -d "$APP_DIR/.git" ]; then
+            mkdir -p "$APP_DIR"
+            git clone -b "$TARGET_BRANCH" "$REPO_URL" "$APP_DIR" || {
+              echo "Failed to clone repository. Ensure VM has GitHub SSH access for private repo."
+              echo "Tried URL: $REPO_URL"
+              exit 1
+            }
+          fi
+
+          cd "$APP_DIR"
 
           git fetch --prune origin
-          git checkout main
-          git pull --ff-only origin main
+          git checkout "$TARGET_BRANCH"
+          git pull --ff-only origin "$TARGET_BRANCH"
 
           COMPOSE_CMD="docker compose"
           if ! docker compose version >/dev/null 2>&1; then
@@ -100,6 +125,7 @@ jobs:
             echo "- Workflow: deploy-gcp"
             echo "- Trigger: ${{ github.event_name }}"
             echo "- Repository SHA: ${{ github.sha }}"
-            echo "- Target VM path: /opt/web"
+            echo "- Target branch: ${{ env.TARGET_BRANCH }}"
+            echo "- Target VM path: ${{ env.APP_DIR }}"
             echo "- Compose profile: docker-compose.yaml + docker-compose.prod.yml"
           } >> "$GITHUB_STEP_SUMMARY"
