@@ -69,9 +69,22 @@ resource "google_compute_instance" "vm" {
     }
   }
 
-  metadata = {
-    enable-oslogin = "TRUE"
+  dynamic "service_account" {
+    for_each = var.service_account_email != null ? [1] : []
+    content {
+      email  = var.service_account_email
+      scopes = var.service_account_scopes
+    }
   }
+
+  metadata = merge(
+    {
+      enable-oslogin = "TRUE"
+    },
+    var.startup_script_content != null ? {
+      "startup-script" = var.startup_script_content
+    } : {}
+  )
 
   labels = var.labels
 

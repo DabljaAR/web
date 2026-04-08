@@ -126,6 +126,62 @@ variable "enable_spot" {
   default     = true
 }
 
+variable "startup_script_enabled" {
+  description = "Enable VM startup bootstrap script for host baseline configuration"
+  type        = bool
+  default     = false
+}
+
+variable "deployment_user" {
+  description = "Primary Linux user for deployment directory ownership"
+  type        = string
+  default     = "ubuntu"
+}
+
+variable "enable_vm_service_account" {
+  description = "Enable creation and attachment of a dedicated VM service account"
+  type        = bool
+  default     = false
+}
+
+variable "vm_service_account_roles" {
+  description = "Project IAM roles granted to the VM service account"
+  type        = list(string)
+  default = [
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+    "roles/secretmanager.secretAccessor"
+  ]
+}
+
+variable "vm_service_account_scopes" {
+  description = "OAuth scopes applied when attaching VM service account"
+  type        = list(string)
+  default     = ["https://www.googleapis.com/auth/cloud-platform"]
+}
+
+variable "vm_env_secret_name" {
+  description = "Optional Secret Manager secret name that contains full .env.production content"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.vm_env_secret_name == "" || can(regex("^[A-Za-z0-9_-]+$", var.vm_env_secret_name))
+    error_message = "vm_env_secret_name must be empty or a valid Secret Manager secret name."
+  }
+}
+
+variable "vm_git_deploy_key_secret_name" {
+  description = "Optional Secret Manager secret name that contains private SSH deploy key for GitHub clone"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.vm_git_deploy_key_secret_name == "" || can(regex("^[A-Za-z0-9_-]+$", var.vm_git_deploy_key_secret_name))
+    error_message = "vm_git_deploy_key_secret_name must be empty or a valid Secret Manager secret name."
+  }
+}
+
 variable "boot_disk_image" {
   description = "Boot disk image family path for the VM"
   type        = string

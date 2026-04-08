@@ -59,6 +59,11 @@ output "storage_bucket_name" {
   value       = module.storage.bucket_name
 }
 
+output "vm_service_account_email" {
+  description = "Service account attached to VM (null when disabled)"
+  value       = var.enable_vm_service_account ? module.iam[0].service_account_email : null
+}
+
 output "firewall_rule_ids" {
   description = "Created firewall rule IDs"
   value = {

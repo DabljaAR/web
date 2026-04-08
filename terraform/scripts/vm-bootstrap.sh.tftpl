@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LOG_FILE="/var/log/vm-bootstrap.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "[$(date -Is)] Starting VM bootstrap"
+
+if [[ "$${EUID}" -ne 0 ]]; then
+  echo "Bootstrap script must run as root"
+  exit 1
+fi
+
+DEPLOYMENT_USER="${deployment_user}"
+APP_DIR="${app_dir}"
+ENV_SECRET_NAME="${env_secret_name}"
+GIT_DEPLOY_KEY_SECRET_NAME="${git_deploy_key_secret_name}"
+BOOTSTRAP_DONE_FILE="/var/lib/vm-bootstrap.done"
+
+# Install baseline packages only when missing to keep reruns cheap.
+install_base_packages() {
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    gnupg \
+    openssh-client \
+    lsb-release \
+    ufw \
+    unattended-upgrades
+}
+
+install_docker() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    echo "Docker and compose plugin already installed"
+    return
+  fi
+
+  install -m 0755 -d /etc/apt/keyrings
+  if [[ ! -f /etc/apt/keyrings/docker.asc ]]; then
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+  fi
+
+  cat >/etc/apt/sources.list.d/docker.list <<EOF
+deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable
+EOF
+
+  apt-get update
+  apt-get install -y --no-install-recommends \
+    docker-ce \
+    docker-ce-cli \
+    containerd.io \
+    docker-buildx-plugin \
+    docker-compose-plugin
+
+  systemctl enable docker
+  systemctl restart docker
+}
+
+configure_docker_daemon() {
+  install -d -m 0755 /etc/docker
+
+  cat >/etc/docker/daemon.json <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "live-restore": true
+}
+EOF
+
+  systemctl restart docker
+}
+
+ensure_user_membership() {
+  if id "$DEPLOYMENT_USER" >/dev/null 2>&1; then
+    usermod -aG docker "$DEPLOYMENT_USER" || true
+  fi
+}
+
+mount_data_disk() {
+  local mount_point="/mnt/data"
+  local device=""
+
+  install -d -m 0755 "$mount_point"
+
+  for candidate in /dev/disk/by-id/google-data /dev/sdb /dev/nvme1n1; do
+    if [[ -b "$candidate" ]]; then
+      device="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$device" ]]; then
+    echo "No data disk detected; skipping mount"
+    return
+  fi
+
+  if ! blkid "$device" >/dev/null 2>&1; then
+    mkfs.ext4 -F "$device"
+  fi
+
+  local uuid
+  uuid="$(blkid -s UUID -o value "$device")"
+
+  if ! grep -q "$uuid" /etc/fstab; then
+    echo "UUID=$uuid $mount_point ext4 defaults,nofail 0 2" >>/etc/fstab
+  fi
+
+  mount -a
+}
+
+enable_auto_updates() {
+  dpkg-reconfigure -f noninteractive unattended-upgrades || true
+}
+
+create_runtime_dirs() {
+  install -d -m 0755 "$APP_DIR"
+  install -d -m 0755 "$APP_DIR/.runtime"
+  if id "$DEPLOYMENT_USER" >/dev/null 2>&1; then
+    chown -R "$DEPLOYMENT_USER":"$DEPLOYMENT_USER" "$APP_DIR"
+  fi
+}
+
+fetch_env_from_secret_manager() {
+  if [[ -z "$ENV_SECRET_NAME" ]]; then
+    echo "No env secret configured; skipping Secret Manager env bootstrap"
+    return
+  fi
+
+  local metadata_url="http://metadata.google.internal/computeMetadata/v1"
+  local token
+  local project_id
+  local response
+  local env_target
+
+  token="$(curl -fsS -H "Metadata-Flavor: Google" "$metadata_url/instance/service-accounts/default/token" | jq -r '.access_token')"
+  project_id="$(curl -fsS -H "Metadata-Flavor: Google" "$metadata_url/project/project-id")"
+
+  response="$(curl -fsS \
+    -H "Authorization: Bearer $token" \
+    "https://secretmanager.googleapis.com/v1/projects/$project_id/secrets/$ENV_SECRET_NAME/versions/latest:access")"
+
+  env_target="$APP_DIR/.env.production"
+  echo "$response" | jq -r '.payload.data' | base64 --decode >"$env_target"
+  chmod 600 "$env_target"
+
+  if id "$DEPLOYMENT_USER" >/dev/null 2>&1; then
+    chown "$DEPLOYMENT_USER":"$DEPLOYMENT_USER" "$env_target"
+  fi
+}
+
+setup_git_ssh_access() {
+  if [[ -z "$GIT_DEPLOY_KEY_SECRET_NAME" ]]; then
+    echo "No git deploy key secret configured; skipping git SSH setup"
+    return
+  fi
+
+  if ! id "$DEPLOYMENT_USER" >/dev/null 2>&1; then
+    echo "Deployment user '$DEPLOYMENT_USER' does not exist; skipping git SSH setup"
+    return
+  fi
+
+  local metadata_url="http://metadata.google.internal/computeMetadata/v1"
+  local token
+  local project_id
+  local response
+  local user_home
+  local ssh_dir
+  local key_file
+  local config_file
+  local known_hosts_file
+
+  user_home="$(getent passwd "$DEPLOYMENT_USER" | cut -d: -f6)"
+  if [[ -z "$user_home" ]]; then
+    echo "Failed to resolve home directory for '$DEPLOYMENT_USER'; skipping git SSH setup"
+    return
+  fi
+
+  ssh_dir="$user_home/.ssh"
+  key_file="$ssh_dir/id_ed25519_github_deploy"
+  config_file="$ssh_dir/config"
+  known_hosts_file="$ssh_dir/known_hosts"
+
+  install -d -m 700 "$ssh_dir"
+
+  token="$(curl -fsS -H "Metadata-Flavor: Google" "$metadata_url/instance/service-accounts/default/token" | jq -r '.access_token')"
+  project_id="$(curl -fsS -H "Metadata-Flavor: Google" "$metadata_url/project/project-id")"
+
+  response="$(curl -fsS \
+    -H "Authorization: Bearer $token" \
+    "https://secretmanager.googleapis.com/v1/projects/$project_id/secrets/$GIT_DEPLOY_KEY_SECRET_NAME/versions/latest:access")"
+
+  echo "$response" | jq -r '.payload.data' | base64 --decode >"$key_file"
+  chmod 600 "$key_file"
+
+  if ! grep -q "github.com" "$known_hosts_file" 2>/dev/null; then
+    ssh-keyscan -t ed25519 github.com >>"$known_hosts_file"
+  fi
+
+  if ! grep -q "id_ed25519_github_deploy" "$config_file" 2>/dev/null; then
+    cat >>"$config_file" <<EOF
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile $key_file
+  IdentitiesOnly yes
+  StrictHostKeyChecking yes
+  UserKnownHostsFile $known_hosts_file
+EOF
+  fi
+
+  chmod 600 "$config_file" "$known_hosts_file"
+  chown "$DEPLOYMENT_USER":"$DEPLOYMENT_USER" "$ssh_dir" "$key_file" "$config_file" "$known_hosts_file"
+}
+
+install_base_packages
+install_docker
+configure_docker_daemon
+ensure_user_membership
+mount_data_disk
+enable_auto_updates
+create_runtime_dirs
+fetch_env_from_secret_manager
+setup_git_ssh_access
+
+echo "$(date -Is) bootstrap_complete" >"$BOOTSTRAP_DONE_FILE"
+echo "[$(date -Is)] VM bootstrap completed successfully"

@@ -45,6 +45,17 @@ machine_type   = "n1-standard-4"     # 4 vCPU, 15GB RAM
 gpu_type       = "nvidia-tesla-t4"   # 16GB VRAM
 gpu_count      = 0
 enable_spot    = true                # ~70% cost savings
+startup_script_enabled = false       # Set true to install Docker + host baseline at first boot
+deployment_user = "ubuntu"          # Ownership for /opt/web paths created by bootstrap
+enable_vm_service_account = false    # Set true to create and attach a dedicated VM SA
+# vm_env_secret_name = "env-production"  # Optional: secret containing full .env.production text
+# vm_git_deploy_key_secret_name = "github-deploy-key"  # Optional: secret containing private deploy key for git clone
+# vm_service_account_roles = [        # Optional override
+#   "roles/logging.logWriter",
+#   "roles/monitoring.metricWriter",
+#   "roles/secretmanager.secretAccessor"
+# ]
+# vm_service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
 boot_disk_image = "projects/deeplearning-platform-release/global/images/family/common-cu128-ubuntu-2204-nvidia-570"
 boot_disk_size = 50                  # GB
 data_disk_size = 100                 # GB (persistent)
