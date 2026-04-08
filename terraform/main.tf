@@ -66,28 +66,48 @@ module "storage" {
 }
 
 # =============================================================================
+# IAM Module (Optional)
+# =============================================================================
+module "iam" {
+  count  = var.enable_vm_service_account ? 1 : 0
+  source = "./modules/iam"
+
+  name_prefix = local.name_prefix
+  project_id  = var.project_id
+  roles       = var.vm_service_account_roles
+  gcs_bucket  = module.storage.bucket_name
+  secret_ids  = []
+
+  depends_on = [google_project_service.apis]
+}
+
+# =============================================================================
 # Compute Module
 # =============================================================================
 module "compute" {
   source = "./modules/compute"
 
-  name_prefix      = local.name_prefix
-  project_id       = var.project_id
-  region           = var.region
-  zone             = var.zone
-  machine_type     = var.machine_type
-  gpu_type         = var.gpu_type
-  gpu_count        = var.gpu_count
-  spot             = var.enable_spot
-  boot_disk_image  = var.boot_disk_image
-  boot_disk_size   = var.boot_disk_size
-  data_disk_size   = var.data_disk_size
-  subnet_self_link = module.network.subnet_self_link
-  labels           = local.common_labels
+  name_prefix            = local.name_prefix
+  project_id             = var.project_id
+  region                 = var.region
+  zone                   = var.zone
+  machine_type           = var.machine_type
+  gpu_type               = var.gpu_type
+  gpu_count              = var.gpu_count
+  spot                   = var.enable_spot
+  boot_disk_image        = var.boot_disk_image
+  boot_disk_size         = var.boot_disk_size
+  data_disk_size         = var.data_disk_size
+  subnet_self_link       = module.network.subnet_self_link
+  startup_script_content = local.startup_script_content
+  service_account_email  = var.enable_vm_service_account ? module.iam[0].service_account_email : null
+  service_account_scopes = var.vm_service_account_scopes
+  labels                 = local.common_labels
 
   depends_on = [
     module.network,
     module.firewall,
-    module.storage
+    module.storage,
+    module.iam
   ]
 }

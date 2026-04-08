@@ -34,6 +34,9 @@ jobs:
     env:
       TARGET_BRANCH: production
       APP_DIR: ~/web
+      ENV_FILE: .env.production
+      BOOTSTRAP_MARKER: /var/lib/vm-bootstrap.done
+      REQUIRE_BOOTSTRAP_MARKER: "true"
 
     steps:
       - name: Checkout
@@ -68,6 +71,9 @@ jobs:
           VM_PORT: ${{ secrets.GCP_VM_PORT }}
           TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
           APP_DIR: ${{ env.APP_DIR }}
+          ENV_FILE: ${{ env.ENV_FILE }}
+          BOOTSTRAP_MARKER: ${{ env.BOOTSTRAP_MARKER }}
+          REQUIRE_BOOTSTRAP_MARKER: ${{ env.REQUIRE_BOOTSTRAP_MARKER }}
           REPO_SSH_URL: ${{ secrets.GIT_REPO_SSH_URL }}
           REPO_FALLBACK: git@github.com:${{ github.repository }}.git
         run: |
@@ -75,7 +81,7 @@ jobs:
           VM_PORT="${VM_PORT:-22}"
 
           ssh -p "$VM_PORT" "$VM_USER@$VM_HOST" \
-            "TARGET_BRANCH='$TARGET_BRANCH' APP_DIR='$APP_DIR' REPO_SSH_URL='$REPO_SSH_URL' REPO_FALLBACK='$REPO_FALLBACK' bash -se" <<'EOF'
+            "TARGET_BRANCH='$TARGET_BRANCH' APP_DIR='$APP_DIR' ENV_FILE='$ENV_FILE' BOOTSTRAP_MARKER='$BOOTSTRAP_MARKER' REQUIRE_BOOTSTRAP_MARKER='$REQUIRE_BOOTSTRAP_MARKER' REPO_SSH_URL='$REPO_SSH_URL' REPO_FALLBACK='$REPO_FALLBACK' bash -se" <<'EOF'
           set -euo pipefail
 
           if ! command -v git >/dev/null 2>&1; then
@@ -85,10 +91,24 @@ jobs:
 
           REPO_URL="${REPO_SSH_URL:-$REPO_FALLBACK}"
 
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "docker is not installed on VM"
+            exit 1
+          fi
+
           # Expand leading ~ for user-owned deployment path.
           case "$APP_DIR" in
             "~"|"~/"*) APP_DIR="${HOME}${APP_DIR#\~}" ;;
           esac
+
+          if [ "${REQUIRE_BOOTSTRAP_MARKER:-false}" = "true" ] && [ ! -f "$BOOTSTRAP_MARKER" ]; then
+            echo "Required bootstrap marker is missing: $BOOTSTRAP_MARKER"
+            exit 1
+          fi
+
+          if [ "${REQUIRE_BOOTSTRAP_MARKER:-false}" != "true" ] && [ ! -f "$BOOTSTRAP_MARKER" ]; then
+            echo "Warning: bootstrap marker not found ($BOOTSTRAP_MARKER). Continuing because REQUIRE_BOOTSTRAP_MARKER=false."
+          fi
 
           # Bootstrap repository on first deploy if it does not exist yet.
           if [ ! -d "$APP_DIR/.git" ]; then
@@ -101,6 +121,11 @@ jobs:
           fi
 
           cd "$APP_DIR"
+
+          if [ ! -r "$ENV_FILE" ]; then
+            echo "Required env file is missing or unreadable: $APP_DIR/$ENV_FILE"
+            exit 1
+          fi
 
           git fetch --prune origin
           git checkout "$TARGET_BRANCH"
@@ -116,8 +141,15 @@ jobs:
             fi
           fi
 
-          $COMPOSE_CMD --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
-          $COMPOSE_CMD --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml ps
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yaml -f docker-compose.prod.yml ps
+
+          for _ in 1 2 3 4 5; do
+            if curl -fsS http://localhost:8000/api/health >/dev/null; then
+              break
+            fi
+            sleep 3
+          done
 
           curl -fsS http://localhost:8000/api/health >/dev/null
           git rev-parse --short HEAD

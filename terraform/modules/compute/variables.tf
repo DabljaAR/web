@@ -88,3 +88,21 @@ variable "labels" {
   type        = map(string)
   default     = {}
 }
+
+variable "startup_script_content" {
+  description = "Optional startup script content for VM first boot"
+  type        = string
+  default     = null
+}
+
+variable "service_account_email" {
+  description = "Optional service account email to attach to the VM"
+  type        = string
+  default     = null
+}
+
+variable "service_account_scopes" {
+  description = "OAuth scopes for attached VM service account"
+  type        = list(string)
+  default     = ["https://www.googleapis.com/auth/cloud-platform"]
+}
