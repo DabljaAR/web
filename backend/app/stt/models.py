@@ -490,29 +490,4 @@ def _run_stt_job(
             engine.dispose()
 
 
-@celery_app.task(
-    bind=True,
-    base=WhisperModelManager,            # self IS the WhisperModelManager
-    name="app.jobs.tasks.pipeline.stt_transcribe",
-    queue="ai_stt",
-    max_retries=3,
-    default_retry_delay=30,
-    acks_late=True,
-)
-def transcribe_task(
-    self: "WhisperModelManager",
-    job_id: str,
-    file_key: str,
-    language: Optional[str] = None,
-    target_lang: str = "arb_Arab",
-) -> None:
-    """
-    Celery STT task — fully synchronous.
-    `self` is the WhisperModelManager; model loads once, reused every call.
-    After transcription, dispatches each segment to NMT queue for translation.
-    """
-    logger.info(f"[STT] Task received | job_id={job_id} | file_key={file_key} | target_lang={target_lang}")
-    try:
-        _run_stt_job(self, job_id, file_key, language, target_lang)
-    except Exception as exc:
-        raise self.retry(exc=exc)
+

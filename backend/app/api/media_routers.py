@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException, status, Query, Form, Body
+from fastapi import APIRouter, Depends, UploadFile, File, BackgroundTasks, HTTPException, status, Query, Form, Body, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.models import User
@@ -21,6 +21,7 @@ async def get_video_service(db: AsyncSession = Depends(get_db)) -> VideoService:
 @router.post("/upload", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video(
     background_tasks: BackgroundTasks,
+    request: Request,  # Add request to debug headers
     file: UploadFile = File(...),
     output_type: str = Form("fullDubbing"),
     domain: str = Form("general"),
@@ -32,6 +33,14 @@ async def upload_video(
     """
     Upload a video file with processing options.
     """
+    # DEBUG: Log request details
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"[UPLOAD DEBUG] Content-Type: {request.headers.get('content-type')}")
+    logger.info(f"[UPLOAD DEBUG] Content-Length: {request.headers.get('content-length')}")
+    logger.info(f"[UPLOAD DEBUG] File: {file.filename}, size: {file.size}, type: {file.content_type}")
+    logger.info(f"[UPLOAD DEBUG] Form fields - output_type: {output_type}, domain: {domain}, voice: {voice}, translation_style: {translation_style}")
+    
     options = {
         "output_type": output_type,
         "domain": domain,

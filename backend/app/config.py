@@ -78,6 +78,15 @@ class Settings(BaseSettings):
     # ========== HUGGINGFACE AUTHENTICATION ==========
     HF_TOKEN: str = os.getenv("HF_TOKEN", "")  # HuggingFace access token for model downloads
     
+    # ========== DUBBING MERGE CONFIGURATION ==========
+    DUBBING_MAX_STRETCH_RATIO: float = float(os.getenv("DUBBING_MAX_STRETCH_RATIO", "1.2"))  # Max 20% speed increase
+    DUBBING_MIN_STRETCH_RATIO: float = float(os.getenv("DUBBING_MIN_STRETCH_RATIO", "0.8"))  # Max 20% slowdown
+    DUBBING_SILENCE_THRESHOLD: float = float(os.getenv("DUBBING_SILENCE_THRESHOLD", "0.1"))  # Min silence between segments (seconds)
+    DUBBING_OUTPUT_VIDEO_CODEC: str = os.getenv("DUBBING_OUTPUT_VIDEO_CODEC", "libx264")
+    DUBBING_OUTPUT_AUDIO_CODEC: str = os.getenv("DUBBING_OUTPUT_AUDIO_CODEC", "aac")
+    DUBBING_OUTPUT_AUDIO_BITRATE: str = os.getenv("DUBBING_OUTPUT_AUDIO_BITRATE", "192k")
+    DUBBING_TEMP_DIR: str = os.getenv("DUBBING_TEMP_DIR", "/tmp/dubbing_merge")  # Temp workspace for processing
+    
     # ========== SERVER ==========
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))

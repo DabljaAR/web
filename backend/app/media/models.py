@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, Boolean, Enum as SQLEnum, Float, BigInteger
+from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, Boolean, Enum as SQLEnum, Float, BigInteger, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
 
@@ -32,6 +32,7 @@ class Video(Base):
     file_path: Mapped[str] = mapped_column(String(512), nullable=False) # Path or key
     thumbnail_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     audio_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    dubbed_video_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)  # Dubbed video output
     
     duration: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     width: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -43,6 +44,7 @@ class Video(Base):
 
     status: Mapped[VideoStatus] = mapped_column(SQLEnum(VideoStatus), default=VideoStatus.PENDING, nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dubbing_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # Dubbing merge metadata
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

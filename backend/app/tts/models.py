@@ -223,6 +223,92 @@ class SilmaTTSModelManager(Task):
 
         return audio_bytes
 
+    def synthesize_and_upload(
+        self,
+        text: str,
+        minio_key: str,
+        *,
+        ref_audio_path: Optional[str] = None,
+        ref_text: Optional[str] = None,
+        nfe_step: Optional[int] = None,
+        speed: Optional[float] = None,
+        cfg_strength: Optional[float] = None,
+        sway_sampling_coef: Optional[float] = None,
+        target_rms: Optional[float] = None,
+        seed: Optional[int] = None,
+    ) -> dict:
+        """
+        Synthesize Arabic speech and upload to MinIO.
+        
+        This is a non-Celery method for direct use in progressive pipeline.
+        
+        Returns:
+            dict: {
+                "status": "success",
+                "minio_key": str,
+                "audio_url": str,
+                "bytes_size": int,
+                "duration": float,
+                "sample_rate": int
+            }
+        """
+        # Synthesize audio
+        audio_bytes = self.synthesize(
+            text=text,
+            ref_audio_path=ref_audio_path,
+            ref_text=ref_text,
+            nfe_step=nfe_step,
+            speed=speed,
+            cfg_strength=cfg_strength,
+            sway_sampling_coef=sway_sampling_coef,
+            target_rms=target_rms,
+            seed=seed,
+        )
+        
+        # Get audio info
+        import io
+        import soundfile as sf
+        with io.BytesIO(audio_bytes) as buf:
+            info = sf.info(buf)
+            duration = info.duration
+            sample_rate = info.samplerate
+        
+        # Upload to MinIO
+        try:
+            from app.media.storage import get_storage_service
+            storage = get_storage_service()
+            
+            # Run async upload in sync context (isolated event loop)
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    storage.upload_bytes(audio_bytes, minio_key, "audio/wav")
+                )
+                
+                # Get presigned URL
+                audio_url = loop.run_until_complete(
+                    storage.get_url(minio_key)
+                )
+            finally:
+                loop.close()
+            
+            logger.info("TTS synthesized and uploaded: %s (%d bytes)", minio_key, len(audio_bytes))
+            
+            return {
+                "status": "success",
+                "minio_key": minio_key,
+                "audio_url": audio_url,
+                "bytes_size": len(audio_bytes),
+                "duration": duration,
+                "sample_rate": sample_rate,
+            }
+            
+        except Exception as e:
+            logger.error("Failed to upload TTS to MinIO: %s", e)
+            raise
+
 
 # ---------------------------------------------------------------------------
 # Celery task

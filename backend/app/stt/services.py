@@ -179,8 +179,8 @@ class TranscriptionService:
         await self.db.commit()
         await self.db.refresh(job)
 
-        # 3. Dispatch Celery task
-        from app.jobs.tasks.pipeline import stt_transcribe as transcribe_task
+        # 3. Dispatch Celery task (STT-only, no NMT/TTS)
+        from app.jobs.tasks.pipeline import stt_transcribe_only as transcribe_task
         celery_result = transcribe_task.apply_async(
             kwargs={
                 "job_id": job.id,

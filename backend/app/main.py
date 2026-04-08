@@ -16,9 +16,11 @@ from app.core import init_db
 from app.core.rate_limiter import limiter
 from app.core.router import router as core_router
 from app.dependencies import connect_to_db, disconnect_from_db
+from app.dubbing.router import router as dubbing_router
 from app.nmt.router import router as nmt_router
 from app.stt.router import router as stt_router
 from app.tts.router import router as tts_router
+from app.progressive.websocket_router import router as progressive_router
 from app.shared.logging import setup_logging
 from app.shared.middleware import ExceptionLoggingMiddleware
 
@@ -131,6 +133,8 @@ app.include_router(job_router, prefix="/api")
 app.include_router(stt_router)  # Re-enabled, has prefix="/api/transcription"
 app.include_router(nmt_router, prefix="/api")
 app.include_router(tts_router, prefix="/api/tts")  # Re-enabled
+app.include_router(dubbing_router)  # Has prefix="/api/dubbing"
+app.include_router(progressive_router)  # Progressive WebSocket and API endpoints
 
 # ---------------------------------------------------------------------------
 # Root endpoint

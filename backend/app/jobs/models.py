@@ -62,6 +62,12 @@ class Job(Base):
     )
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
+    # Progressive tracking columns
+    segments_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    segments_completed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    current_video_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    merge_timeline: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     def __repr__(self) -> str:
         return f"<Job id={self.id} type={self.job_type} status={self.status}>"

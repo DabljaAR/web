@@ -203,3 +203,138 @@ class FFmpegService:
         except Exception as e:
             logger.error(f"Error generating HLS: {e}")
             return False
+
+    async def merge_audio_to_video(
+        self, 
+        video_path: str, 
+        audio_path: str, 
+        output_path: str,
+        video_codec: str = "copy",
+        audio_codec: str = "aac",
+        audio_bitrate: str = "192k"
+    ) -> bool:
+        """
+        Replace video's audio track with new audio.
+        
+        Args:
+            video_path: Path to original video
+            audio_path: Path to new audio track
+            output_path: Path for output video
+            video_codec: Video codec (default: copy - no re-encoding)
+            audio_codec: Audio codec (default: aac)
+            audio_bitrate: Audio bitrate (default: 192k)
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        cmd = [
+            self.ffmpeg_path,
+            "-i", video_path,
+            "-i", audio_path,
+            "-c:v", video_codec,  # Copy video stream (no re-encode)
+            "-c:a", audio_codec,   # Encode audio
+            "-b:a", audio_bitrate,
+            "-map", "0:v:0",       # Use video from first input
+            "-map", "1:a:0",       # Use audio from second input
+            "-shortest",           # End when shortest stream ends
+            "-y",
+            output_path
+        ]
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                logger.error(f"ffmpeg merge audio failed: {stderr.decode()}")
+                return False
+            
+            # Verify output exists
+            if not Path(output_path).exists() or Path(output_path).stat().st_size == 0:
+                logger.error(f"Output file missing or empty: {output_path}")
+                return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error merging audio to video: {e}")
+            return False
+
+    async def extract_video_only(self, input_path: str, output_path: str) -> bool:
+        """
+        Extract video stream without audio.
+        
+        Args:
+            input_path: Path to input video
+            output_path: Path for output video (no audio)
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        cmd = [
+            self.ffmpeg_path,
+            "-i", input_path,
+            "-an",  # No audio
+            "-c:v", "copy",  # Copy video codec
+            "-y",
+            output_path
+        ]
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                logger.error(f"ffmpeg extract video failed: {stderr.decode()}")
+                return False
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error extracting video: {e}")
+            return False
+
+    async def get_audio_duration(self, audio_path: str) -> Optional[float]:
+        """
+        Get duration of an audio file in seconds.
+        
+        Args:
+            audio_path: Path to audio file
+        
+        Returns:
+            Duration in seconds, or None if error
+        """
+        cmd = [
+            self.ffprobe_path,
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            audio_path
+        ]
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                logger.error(f"ffprobe failed: {stderr.decode()}")
+                return None
+            
+            data = json.loads(stdout.decode())
+            format_info = data.get("format", {})
+            duration = float(format_info.get("duration", 0))
+            
+            return duration if duration > 0 else None
+        except Exception as e:
+            logger.error(f"Error getting audio duration: {e}")
+            return None
