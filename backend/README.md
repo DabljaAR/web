@@ -258,6 +258,13 @@ alembic revision --autogenerate -m "Your migration message"
 alembic upgrade head
 ```
 
+Run linting and formatting checks with ruff:
+
+```bash
+ruff check .
+ruff format --check .
+```
+
 ### Running Tests
 To run the tests, use the following command:
 
