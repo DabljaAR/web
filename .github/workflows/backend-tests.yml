@@ -6,11 +6,6 @@ on:
     paths:
       - backend/**
       - .github/workflows/backend-tests.yml
-  push:
-    branches: [main, ci]
-    paths:
-      - backend/**
-      - .github/workflows/backend-tests.yml
 
 permissions:
   contents: read

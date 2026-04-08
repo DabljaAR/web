@@ -6,11 +6,6 @@ on:
     paths:
       - frontend/**
       - .github/workflows/frontend-tests.yml
-  push:
-    branches: [main, ci]
-    paths:
-      - frontend/**
-      - .github/workflows/frontend-tests.yml
 
 permissions:
   contents: read
