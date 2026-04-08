@@ -43,7 +43,6 @@
         "ms-python.python",
         "ms-python.pylance",
         "charliermarsh.ruff",
-        "ms-python.black-formatter",
         "ms-python.debugpy",
         // Productivity
         "eamodio.gitlens",
