@@ -127,6 +127,7 @@ Deployment workflow requires these repository secrets:
 - `GCP_VM_USER`: SSH user on the VM.
 - `GCP_VM_SSH_KEY`: Private SSH key content for that user.
 - `GCP_VM_PORT`: SSH port (optional, defaults to `22` if empty).
+- `GIT_REPO_SSH_URL`: Optional private repo SSH URL for first-time clone (example: `git@github.com:owner/repo.git`). If omitted, workflow falls back to `git@github.com:<current-repo>.git`.
 
 One-time VM prerequisites for deployment:
 
@@ -135,6 +136,8 @@ One-time VM prerequisites for deployment:
 3. Docker and Docker Compose are installed and usable by the SSH user.
 4. The VM has network access to pull latest git changes.
 5. DNS and ports 80/443 are configured for production traffic.
+
+The deployment workflow can bootstrap first deploy automatically: if `/opt/web/.git` is missing, it clones the repository on the VM before running `docker compose`.
 
 ### Local Reproduction
 
