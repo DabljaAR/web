@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
         max_bytes=settings.LOG_MAX_BYTES,
         backup_count=settings.LOG_BACKUP_COUNT,
         enable_console=settings.LOG_ENABLE_CONSOLE,
-        enable_file=settings.LOG_ENABLE_FILE,
+        enable_file=settings.LOG_TO_FILE,
         json_format=settings.LOG_JSON_FORMAT,
     )
 
