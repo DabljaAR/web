@@ -57,14 +57,32 @@ Use the production overlays from the project root:
 
 ```bash
 cp .env.production.example .env.production
-# Fill required secrets and DOMAIN in .env.production
+# Fill required secrets, DOMAIN, and ACME_EMAIL in .env.production
+
+# Build frontend static files for Caddy (/srv mount)
+docker run --rm \
+  -v "$PWD/frontend:/frontend" \
+  -w /frontend \
+  -e VITE_API_BASE_URL=/api \
+  node:24-alpine \
+  sh -c "npm ci --legacy-peer-deps && npm run build"
+
+# Start production stack
 docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
 ```
 
 Default production behavior:
 - Public entrypoint is Caddy only on ports 80 and 443.
+- Caddy also listens on UDP 443 for HTTP/3.
 - Backend, Postgres, Redis, and MinIO are internal-only.
-- Frontend is served as static assets by Caddy.
+- Caddy uses the official image with mounted config (`./Caddyfile`) and mounted static assets (`./frontend/dist` -> `/srv`).
+
+Reload Caddy config without container restart:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml \
+  exec -w /etc/caddy caddy caddy reload
+```
 
 Optional overlays:
 
