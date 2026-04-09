@@ -1,4 +1,5 @@
 {
+    admin localhost:2019
     email {$ACME_EMAIL}
 }
 

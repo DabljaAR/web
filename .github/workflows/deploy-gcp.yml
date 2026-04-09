@@ -15,7 +15,6 @@ on:
       - docker-compose.yaml
       - docker-compose.prod.yml
       - Caddyfile
-      - Dockerfile.caddy
       - .github/workflows/deploy-gcp.yml
 
 permissions:
@@ -127,6 +126,17 @@ jobs:
             exit 1
           fi
 
+          require_env() {
+            local key="$1"
+            if ! grep -Eq "^[[:space:]]*${key}=" "$ENV_FILE"; then
+              echo "Missing required key in $ENV_FILE: $key"
+              exit 1
+            fi
+          }
+
+          require_env DOMAIN
+          require_env ACME_EMAIL
+
           git fetch --prune origin
           git checkout "$TARGET_BRANCH"
           git pull --ff-only origin "$TARGET_BRANCH"
@@ -139,6 +149,19 @@ jobs:
               echo "Neither docker compose nor docker-compose is available on VM"
               exit 1
             fi
+          fi
+
+          # Build frontend static assets to host path mounted by Caddy at /srv.
+          docker run --rm \
+            -v "$APP_DIR/frontend:/frontend" \
+            -w /frontend \
+            -e VITE_API_BASE_URL=/api \
+            node:24-alpine \
+            sh -c "npm ci --legacy-peer-deps && npm run build"
+
+          if [ ! -f "$APP_DIR/frontend/dist/index.html" ]; then
+            echo "Frontend build did not produce frontend/dist/index.html"
+            exit 1
           fi
 
           $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yaml -f docker-compose.prod.yml up -d --build

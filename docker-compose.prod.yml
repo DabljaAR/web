@@ -1,21 +1,22 @@
 services:
   caddy:
-    build:
-      context: .
-      dockerfile: Dockerfile.caddy
-      args:
-        VITE_API_BASE_URL: /api
+    image: caddy:2.10-alpine
     container_name: dabljaar_caddy
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp"
+      - "127.0.0.1:2019:2019"
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required for production}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required for production}
     depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped
     volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv:ro
       - caddy_data:/data
       - caddy_config:/config
     security_opt:
