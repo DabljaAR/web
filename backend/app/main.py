@@ -1,12 +1,10 @@
 import gc
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 
 from app.api.job_router import router as job_router
@@ -44,7 +42,7 @@ async def lifespan(app: FastAPI):
         max_bytes=settings.LOG_MAX_BYTES,
         backup_count=settings.LOG_BACKUP_COUNT,
         enable_console=settings.LOG_ENABLE_CONSOLE,
-        enable_file=settings.LOG_ENABLE_FILE,
+        enable_file=settings.LOG_TO_FILE,
         json_format=settings.LOG_JSON_FORMAT,
     )
 
@@ -141,11 +139,6 @@ app.include_router(tts_router, prefix="/api/tts")  # Re-enabled
 async def read_root():
     return {"message": "Welcome to DabljaAR Backend"}
 
-
-# Mount static files for uploaded avatars
-uploads_dir = Path("uploads")
-uploads_dir.mkdir(exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # ---------------------------------------------------------------------------
 # Dev entry point

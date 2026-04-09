@@ -3,7 +3,7 @@ import shutil
 import uuid
 import logging
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, Optional
 from fastapi import UploadFile
 from app.config import settings
 import aioboto3
@@ -58,10 +58,25 @@ class StorageService(Protocol):
 
 
 class LocalStorageService:
-    def __init__(self, base_dir: str = "uploads", base_url: str = "/uploads"):
+    def __init__(self, base_dir: Optional[str] = None, base_url: Optional[str] = None):
+        # Use settings if not provided explicitly
+        if base_dir is None:
+            base_dir = settings.LOCAL_STORAGE_DIR
+        if base_url is None:
+            base_url = settings.LOCAL_STORAGE_URL_PREFIX
+            
         self.base_dir = Path(base_dir)
-        self.base_dir.mkdir(parents=True, exist_ok=True)
         self.base_url = base_url.rstrip("/")
+        
+        # Validate that the base directory exists (don't auto-create)
+        if not self.base_dir.exists():
+            error_msg = (
+                f"Local storage directory does not exist: {self.base_dir.absolute()}\n"
+                f"Please create it manually or set MINIO_ENDPOINT to use S3/MinIO storage.\n"
+                f"To create the directory: mkdir -p {self.base_dir}"
+            )
+            logger.error(error_msg)
+            raise ValueError(error_msg)
 
     async def save(self, file: UploadFile, directory: str = "") -> str:
         target_dir = self.base_dir / directory

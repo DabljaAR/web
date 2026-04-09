@@ -34,9 +34,8 @@ def setup_logging(
         enable_file: Enable file logging
         json_format: Use JSON format for logs (useful for log aggregation)
     """
-    # Create logs directory if it doesn't exist
+    # Validate log directory exists (don't auto-create)
     log_path = Path(log_dir)
-    log_path.mkdir(parents=True, exist_ok=True)
     
     # Get root logger
     root_logger = logging.getLogger()
@@ -223,86 +222,110 @@ def setup_logging(
     
     # File handler with rotation
     if enable_file:
-        # Main log file (all logs)
-        log_file_path = log_path / log_file
-        file_handler = logging.handlers.RotatingFileHandler(
-            filename=str(log_file_path),
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8"
-        )
-        file_handler.setLevel(logging.DEBUG)
-        if json_format:
-            file_handler.setFormatter(formatter)
-        else:
-            file_handler.setFormatter(file_formatter)
-        root_logger.addHandler(file_handler)
+        try:
+            # Validate log directory exists
+            if not log_path.exists():
+                raise FileNotFoundError(
+                    f"Logs directory does not exist: {log_path.absolute()}\n"
+                    f"Create it manually: mkdir -p {log_path}\n"
+                    f"Or disable file logging with LOG_TO_FILE=false"
+                )
+            
+            # Main log file (all logs)
+            log_file_path = log_path / log_file
+            file_handler = logging.handlers.RotatingFileHandler(
+                filename=str(log_file_path),
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8"
+            )
+            file_handler.setLevel(logging.DEBUG)
+            if json_format:
+                file_handler.setFormatter(formatter)
+            else:
+                file_handler.setFormatter(file_formatter)
+            root_logger.addHandler(file_handler)
+            
+            # Separate error log file (ERROR and CRITICAL only)
+            error_log_file = log_path / "error.log"
+            error_handler = logging.handlers.RotatingFileHandler(
+                filename=str(error_log_file),
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8"
+            )
+            error_handler.setLevel(logging.ERROR)
+            if json_format:
+                error_handler.setFormatter(formatter)
+            else:
+                error_handler.setFormatter(file_formatter)
+            root_logger.addHandler(error_handler)
+            
+            # Separate warning log file (WARNING only)
+            warning_log_file = log_path / "warning.log"
+            warning_handler = logging.handlers.RotatingFileHandler(
+                filename=str(warning_log_file),
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8"
+            )
+            warning_handler.setLevel(logging.WARNING)
+            # Only log WARNING level, not ERROR (to avoid duplicates)
+            warning_handler.addFilter(lambda record: record.levelno == logging.WARNING)
+            if json_format:
+                warning_handler.setFormatter(formatter)
+            else:
+                warning_handler.setFormatter(file_formatter)
+            root_logger.addHandler(warning_handler)
+            
+            # Separate info log file (INFO only)
+            info_log_file = log_path / "info.log"
+            info_handler = logging.handlers.RotatingFileHandler(
+                filename=str(info_log_file),
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8"
+            )
+            info_handler.setLevel(logging.INFO)
+            # Only log INFO level, not WARNING or ERROR (to avoid duplicates)
+            info_handler.addFilter(lambda record: record.levelno == logging.INFO)
+            if json_format:
+                info_handler.setFormatter(formatter)
+            else:
+                info_handler.setFormatter(file_formatter)
+            root_logger.addHandler(info_handler)
+            
+            # Separate success log file (SUCCESS level only)
+            success_log_file = log_path / "success.log"
+            success_handler = logging.handlers.RotatingFileHandler(
+                filename=str(success_log_file),
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8"
+            )
+            success_handler.setLevel(SUCCESS_LEVEL)
+            # Only log SUCCESS level
+            success_handler.addFilter(lambda record: record.levelno == SUCCESS_LEVEL)
+            if json_format:
+                success_handler.setFormatter(formatter)
+            else:
+                success_handler.setFormatter(file_formatter)
+            root_logger.addHandler(success_handler)
         
-        # Separate error log file (ERROR and CRITICAL only)
-        error_log_file = log_path / "error.log"
-        error_handler = logging.handlers.RotatingFileHandler(
-            filename=str(error_log_file),
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8"
-        )
-        error_handler.setLevel(logging.ERROR)
-        if json_format:
-            error_handler.setFormatter(formatter)
-        else:
-            error_handler.setFormatter(file_formatter)
-        root_logger.addHandler(error_handler)
-        
-        # Separate warning log file (WARNING only)
-        warning_log_file = log_path / "warning.log"
-        warning_handler = logging.handlers.RotatingFileHandler(
-            filename=str(warning_log_file),
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8"
-        )
-        warning_handler.setLevel(logging.WARNING)
-        # Only log WARNING level, not ERROR (to avoid duplicates)
-        warning_handler.addFilter(lambda record: record.levelno == logging.WARNING)
-        if json_format:
-            warning_handler.setFormatter(formatter)
-        else:
-            warning_handler.setFormatter(file_formatter)
-        root_logger.addHandler(warning_handler)
-        
-        # Separate info log file (INFO only)
-        info_log_file = log_path / "info.log"
-        info_handler = logging.handlers.RotatingFileHandler(
-            filename=str(info_log_file),
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8"
-        )
-        info_handler.setLevel(logging.INFO)
-        # Only log INFO level, not WARNING or ERROR (to avoid duplicates)
-        info_handler.addFilter(lambda record: record.levelno == logging.INFO)
-        if json_format:
-            info_handler.setFormatter(formatter)
-        else:
-            info_handler.setFormatter(file_formatter)
-        root_logger.addHandler(info_handler)
-        
-        # Separate success log file (SUCCESS level only)
-        success_log_file = log_path / "success.log"
-        success_handler = logging.handlers.RotatingFileHandler(
-            filename=str(success_log_file),
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8"
-        )
-        success_handler.setLevel(SUCCESS_LEVEL)
-        # Only log SUCCESS level
-        success_handler.addFilter(lambda record: record.levelno == SUCCESS_LEVEL)
-        if json_format:
-            success_handler.setFormatter(formatter)
-        else:
-            success_handler.setFormatter(file_formatter)
-        root_logger.addHandler(success_handler)
+        except (OSError, PermissionError, FileNotFoundError) as e:
+            # Gracefully fallback to console-only if file logging fails
+            if enable_console:
+                console_logger = logging.getLogger()
+                console_logger.warning(
+                    f"⚠️  File logging disabled: {type(e).__name__}: {e}\n"
+                    f"Continuing with console-only logging."
+                )
+            else:
+                raise RuntimeError(
+                    f"Failed to setup logging: "
+                    f"File logging failed ({type(e).__name__}: {e}) "
+                    f"and console logging is disabled."
+                ) from e
     
     # Set levels for third-party loggers to suppress verbose logs
     # Suppress SQLAlchemy query logs (we only want errors)
