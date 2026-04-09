@@ -3,6 +3,7 @@ import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock, patch
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 
 from app.core.models import User
 from app.core.schema import UserCreate, UserUpdate, UserResponse
@@ -301,6 +302,54 @@ class TestSignup:
         
         with pytest.raises(UserAlreadyExistsException):
             await user_service.signup(sample_user_create)
+
+
+class TestPasswordByteLimitValidation:
+    """Test UTF-8 byte length password validation for bcrypt."""
+
+    def test_user_create_accepts_exactly_72_ascii_bytes(self):
+        payload = UserCreate(
+            username="bytesok",
+            email="bytesok@example.com",
+            password="A" * 72,
+            first_name="Bytes",
+            last_name="Ok",
+            preferred_language="en",
+            avatar_url=None,
+        )
+
+        assert payload.password == "A" * 72
+
+    def test_user_create_rejects_73_ascii_bytes(self):
+        with pytest.raises(ValidationError, match="must not exceed 72 bytes"):
+            UserCreate(
+                username="bytestoolong",
+                email="bytestoolong@example.com",
+                password="A" * 73,
+                first_name="Bytes",
+                last_name="TooLong",
+                preferred_language="en",
+                avatar_url=None,
+            )
+
+    def test_user_create_rejects_multibyte_password_over_72_bytes(self):
+        # Arabic chars are multibyte in UTF-8 and exceed the 72-byte bcrypt limit.
+        password = "Aa1" + ("أ" * 35)
+
+        with pytest.raises(ValidationError, match="must not exceed 72 bytes"):
+            UserCreate(
+                username="arabicbytes",
+                email="arabicbytes@example.com",
+                password=password,
+                first_name="Arabic",
+                last_name="Bytes",
+                preferred_language="ar",
+                avatar_url=None,
+            )
+
+    def test_user_update_rejects_password_over_72_bytes(self):
+        with pytest.raises(ValidationError, match="must not exceed 72 bytes"):
+            UserUpdate(password="A" * 73, first_name="Updated")
 
 
 

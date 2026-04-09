@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,18 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # OAuth2 scheme for token extraction
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+
+BCRYPT_MAX_PASSWORD_BYTES = 72
+
+
+def _validate_bcrypt_password_length(password: str) -> None:
+    """Validate password byte length against bcrypt backend limits."""
+    password_bytes = len(password.encode("utf-8"))
+    if password_bytes > BCRYPT_MAX_PASSWORD_BYTES:
+        raise ValueError(
+            f"Password must not exceed {BCRYPT_MAX_PASSWORD_BYTES} bytes when UTF-8 encoded"
+        )
 
 
 class AuthService:
@@ -49,7 +61,11 @@ class AuthService:
         Returns:
             True if password matches, False otherwise
         """
-        return pwd_context.verify(plain_password, hashed_password)
+        try:
+            return pwd_context.verify(plain_password, hashed_password)
+        except ValueError:
+            # Invalid plain password format for bcrypt backend limits.
+            return False
     
     @staticmethod
     def get_password_hash(password: str) -> str:
@@ -62,6 +78,7 @@ class AuthService:
         Returns:
             The hashed password
         """
+        _validate_bcrypt_password_length(password)
         return pwd_context.hash(password)
     
     def create_access_token(self, data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
