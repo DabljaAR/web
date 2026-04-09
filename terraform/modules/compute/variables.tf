@@ -39,7 +39,7 @@ variable "gpu_count" {
 variable "spot" {
   description = "Use Spot VM (preemptible)"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "boot_disk_image" {

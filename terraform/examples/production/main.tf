@@ -18,7 +18,7 @@ module "dabljaar" {
   machine_type   = "n1-standard-8" # More CPU for production
   gpu_type       = "nvidia-tesla-t4"
   gpu_count      = 1
-  enable_spot    = true # Still use spot for cost savings
+  enable_spot    = false # Use standard instances for stability
   boot_disk_size = 100
   data_disk_size = 500 # More storage for production
 }
