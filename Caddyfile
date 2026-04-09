@@ -1,18 +1,35 @@
 {
     admin localhost:2019
     email {$ACME_EMAIL}
+    
+    # Enable request logging
+    log default {
+        level info
+        format json
+        output stdout
+    }
 }
 
 {$DOMAIN} {
     encode zstd gzip
 
+    # Request logging for this domain
+    log {
+        level info
+        format json
+        output stdout
+    }
+
     # Reverse proxy API traffic to FastAPI backend
     @api path /api/*
     reverse_proxy @api backend:8000
 
-    # Serve frontend static files with SPA fallback
+    # Serve frontend static files with SPA fallback (but NOT for /api)
+    @notapi {
+        not path /api/*
+    }
     root * /srv
-    try_files {path} /index.html
+    try_files @notapi {path} /index.html
     file_server
 
     # Basic hardening headers
