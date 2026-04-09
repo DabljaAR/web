@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
     LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
     LOG_ENABLE_CONSOLE: bool = os.getenv("LOG_ENABLE_CONSOLE", "True").lower() == "true"
-    LOG_ENABLE_FILE: bool = os.getenv("LOG_ENABLE_FILE", "True").lower() == "true"
+    LOG_TO_FILE: bool = os.getenv("LOG_TO_FILE", "True").lower() == "true"  # Set to False in production for stdout-only (12-factor app)
     LOG_JSON_FORMAT: bool = os.getenv("LOG_JSON_FORMAT", "False").lower() == "true"
     LOG_ENABLE_SUCCESS: bool = os.getenv("LOG_ENABLE_SUCCESS", "True").lower() == "true"
     
