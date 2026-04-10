@@ -75,15 +75,6 @@ class UserBase(BaseModel):
             raise ValueError('Username must contain only letters, numbers, underscores, and hyphens')
         return v.lower()
 
-    @field_validator('preferred_language')
-    @classmethod
-    def validate_language(cls, v: Optional[str]) -> Optional[str]:
-        
-        if v is not None and len(v) > 10:
-            raise ValueError('Language code must be 10 characters or less')
-        return v.lower() if v else v
-
-
 class UserCreate(UserBase):
     """Schema for creating a new user - ONLY user-provided fields, NOT database-generated ones."""
     password: str = Field(
@@ -214,14 +205,6 @@ class UserUpdate(BaseModel):
             if not any(c.isdigit() for c in v):
                 raise ValueError('Password must contain at least one digit')
         return v
-
-    @field_validator('preferred_language')
-    @classmethod
-    def validate_language(cls, v: Optional[str]) -> Optional[str]:
-        """Validate language code format if provided."""
-        if v is not None and len(v) > 10:
-            raise ValueError('Language code must be 10 characters or less')
-        return v.lower() if v else v
 
     @model_validator(mode='after')
     def check_at_least_one_field(self):
