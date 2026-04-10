@@ -10,7 +10,7 @@ from app.core.schema import UserCreate, UserUpdate, UserResponse
 from app.core.services import UserService
 from app.core.repository import UserRepository
 from app.core.auth import AuthService
-from app.core.enums import languageEnum
+from app.shared.enums import languageEnum
 from app.core.exceptions import UserAlreadyExistsException
 import app.media.models  # Register Video model for SQLAlchemy mappers
 

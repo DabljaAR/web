@@ -16,6 +16,12 @@ APP_DIR="${app_dir}"
 ENV_SECRET_NAME="${env_secret_name}"
 GIT_DEPLOY_KEY_SECRET_NAME="${git_deploy_key_secret_name}"
 BOOTSTRAP_DONE_FILE="/var/lib/vm-bootstrap.done"
+DATA_MOUNT="/mnt/data"
+
+if [[ -f "$BOOTSTRAP_DONE_FILE" ]]; then
+  echo "[$(date -Is)] Bootstrap already completed; skipping"
+  exit 0
+fi
 
 # Install baseline packages only when missing to keep reruns cheap.
 install_base_packages() {
@@ -25,9 +31,11 @@ install_base_packages() {
     ca-certificates \
     curl \
     git \
+    htop \
     jq \
     gnupg \
     openssh-client \
+    rsync \
     lsb-release \
     ufw \
     unattended-upgrades
@@ -61,11 +69,71 @@ EOF
   systemctl restart docker
 }
 
+install_nvidia_container_toolkit() {
+  if ! command -v nvidia-smi >/dev/null 2>&1; then
+    echo "No NVIDIA driver detected; skipping NVIDIA Container Toolkit setup"
+    return
+  fi
+
+  if dpkg -s nvidia-container-toolkit >/dev/null 2>&1; then
+    echo "NVIDIA Container Toolkit already installed"
+  else
+    install -d -m 0755 /usr/share/keyrings
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+      | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#' \
+      >/etc/apt/sources.list.d/nvidia-container-toolkit.list
+    apt-get update
+    apt-get install -y --no-install-recommends nvidia-container-toolkit
+  fi
+
+  if command -v nvidia-ctk >/dev/null 2>&1; then
+    nvidia-ctk runtime configure --runtime=docker
+  fi
+}
+
+configure_containerd_storage() {
+  local target_dir="$DATA_MOUNT/containerd"
+  local current_dir="/var/lib/containerd"
+
+  install -d -m 0755 "$target_dir"
+
+  if [[ -L "$current_dir" ]]; then
+    return
+  fi
+
+  if [[ -d "$current_dir" ]]; then
+    systemctl stop containerd || true
+    if [[ -n "$(ls -A "$current_dir" 2>/dev/null)" ]]; then
+      rsync -a "$current_dir"/ "$target_dir"/
+    fi
+    rm -rf "$current_dir"
+  fi
+
+  ln -sfn "$target_dir" "$current_dir"
+  systemctl restart containerd || true
+}
+
 configure_docker_daemon() {
+  local docker_root="$DATA_MOUNT/docker"
+  local legacy_root="/var/lib/docker"
+
+  install -d -m 0710 "$docker_root"
+
+  if [[ -d "$legacy_root" && ! -L "$legacy_root" ]]; then
+    systemctl stop docker containerd || true
+    if [[ -n "$(ls -A "$legacy_root" 2>/dev/null)" ]]; then
+      rsync -a "$legacy_root"/ "$docker_root"/
+    fi
+    rm -rf "$legacy_root"
+  fi
+
   install -d -m 0755 /etc/docker
 
   cat >/etc/docker/daemon.json <<'EOF'
 {
+  "data-root": "/mnt/data/docker",
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "10m",
@@ -75,6 +143,7 @@ configure_docker_daemon() {
 }
 EOF
 
+  ln -sfn "$docker_root" "$legacy_root"
   systemctl restart docker
 }
 
@@ -85,7 +154,7 @@ ensure_user_membership() {
 }
 
 mount_data_disk() {
-  local mount_point="/mnt/data"
+  local mount_point="$DATA_MOUNT"
   local device=""
 
   install -d -m 0755 "$mount_point"
@@ -123,8 +192,14 @@ enable_auto_updates() {
 create_runtime_dirs() {
   install -d -m 0755 "$APP_DIR"
   install -d -m 0755 "$APP_DIR/.runtime"
+  install -d -m 0710 "$DATA_MOUNT/docker"
+  install -d -m 0775 "$DATA_MOUNT/volumes"
+  install -d -m 0755 "$DATA_MOUNT/containerd"
+
   if id "$DEPLOYMENT_USER" >/dev/null 2>&1; then
     chown -R "$DEPLOYMENT_USER":"$DEPLOYMENT_USER" "$APP_DIR"
+    chown -R "$DEPLOYMENT_USER":"$DEPLOYMENT_USER" "$DATA_MOUNT/volumes"
+    chown root:docker "$DATA_MOUNT/docker"
   fi
 }
 
@@ -221,10 +296,12 @@ EOF
 }
 
 install_base_packages
+mount_data_disk
 install_docker
+install_nvidia_container_toolkit
+configure_containerd_storage
 configure_docker_daemon
 ensure_user_membership
-mount_data_disk
 enable_auto_updates
 create_runtime_dirs
 fetch_env_from_secret_manager

@@ -1,3 +1,8 @@
+# backend/docker-compose.yml
+# Backend-only compose for isolated backend development (without the React frontend).
+# Starts: postgres, redis, minio, backend API, celery-worker-media, celery-worker-ai.
+# Usage (from repo root): docker compose -f backend/docker-compose.yml up -d
+# For full-stack development use the root docker-compose.yml instead.
 services:
   postgres:
     image: postgres:16-alpine
@@ -112,6 +117,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        INSTALL_AI: "true"
     container_name: dabljaar_worker_ai
     entrypoint: []
     command: celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=1 --hostname=worker-ai@%h

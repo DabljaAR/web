@@ -68,7 +68,7 @@ docker run --rm \
   sh -c "npm ci --legacy-peer-deps && npm run build"
 
 # Start production stack
-docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
 Default production behavior:
@@ -80,7 +80,7 @@ Default production behavior:
 Reload Caddy config without container restart:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml \
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml \
   exec -w /etc/caddy caddy caddy reload
 ```
 
@@ -89,21 +89,21 @@ Optional overlays:
 ```bash
 # Enable GPU for AI worker
 docker compose --env-file .env.production \
-  -f docker-compose.yaml -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d --build
+  -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d --build
 
 # Start admin-only services (for example Flower)
 docker compose --env-file .env.production \
-  -f docker-compose.yaml -f docker-compose.prod.yml --profile admin up -d
+  -f docker-compose.yml -f docker-compose.prod.yml --profile admin up -d
 
 # Bind admin UIs to localhost only (SSH tunnel/VPN access)
 docker compose --env-file .env.production \
-  -f docker-compose.yaml -f docker-compose.prod.yml -f docker-compose.admin.yml up -d
+  -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.admin.yml up -d
 ```
 
 Validate merged production config before deploy:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml config
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml config
 ```
 
 ## Docker Commands Reference
@@ -243,7 +243,7 @@ docker-compose exec backend pytest --cov=app
 Error: Bind for 0.0.0.0:8000 failed: port is already allocated
 ```
 
-**Solution**: Stop the conflicting service or change the port in `docker-compose.yaml`:
+**Solution**: Stop the conflicting service or change the port in `docker-compose.yml`:
 
 ```yaml
 ports:
@@ -350,7 +350,7 @@ services:
 ### Using Production Compose File
 
 ```bash
-docker-compose -f docker-compose.yaml -f docker-compose.prod.yaml up -d
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
 
 ## Volumes

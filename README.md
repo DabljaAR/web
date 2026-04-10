@@ -2,14 +2,23 @@
 The main web platform for the DabljaAR website.
 
 ## Structure
-- `backend/`: Contains the backend server code.
-- `frontend/`: Contains the frontend client code.
-Each subdirectory has its own README file with specific instructions and details.
+- `backend/`: FastAPI backend — auth, media, AI pipeline workers.
+- `frontend/`: React + Vite SPA.
+- `docs/`: Technical documentation.
+- `infra/`: Terraform infrastructure (GCP).
 
-## Setup Instructions
-Please refer to the README files in the `backend/` and `frontend/` directories for setup instructions for each component.
-- `backend/README.md`: Instructions for setting up and running the backend server.
-- `frontend/README.md`: Instructions for setting up and running the frontend client.
+## Documentation
+
+Detailed technical docs live in [`docs/`](docs/):
+
+- [`docs/architecture.md`](docs/architecture.md) — system design and module overview
+- [`docs/api.md`](docs/api.md) — API endpoint reference
+- [`docs/onboarding.md`](docs/onboarding.md) — new developer setup guide
+- [`docs/runbook.md`](docs/runbook.md) — operations and troubleshooting
+- [`docs/deployment.md`](docs/deployment.md) — deployment guide and environment config
+- [`docs/pipeline.md`](docs/pipeline.md) — AI dubbing pipeline details
+- [`docs/media.md`](docs/media.md) — media processing and storage
+- [`docs/docker_setup.md`](docs/docker_setup.md) — Docker Compose setup
 
 ## Quick Start (Ubuntu 22.04 Native Dev)
 
@@ -40,8 +49,8 @@ Optional flags:
 The script is idempotent and manages local runtime files under `.runtime/`.
 
 ## Technologies Used
-- Backend: Python, FastAPI, dbmate, PostgreSQL
-- Frontend: Typescript, React, Vite, Tailwind CSS
+- Backend: Python, FastAPI, SQLAlchemy, Alembic, Celery, PostgreSQL, Redis — managed with uv
+- Frontend: TypeScript, React, Vite, Tailwind CSS
 
 ## Quick Start (with docker-compose)
 
@@ -49,9 +58,9 @@ The script is idempotent and manages local runtime files under `.runtime/`.
 2. Navigate to the `web/` directory.
 3. Run the following command to start both the backend and frontend services:
    ```bash
-   docker-compose up --build
+   docker compose up --build
    ```
-4. Access the frontend at `http://localhost:5173` and the backend API at `http://localhost:3000`.
+4. Access the frontend at `http://localhost:5173` and the backend API at `http://localhost:8000`.
 
 ## Production (Docker Compose + Caddy)
 
@@ -60,14 +69,14 @@ cp .env.production.example .env.production
 # Edit .env.production and set DOMAIN and secrets
 
 docker compose --env-file .env.production \
-   -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
+   -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
 Optional GPU overlay for AI worker:
 
 ```bash
 docker compose --env-file .env.production \
-   -f docker-compose.yaml -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d --build
+   -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d --build
 ```
 
 ## CI/CD with GitHub Actions
@@ -83,8 +92,7 @@ Both workflows trigger on `push` and `pull_request` to `main` and use path filte
 ### Backend Workflow Details
 
 - Uses Python 3.12.
-- Installs backend dependencies with `uv sync --locked`.
-- Installs test tooling from `backend/requirements-test.txt`.
+- Installs dependencies with `uv sync --locked --group dev`.
 - Runs `ruff check` and `ruff format --check` against `app` and `tests`.
 - Runs `pytest` with coverage and uploads `coverage.xml` and `htmlcov/`.
 
@@ -103,7 +111,7 @@ Both workflows trigger on `push` and `pull_request` to `main` and use path filte
 - Connects to the VM via SSH and deploys from `/opt/web`.
 - Updates code with `git fetch` + `git pull --ff-only origin main`.
 - Rebuilds and restarts production containers using:
-   - `docker-compose.yaml`
+   - `docker-compose.yml`
    - `docker-compose.prod.yml`
 - Verifies deployment by checking container status and backend health endpoint.
 
@@ -145,8 +153,7 @@ Backend:
 
 ```bash
 cd backend
-uv sync --locked
-uv pip install -r requirements-test.txt
+uv sync --locked --group dev
 uv run ruff check app tests
 uv run ruff format --check app tests
 uv run pytest --cov=app --cov-report=xml --cov-report=html --cov-report=term-missing -m "not integration and not slow"

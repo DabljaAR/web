@@ -312,3 +312,37 @@ docker volume rm dabljaar_postgres_data
 docker compose up postgres -d
 cd backend && alembic upgrade head
 ```
+
+---
+
+## GPU Setup and Validation
+
+### Install CUDA-enabled PyTorch
+
+```bash
+pip uninstall torch torchaudio
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+
+### Verify CUDA
+
+```bash
+python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda, torch.cuda.device_count())"
+```
+
+### Runtime Configuration
+
+Set in environment:
+
+```env
+STT_DEVICE=cuda
+HABIBI_DEVICE=cuda
+STT_COMPUTE_TYPE=float16
+```
+
+For low VRAM:
+
+```env
+STT_MODEL_SIZE=small
+STT_GPU_MEMORY_THRESHOLD=0.7
+```

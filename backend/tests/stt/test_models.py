@@ -1,6 +1,6 @@
 """
 Unit tests for STT models.
-Location: tests/sst/test_models.py
+Location: tests/stt/test_models.py
 """
 
 import pytest

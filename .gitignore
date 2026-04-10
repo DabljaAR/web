@@ -144,11 +144,11 @@ vite.config.ts.timestamp-*
 data/
 
 # Terraform
-terraform/.terraform/
-terraform/*.tfstate
-terraform/*.tfstate.*
-terraform/crash.log
-terraform/override.tf
-terraform/override.tf.json
-terraform/*.tfvars
-!terraform/*.tfvars.example
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/crash.log
+infra/terraform/override.tf
+infra/terraform/override.tf.json
+infra/terraform/*.tfvars
+!infra/terraform/*.tfvars.example

@@ -52,7 +52,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate     # Linux/macOS
 # .venv\Scripts\activate      # Windows
-pip install -r requirements.txt
+uv sync --group dev
 ```
 
 ### 2.2 Environment Variables
@@ -179,7 +179,7 @@ npm run test -- --coverage    # With coverage
 
 ```
 web/
-├── docker-compose.yaml       # Full-stack orchestration
+├── docker-compose.yml        # Full-stack orchestration
 ├── docs/                     # Architecture, API, onboarding docs
 ├── backend/
 │   ├── app/

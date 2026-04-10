@@ -106,6 +106,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
+      args:
+        INSTALL_AI: "true"
     volumes: []
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
