@@ -39,7 +39,7 @@ variable "gpu_count" {
 variable "spot" {
   description = "Use Spot VM (preemptible)"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "boot_disk_image" {
@@ -77,35 +77,32 @@ variable "subnet_self_link" {
   type        = string
 }
 
-variable "service_account_email" {
-  description = "Service account email"
-  type        = string
-}
-
 variable "network_tag" {
   description = "Network tag for firewall rules"
   type        = string
   default     = "dabljaar-vm"
 }
 
-variable "gcs_model_bucket" {
-  description = "GCS bucket containing AI models"
-  type        = string
-}
-
-variable "app_repo_url" {
-  description = "Git repository URL"
-  type        = string
-}
-
-variable "app_repo_branch" {
-  description = "Git branch to deploy"
-  type        = string
-  default     = "main"
-}
-
 variable "labels" {
   description = "Labels to apply to resources"
   type        = map(string)
   default     = {}
+}
+
+variable "startup_script_content" {
+  description = "Optional startup script content for VM first boot"
+  type        = string
+  default     = null
+}
+
+variable "service_account_email" {
+  description = "Optional service account email to attach to the VM"
+  type        = string
+  default     = null
+}
+
+variable "service_account_scopes" {
+  description = "OAuth scopes for attached VM service account"
+  type        = list(string)
+  default     = ["https://www.googleapis.com/auth/cloud-platform"]
 }

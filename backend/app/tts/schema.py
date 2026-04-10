@@ -1,15 +1,11 @@
 """
 Pydantic models for TTS API schema validation and documentation.
+
+SILMA-TTS supports Arabic speech synthesis with voice cloning.
 """
 
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from enum import Enum
-
-
-class ArabicDialect(str, Enum):
-    MSA = "MSA"
-    EGY = "EGY"
 
 
 # ==================== REQUEST MODELS ====================
@@ -17,26 +13,38 @@ class ArabicDialect(str, Enum):
 class TTSRequest(BaseModel):
     """Request model for TTS synthesis."""
     
-    text: str = Field(..., description="Arabic text to synthesize")
-    dialect: ArabicDialect = Field(
-        default=ArabicDialect.MSA,
-        description="Arabic dialect (MSA or EGY)"
-    )
+    text: str = Field(..., description="Arabic text to synthesize (can include English)")
     ref_audio_path: Optional[str] = Field(
         default=None,
         description="Path to reference audio for voice cloning"
     )
     ref_text: Optional[str] = Field(
         default=None,
-        description="Transcript of the reference audio"
+        description="Transcript of the reference audio (optional - auto-transcribed if not provided)"
     )
     speed: Optional[float] = Field(
         default=None,
-        description="Speech rate (1.0 = normal)"
+        description="Speech rate (1.0 = normal, <1.0 = slower, >1.0 = faster)"
     )
     cfg_strength: Optional[float] = Field(
         default=None,
-        description="Classifier-free guidance strength"
+        description="Classifier-free guidance strength (higher = more accurate to reference)"
+    )
+    nfe_step: Optional[int] = Field(
+        default=None,
+        description="Number of function evaluations (higher = better quality, slower)"
+    )
+    sway_sampling_coef: Optional[float] = Field(
+        default=None,
+        description="Sway sampling coefficient"
+    )
+    target_rms: Optional[float] = Field(
+        default=None,
+        description="Target RMS for audio normalization"
+    )
+    seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for reproducibility"
     )
     job_id: Optional[str] = Field(
         default=None,
@@ -55,8 +63,7 @@ class TTSRequest(BaseModel):
         schema_extra = {
             "example": {
                 "text": "مرحباً بكم في منصة دبلجة عربية",
-                "dialect": "MSA",
-                "speed": 0.8,
+                "speed": 1.0,
                 "upload_to_minio": True
             }
         }
@@ -66,10 +73,6 @@ class TTSJobRequest(BaseModel):
     """Request model for TTS job with video_id."""
     
     video_id: int = Field(..., description="Video ID to synthesize audio for")
-    dialect: ArabicDialect = Field(
-        default=ArabicDialect.MSA,
-        description="Arabic dialect"
-    )
     target_lang: str = Field(
         default="arb_Arab",
         description="Target language code"
@@ -79,7 +82,6 @@ class TTSJobRequest(BaseModel):
         schema_extra = {
             "example": {
                 "video_id": 123,
-                "dialect": "MSA",
                 "target_lang": "arb_Arab"
             }
         }
@@ -108,7 +110,6 @@ class TTSJobResponse(BaseModel):
     job_id: str = Field(..., description="Job ID")
     status: str = Field(..., description="Job status")
     video_id: Optional[int] = Field(default=None, description="Video ID")
-    dialect: Optional[str] = Field(default=None, description="Dialect used")
     output_key: Optional[str] = Field(default=None, description="MinIO key for output audio")
     error: Optional[str] = Field(default=None, description="Error message if failed")
     created_at: Optional[str] = Field(default=None, description="Job creation time")
@@ -120,7 +121,6 @@ class TTSJobResponse(BaseModel):
                 "job_id": "550e8400-e29b-41d4-a716-446655440000",
                 "status": "completed",
                 "video_id": 123,
-                "dialect": "MSA",
                 "output_key": "tts/123/audio.wav"
             }
         }
@@ -147,7 +147,6 @@ class TTSStatusResponse(BaseModel):
                 "status": "success",
                 "result": {
                     "status": "success",
-                    "dialect": "MSA",
                     "bytes_size": 12345
                 }
             }
@@ -181,7 +180,7 @@ class TTSHealthResponse(BaseModel):
     status: str = Field(default="healthy", description="API status")
     model_loaded: bool = Field(..., description="Whether model is loaded")
     device: str = Field(..., description="Device in use (cuda/cpu)")
-    dialect: str = Field(default="MSA", description="Available dialect")
+    model: str = Field(default="SILMA-TTS", description="TTS model name")
     version: str = Field(default="1.0.0", description="API version")
     
     class Config:
@@ -190,7 +189,7 @@ class TTSHealthResponse(BaseModel):
                 "status": "healthy",
                 "model_loaded": True,
                 "device": "cpu",
-                "dialect": "MSA",
+                "model": "SILMA-TTS",
                 "version": "1.0.0"
             }
         }

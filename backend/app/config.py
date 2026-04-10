@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "False").lower() == "true"
     
+    # ========== LOCAL STORAGE CONFIGURATION ==========
+    # Used only when MINIO_ENDPOINT is not configured. 
+    # For local development fallback only; production should use MinIO.
+    LOCAL_STORAGE_DIR: str = os.getenv("LOCAL_STORAGE_DIR", "uploads")
+    LOCAL_STORAGE_URL_PREFIX: str = os.getenv("LOCAL_STORAGE_URL_PREFIX", "/uploads")
+    
     # ========== LOGGING CONFIGURATION ==========
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_DIR: str = os.getenv("LOG_DIR", "logs")
@@ -50,7 +56,7 @@ class Settings(BaseSettings):
     LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
     LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
     LOG_ENABLE_CONSOLE: bool = os.getenv("LOG_ENABLE_CONSOLE", "True").lower() == "true"
-    LOG_ENABLE_FILE: bool = os.getenv("LOG_ENABLE_FILE", "True").lower() == "true"
+    LOG_TO_FILE: bool = os.getenv("LOG_TO_FILE", "True").lower() == "true"  # Set to False in production for stdout-only (12-factor app)
     LOG_JSON_FORMAT: bool = os.getenv("LOG_JSON_FORMAT", "False").lower() == "true"
     LOG_ENABLE_SUCCESS: bool = os.getenv("LOG_ENABLE_SUCCESS", "True").lower() == "true"
     
@@ -65,13 +71,18 @@ class Settings(BaseSettings):
     STT_RETRY_ATTEMPTS: int = int(os.getenv("STT_RETRY_ATTEMPTS", "3"))
     STT_RETRY_DELAY: int = int(os.getenv("STT_RETRY_DELAY", "2"))
     
-    # ========== TEXT-TO-SPEECH (TTS) ==========
-    HABIBI_TTS_SRC: str = os.getenv("HABIBI_TTS_SRC", "")  # Auto-detected from installed package if empty
-    HABIBI_MODEL_PATH: str = os.getenv("HABIBI_MODEL_PATH", "")  # Auto-detected from HF cache if empty  
-    HABIBI_DEVICE: str = os.getenv("HABIBI_DEVICE", "auto")  # "auto", "cpu", "cuda"
-    HABIBI_REFERENCE_AUDIO: str = os.getenv("HABIBI_REFERENCE_AUDIO", "")  # Auto-detected from package if empty
-    TTS_DEFAULT_SPEED: float = float(os.getenv("TTS_DEFAULT_SPEED", "0.8"))  # Speech rate multiplier (1.0 = normal)
-    TTS_DEFAULT_CFG_STRENGTH: float = float(os.getenv("TTS_DEFAULT_CFG_STRENGTH", "3.0"))  # Guidance strength
+    # ========== TEXT-TO-SPEECH (TTS - SILMA) ==========
+    SILMA_DEVICE: str = os.getenv("SILMA_DEVICE", "auto")  # "auto", "cpu", "cuda"
+    SILMA_REFERENCE_AUDIO: str = os.getenv("SILMA_REFERENCE_AUDIO", "")  # Path to reference audio for voice cloning
+    SILMA_REFERENCE_TEXT: str = os.getenv("SILMA_REFERENCE_TEXT", "")  # Transcript of reference audio
+    TTS_DEFAULT_SPEED: float = float(os.getenv("TTS_DEFAULT_SPEED", "1.0"))  # Speech rate multiplier (1.0 = normal)
+    TTS_DEFAULT_CFG_STRENGTH: float = float(os.getenv("TTS_DEFAULT_CFG_STRENGTH", "1.0"))  # Guidance strength
+    TTS_DEFAULT_NFE_STEP: int = int(os.getenv("TTS_DEFAULT_NFE_STEP", "32"))  # Number of function evaluations
+    TTS_DEFAULT_SWAY_COEF: float = float(os.getenv("TTS_DEFAULT_SWAY_COEF", "-1.0"))  # Sway sampling coefficient
+    TTS_DEFAULT_TARGET_RMS: float = float(os.getenv("TTS_DEFAULT_TARGET_RMS", "0.12"))  # Target RMS for audio normalization
+    
+    # ========== HUGGINGFACE AUTHENTICATION ==========
+    HF_TOKEN: str = os.getenv("HF_TOKEN", "")  # HuggingFace access token for model downloads
     
     # ========== SERVER ==========
     HOST: str = os.getenv("HOST", "0.0.0.0")
@@ -131,76 +142,6 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         """Check if running in development."""
         return self.ENVIRONMENT == "development"
-
-    def get_habibi_tts_src(self) -> str:
-        """Get Habibi-TTS source path with auto-detection."""
-        if self.HABIBI_TTS_SRC:
-            return self.HABIBI_TTS_SRC
-        
-        # Try to find installed habibi-tts package
-        try:
-            import importlib.util
-            spec = importlib.util.find_spec("habibi_tts")
-            if spec and spec.origin:
-                package_dir = os.path.dirname(spec.origin)
-                return package_dir
-        except ImportError:
-            pass
-        
-        # Fallback to common locations
-        common_paths = [
-            os.path.expanduser("~/habibi-tts/src"),
-            "/opt/habibi-tts/src",
-            "./habibi-tts/src"
-        ]
-        
-        for path in common_paths:
-            if os.path.exists(path):
-                return path
-        
-        # If nothing found, return empty (will cause error with helpful message)
-        return ""
-    
-    def get_habibi_model_path(self) -> str:
-        """Get Habibi-TTS model path with auto-detection."""
-        if self.HABIBI_MODEL_PATH:
-            return self.HABIBI_MODEL_PATH
-        
-        # Try HuggingFace cache locations
-        common_cache_paths = [
-            os.path.expanduser("~/.cache/huggingface/hub"),
-            os.path.expanduser("~/.cache/huggingface"),
-            "/tmp/huggingface_cache",
-            "./models"
-        ]
-        
-        for path in common_cache_paths:
-            if os.path.exists(path):
-                return path
-        
-        # Fallback to default HF cache
-        return os.path.expanduser("~/.cache/huggingface/hub")
-    
-    def get_habibi_reference_audio(self) -> str:
-        """Get Habibi-TTS MSA reference audio path with auto-detection."""
-        if self.HABIBI_REFERENCE_AUDIO:
-            return self.HABIBI_REFERENCE_AUDIO
-        
-        # Try to find in installed package
-        try:
-            import importlib.util
-            spec = importlib.util.find_spec("habibi_tts")
-            if spec and spec.origin:
-                package_dir = os.path.dirname(spec.origin)
-                reference_path = os.path.join(package_dir, "assets", "MSA.mp3")
-                if os.path.exists(reference_path):
-                    return reference_path
-        except ImportError:
-            pass
-        
-        # Fallback to temp directory with generated silent audio
-        fallback_path = "/tmp/msa_reference.wav"
-        return fallback_path
 
 
 settings = Settings()

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import List
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+import logging
 from app.media.storage import get_storage_service, StorageService
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,7 @@ from fastapi import Request
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Allowed image extensions
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
@@ -148,18 +150,16 @@ async def signup(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e.detail)
         )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
     except Exception as e:
-        # Log the full error for debugging
-        import logging
-        import traceback
-        logger = logging.getLogger(__name__)
-        error_detail = str(e)
-        logger.error(f"Signup error: {error_detail}", exc_info=True)
-        traceback.print_exc()
-        # Return detailed error in development, generic in production
+        logger.error("Signup error", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {error_detail}"
+            detail="Internal server error"
         )
 
 
@@ -281,6 +281,11 @@ async def update_user(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e.detail)
         )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
 
 
 @router.post("/users/{user_id}/change-password", tags=["users"])
@@ -305,7 +310,13 @@ async def change_password(
             detail="You can only change your own password"
         )
         
-    return await user_service.change_password(user_id, password_data.old_password, password_data.new_password)
+    try:
+        return await user_service.change_password(user_id, password_data.old_password, password_data.new_password)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["users"])

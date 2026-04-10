@@ -20,25 +20,6 @@ region = "us-central1"
 zone   = "us-central1-a"
 
 # -----------------------------------------------------------------------------
-# Required: Secrets (DO NOT commit actual values!)
-# -----------------------------------------------------------------------------
-# Option 1: Set via environment variables
-#   export TF_VAR_db_password="your-password"
-#   export TF_VAR_secret_key="your-secret-key"
-#   export TF_VAR_minio_access_key="your-minio-key"
-#   export TF_VAR_minio_secret_key="your-minio-secret"
-#
-# Option 2: Enter when prompted (don't store in file)
-#
-# Option 3: Use a secrets file (add to .gitignore!)
-#   -var-file="secrets.tfvars"
-
-db_password      = ""  # PostgreSQL password
-secret_key       = ""  # JWT signing key
-minio_access_key = ""  # MinIO access key
-minio_secret_key = ""  # MinIO secret key
-
-# -----------------------------------------------------------------------------
 # Optional: Network Configuration
 # -----------------------------------------------------------------------------
 subnet_cidr = "10.0.0.0/24"
@@ -50,6 +31,13 @@ admin_cidr_blocks = [
   # "OFFICE_IP/32",   # Office IP
 ]
 
+# Public ports (Caddy TLS termination)
+public_ports = [80, 443]
+
+# Admin ports reachable only from admin_cidr_blocks
+# SSH is handled separately via IAP firewall rule in this module.
+admin_ports = [5555, 9001]
+
 # -----------------------------------------------------------------------------
 # Optional: Compute Configuration
 # -----------------------------------------------------------------------------
@@ -57,12 +45,22 @@ machine_type   = "n1-standard-4"     # 4 vCPU, 15GB RAM
 gpu_type       = "nvidia-tesla-t4"   # 16GB VRAM
 gpu_count      = 0
 enable_spot    = true                # ~70% cost savings
+startup_script_enabled = false       # Set true to install Docker + host baseline at first boot
+deployment_user = "ubuntu"          # Ownership for /opt/web paths created by bootstrap
+enable_vm_service_account = false    # Set true to create and attach a dedicated VM SA
+# vm_env_secret_name = "env-production"  # Optional: secret containing full .env.production text
+# vm_git_deploy_key_secret_name = "github-deploy-key"  # Optional: secret containing private deploy key for git clone
+# vm_service_account_roles = [        # Optional override
+#   "roles/logging.logWriter",
+#   "roles/monitoring.metricWriter",
+#   "roles/secretmanager.secretAccessor"
+# ]
+# vm_service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
 boot_disk_image = "projects/deeplearning-platform-release/global/images/family/common-cu128-ubuntu-2204-nvidia-570"
 boot_disk_size = 50                  # GB
 data_disk_size = 100                 # GB (persistent)
 
 # -----------------------------------------------------------------------------
-# Optional: Application Configuration
+# Optional: Storage Configuration
 # -----------------------------------------------------------------------------
-app_repo_url    = "https://github.com/your-org/dabljaar.git"
-app_repo_branch = "main"
+# Bucket is created automatically in the selected region by the storage module.

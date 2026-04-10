@@ -51,6 +51,61 @@ docker-compose up --build -d
 - **API Documentation**: http://localhost:8000/docs
 - **PostgreSQL**: localhost:5433 (external access)
 
+## Production Setup (Caddy TLS)
+
+Use the production overlays from the project root:
+
+```bash
+cp .env.production.example .env.production
+# Fill required secrets, DOMAIN, and ACME_EMAIL in .env.production
+
+# Build frontend static files for Caddy (/srv mount)
+docker run --rm \
+  -v "$PWD/frontend:/frontend" \
+  -w /frontend \
+  -e VITE_API_BASE_URL=/api \
+  node:24-alpine \
+  sh -c "npm ci --legacy-peer-deps && npm run build"
+
+# Start production stack
+docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
+```
+
+Default production behavior:
+- Public entrypoint is Caddy only on ports 80 and 443.
+- Caddy also listens on UDP 443 for HTTP/3.
+- Backend, Postgres, Redis, and MinIO are internal-only.
+- Caddy uses the official image with mounted config (`./Caddyfile`) and mounted static assets (`./frontend/dist` -> `/srv`).
+
+Reload Caddy config without container restart:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml \
+  exec -w /etc/caddy caddy caddy reload
+```
+
+Optional overlays:
+
+```bash
+# Enable GPU for AI worker
+docker compose --env-file .env.production \
+  -f docker-compose.yaml -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d --build
+
+# Start admin-only services (for example Flower)
+docker compose --env-file .env.production \
+  -f docker-compose.yaml -f docker-compose.prod.yml --profile admin up -d
+
+# Bind admin UIs to localhost only (SSH tunnel/VPN access)
+docker compose --env-file .env.production \
+  -f docker-compose.yaml -f docker-compose.prod.yml -f docker-compose.admin.yml up -d
+```
+
+Validate merged production config before deploy:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.yaml -f docker-compose.prod.yml config
+```
+
 ## Docker Commands Reference
 
 ### Starting Services

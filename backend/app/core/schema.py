@@ -14,6 +14,19 @@ from app.shared.enums import (
 )
 
 
+BCRYPT_MAX_PASSWORD_BYTES = 72
+
+
+def _validate_password_byte_length(password: str) -> str:
+    """Ensure password fits bcrypt's 72-byte UTF-8 limit."""
+    password_bytes = len(password.encode("utf-8"))
+    if password_bytes > BCRYPT_MAX_PASSWORD_BYTES:
+        raise ValueError(
+            f"Password must not exceed {BCRYPT_MAX_PASSWORD_BYTES} bytes when UTF-8 encoded"
+        )
+    return password
+
+
 class UserBase(BaseModel):
     username: str = Field(
         ...,
@@ -90,6 +103,7 @@ class UserCreate(UserBase):
     @classmethod
     def validate_password(cls, v: str) -> str:
         """Validate password strength."""
+        _validate_password_byte_length(v)
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
         if not any(c.isupper() for c in v):
@@ -190,6 +204,7 @@ class UserUpdate(BaseModel):
     def validate_password(cls, v: Optional[str]) -> Optional[str]:
         """Validate password strength if provided."""
         if v is not None:
+            _validate_password_byte_length(v)
             if len(v) < 8:
                 raise ValueError('Password must be at least 8 characters long')
             if not any(c.isupper() for c in v):
@@ -320,6 +335,7 @@ class PasswordChangeRequest(BaseModel):
     @classmethod
     def validate_password(cls, v: str) -> str:
         """Validate password strength."""
+        _validate_password_byte_length(v)
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters long')
         if not any(c.isupper() for c in v):

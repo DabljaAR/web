@@ -1,0 +1,61 @@
+{
+    admin localhost:2019
+    email {$ACME_EMAIL}
+    
+    # Enable request logging
+    log default {
+        level info
+        format json
+        output stdout
+    }
+}
+
+{$DOMAIN} {
+    encode zstd gzip
+
+    # Request logging for this domain
+    log {
+        level info
+        format json
+        output stdout
+    }
+
+    # API routes always go to backend
+    handle /api/* {
+        reverse_proxy backend:8000 {
+            # Active health check against backend health endpoint
+            health_uri /api/health
+            health_interval 30s
+            health_timeout 5s
+
+            # Passive health behavior to avoid hanging on unhealthy upstreams
+            fail_duration 30s
+            max_fails 2
+            lb_try_duration 5s
+
+            # Upstream transport timeouts
+            transport http {
+                dial_timeout 10s
+                response_header_timeout 30s
+                read_timeout 60s
+                write_timeout 60s
+            }
+        }
+    }
+
+    # All other routes are served by the SPA with index fallback
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+
+    # Basic hardening headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}

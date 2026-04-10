@@ -1,46 +1,112 @@
 # DabljaAR Terraform Infrastructure
 
-Modular Terraform configuration for deploying the DabljaAR video dubbing platform on GCP with GPU support.
+Terraform in this directory provisions infrastructure only.
 
-## Architecture
+## Scope
 
+Included:
+- VPC network and subnet
+- Firewall rules (public, admin, internal, IAP SSH)
+- Compute VM (with optional GPU)
+- Persistent data disk
+- GCS bucket provisioning
+- Static external IP
+
+Excluded:
+- Application deployment and runtime orchestration
+- Docker Compose startup or service bootstrap
+- Repository cloning or app environment generation
+- Application secret payload management
+
+Optional host baseline bootstrap is supported via VM startup script variables
+(`startup_script_enabled`, `deployment_user`) to install host dependencies such
+as Docker and system packages. This does not run application containers.
+
+## Deployment Bootstrap (Exact Manual Steps)
+
+This section is the minimal setup to make first deploy succeed on a private repo.
+
+### 1) Define the minimal required artifacts
+
+Required:
+- VM access key used by GitHub Actions (`GCP_VM_SSH_KEY`) for CI -> VM SSH.
+- GitHub deploy key (read-only) used by VM for VM -> GitHub clone/pull.
+- `.env.production` content in Secret Manager (`vm_env_secret_name`).
+- VM startup bootstrap enabled (`startup_script_enabled = true`).
+- VM service account enabled with Secret Manager access (`enable_vm_service_account = true`).
+
+Not required for deployment correctness:
+- Generating SSH keys on the VM at runtime.
+- Using both deploy key and HTTPS token for the same clone path.
+- Host hardening features (ufw/autoupdates) as a deployment blocker.
+
+### 2) Create a GitHub deploy key pair locally
+
+```bash
+ssh-keygen -t ed25519 -C "dabljaar-vm-deploy" -f ./github_deploy_key -N ""
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                              GCP Project                                  │
-│                                                                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐ │
-│  │                         VPC Network                                  │ │
-│  │  ┌───────────────────────────────────────────────────────────────┐  │ │
-│  │  │                      Public Subnet                             │  │ │
-│  │  │                                                                │  │ │
-│  │  │   ┌────────────────────────────────────────────────────────┐  │  │ │
-│  │  │   │  SPOT VM (n1-standard-4 + NVIDIA T4)                   │  │  │ │
-│  │  │   │                                                        │  │  │ │
-│  │  │   │  Docker Compose Stack:                                 │  │  │ │
-│  │  │   │  ├─ PostgreSQL 16    ├─ FastAPI Backend               │  │  │ │
-│  │  │   │  ├─ Redis 7          ├─ React Frontend                │  │  │ │
-│  │  │   │  ├─ MinIO            ├─ Celery Workers (AI/GPU)       │  │  │ │
-│  │  │   │  └─ Flower           └─ /opt/models (from GCS)        │  │  │ │
-│  │  │   └────────────────────────────────────────────────────────┘  │  │ │
-│  │  └───────────────────────────────────────────────────────────────┘  │ │
-│  └─────────────────────────────────────────────────────────────────────┘ │
-│                                                                           │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────────────┐  │
-│  │   GCS Bucket     │  │ Service Account  │  │   Secret Manager       │  │
-│  │   (AI Models)    │  │ (minimal perms)  │  │   (credentials)        │  │
-│  └──────────────────┘  └──────────────────┘  └────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────────────┘
+
+Add `./github_deploy_key.pub` in GitHub repo settings as a read-only Deploy Key.
+
+### 3) Create/update required secrets in GCP Secret Manager
+
+```bash
+gcloud config set project YOUR_PROJECT_ID
+
+gcloud secrets describe env-production >/dev/null 2>&1 || \
+    gcloud secrets create env-production --replication-policy=automatic
+gcloud secrets versions add env-production --data-file=.env.production
+
+gcloud secrets describe github-deploy-key >/dev/null 2>&1 || \
+    gcloud secrets create github-deploy-key --replication-policy=automatic
+gcloud secrets versions add github-deploy-key --data-file=./github_deploy_key
 ```
+
+### 4) Set Terraform variables
+
+In `terraform.tfvars`:
+
+```hcl
+startup_script_enabled = true
+enable_vm_service_account = true
+vm_env_secret_name = "env-production"
+vm_git_deploy_key_secret_name = "github-deploy-key"
+```
+
+### 5) Apply Terraform and run bootstrap
+
+```bash
+terraform init
+terraform plan -var-file=terraform.tfvars
+terraform apply -var-file=terraform.tfvars
+```
+
+For existing VMs, force startup script execution:
+
+```bash
+gcloud compute ssh INSTANCE_NAME --zone=ZONE --project=PROJECT_ID --command "sudo google_metadata_script_runner startup"
+```
+
+Fallback:
+
+```bash
+gcloud compute instances reset INSTANCE_NAME --zone=ZONE --project=PROJECT_ID
+```
+
+### 6) Verify bootstrap success
+
+```bash
+gcloud compute ssh INSTANCE_NAME --zone=ZONE --project=PROJECT_ID --command "sudo tail -n 200 /var/log/vm-bootstrap.log"
+gcloud compute ssh INSTANCE_NAME --zone=ZONE --project=PROJECT_ID --command "sudo test -f /var/lib/vm-bootstrap.done && echo bootstrap_ok || echo bootstrap_failed"
+gcloud compute ssh INSTANCE_NAME --zone=ZONE --project=PROJECT_ID --command "docker --version && docker compose version"
+gcloud compute ssh INSTANCE_NAME --zone=ZONE --project=PROJECT_ID --command "sudo -u DEPLOYMENT_USER ssh -T git@github.com || true"
+```
+
+If bootstrap marker exists and Docker is present, GitHub Actions deploy should pass the preflight checks.
 
 ## Quick Start
 
-### 1. Prerequisites
-
-- [Terraform](https://www.terraform.io/downloads.html) >= 1.5.0
-- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
-- GCP project with billing enabled
-
-### 2. Authenticate
+1. Authenticate:
 
 ```bash
 gcloud auth login
@@ -48,14 +114,14 @@ gcloud auth application-default login
 gcloud config set project YOUR_PROJECT_ID
 ```
 
-### 3. Configure
+2. Configure:
 
 ```bash
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your values
+# Edit terraform.tfvars
 ```
 
-### 4. Deploy
+3. Deploy:
 
 ```bash
 terraform init
@@ -63,126 +129,72 @@ terraform plan
 terraform apply
 ```
 
-### 5. Upload AI Models
-
-```bash
-# Get the bucket name from outputs
-BUCKET=$(terraform output -raw model_bucket)
-
-# Upload your models
-gsutil -m cp -r /path/to/nmt-v4 gs://$BUCKET/
-```
-
-## Cost Estimate
-
-| Resource | Spot Price | Notes |
-|----------|------------|-------|
-| n1-standard-4 (Spot) | ~$30/mo | 4 vCPU, 15GB RAM |
-| NVIDIA T4 (Spot) | ~$55/mo | 16GB VRAM |
-| Boot disk (50GB) | ~$4/mo | pd-balanced |
-| Data disk (100GB) | ~$8/mo | pd-balanced |
-| GCS bucket | ~$2/mo | Model storage |
-| External IP | ~$3/mo | Static IP |
-| **Total** | **~$100/mo** | 70%+ savings vs on-demand |
-
 ## Module Structure
 
-```
+```text
 terraform/
-├── main.tf                    # Root: module calls
-├── variables.tf               # Root: input variables
-├── outputs.tf                 # Root: outputs
-├── locals.tf                  # Root: computed values
-├── versions.tf                # Provider versions
-├── backend.tf                 # Remote state (optional)
-├── terraform.tfvars.example   # Example configuration
+├── main.tf                    # root module wiring
+├── variables.tf               # root inputs
+├── outputs.tf                 # infra outputs
+├── locals.tf                  # naming and labels
+├── versions.tf                # terraform/provider constraints
+├── backend.tf                 # remote state backend config
+├── terraform.tfvars.example   # sample values
 │
 └── modules/
-    ├── network/               # VPC, subnet, NAT
-    ├── firewall/              # Firewall rules
-    ├── iam/                   # Service account
+    ├── network/               # VPC/subnet/router/NAT
+    ├── firewall/              # firewall rules
     ├── storage/               # GCS bucket
-    ├── secrets/               # Secret Manager
-    └── compute/               # Spot VM with GPU
+    └── compute/               # VM, disk, external IP
 ```
 
-## Inputs
+## Key Inputs
 
-| Name | Description | Default |
-|------|-------------|---------|
-| `project_id` | GCP project ID | (required) |
-| `project_name` | Short name for resources | `dabljaar` |
-| `environment` | dev/staging/prod | `dev` |
-| `region` | GCP region | `us-central1` |
-| `zone` | GCP zone | `us-central1-a` |
-| `machine_type` | VM machine type | `n1-standard-4` |
-| `gpu_type` | GPU type | `nvidia-tesla-t4` |
-| `enable_spot` | Use Spot VM | `true` |
-| `admin_cidr_blocks` | IPs for admin access | `[]` |
+- `project_id`
+- `project_name`
+- `environment`
+- `region`
+- `zone`
+- `subnet_cidr`
+- `public_ports`
+- `admin_cidr_blocks`
+- `admin_ports`
+- `machine_type`
+- `gpu_type`
+- `gpu_count`
+- `enable_spot`
+- `startup_script_enabled`
+- `deployment_user`
+- `enable_vm_service_account`
+- `vm_env_secret_name`
+- `vm_git_deploy_key_secret_name`
+- `boot_disk_image`
+- `boot_disk_size`
+- `data_disk_size`
 
-## Outputs
+## Key Outputs
 
-| Name | Description |
-|------|-------------|
-| `frontend_url` | Frontend application URL |
-| `backend_url` | Backend API URL |
-| `api_docs_url` | Swagger documentation |
-| `ssh_command` | SSH access command |
-| `model_bucket` | GCS bucket for models |
+- `instance_name`
+- `external_ip`
+- `network_id`
+- `subnet_id`
+- `storage_bucket_name`
+- `firewall_rule_ids`
+- `ssh_command`
 
-## Spot VM Recovery
+## Security Notes
 
-Spot VMs can be preempted but auto-recover:
+- Public exposure should typically be limited to ports 80 and 443.
+- Admin ports are restricted via `admin_cidr_blocks`.
+- SSH access is intended through IAP.
 
-1. **Preemption** → VM terminates
-2. **Auto-restart** → VM restarts (same zone)
-3. **Startup script** runs:
-   - Mount persistent data disk
-   - Sync models from GCS (incremental)
-   - Start Docker Compose
-4. **Ready** → ~2-3 minutes
-
-Data on the persistent disk survives preemption.
-
-## Security
-
-- Admin ports (SSH, Flower, MinIO) restricted to `admin_cidr_blocks`
-- Secrets stored in Secret Manager (not Terraform state)
-- Service account with minimal permissions
-- IAP SSH access enabled for secure tunneling
-
-### Secure Access via IAP Tunnel
+## Validation
 
 ```bash
-# SSH via IAP (no public SSH exposure needed)
-gcloud compute ssh INSTANCE_NAME --zone=ZONE --tunnel-through-iap
-
-# Port forward admin services
-gcloud compute ssh INSTANCE_NAME --zone=ZONE --tunnel-through-iap -- \
-  -L 5555:localhost:5555 \
-  -L 9001:localhost:9001
-```
-
-## Troubleshooting
-
-### View startup logs
-```bash
-$(terraform output -raw view_startup_logs)
-```
-
-### Check GPU status
-```bash
-$(terraform output -raw check_gpu_status)
-```
-
-### View Docker logs
-```bash
-$(terraform output -raw view_docker_logs)
-```
-
-### SSH into instance
-```bash
-$(terraform output -raw ssh_command)
+terraform fmt -recursive
+terraform init -backend=false
+terraform validate
+terraform plan -var-file=terraform.tfvars
 ```
 
 ## Cleanup
@@ -190,7 +202,3 @@ $(terraform output -raw ssh_command)
 ```bash
 terraform destroy
 ```
-
-## License
-
-MIT
