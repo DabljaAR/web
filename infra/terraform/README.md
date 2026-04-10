@@ -167,7 +167,7 @@ For GPU-enabled deployments:
 
 ```bash
 docker compose --env-file .env.production \
-  -f docker-compose.yaml \
+  -f docker-compose.yml \
   -f docker-compose.prod.yml \
   -f docker-compose.gpu.yml up -d --build
 ```
