@@ -58,7 +58,15 @@ class User(Base):
         DateTime,
         default=datetime.utcnow,
     )
-    preferred_language: Mapped[languageEnum] = mapped_column(SQLEnum(languageEnum, name="languages_enum"),nullable=False,default=languageEnum.ENGLISH)
+    preferred_language: Mapped[languageEnum] = mapped_column(
+        SQLEnum(
+            languageEnum,
+            name="languages_enum",
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
+        nullable=False,
+        default=languageEnum.ENGLISH,
+    )
     avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Preferences
     default_domain: Mapped[str] = mapped_column(String(50), nullable=False, default="general")
