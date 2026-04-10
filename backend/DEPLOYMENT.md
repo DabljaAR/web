@@ -298,6 +298,108 @@ Audio → STT (Whisper) → NMT (NLLB) → TTS (Habibi) → Audio Files
     Transcription   Translation   Synthesis      MinIO/S3
 ```
 
+---
+
+## Troubleshooting
+
+### PostgreSQL Authentication Error: "password authentication failed"
+
+**Error message:**
+```
+asyncpg.exceptions.InvalidPasswordError: password authentication failed for user "postgres"
+```
+
+**Root Causes:**
+1. `POSTGRES_PASSWORD` environment variable not set or incorrect in `.env` or docker-compose
+2. Backend container starts before PostgreSQL is ready to accept connections
+3. DATABASE_URL doesn't match the postgres credentials configured
+
+**Solutions:**
+
+**For Production (docker-compose.prod.yml):**
+
+1. **Ensure environment variables are set:**
+   ```bash
+   # Copy the template and fill in required values
+   cp ../.env.production.example ../.env.production
+   
+   # Edit and set secure values:
+   # POSTGRES_PASSWORD=your-very-secure-password
+   # SECRET_KEY=your-secret-key
+   # MINIO_ROOT_USER=minioadmin
+   # MINIO_ROOT_PASSWORD=your-secure-password
+   ```
+
+2. **Verify credentials match:**
+   - Backend `DATABASE_URL` must use the same credentials as postgres service
+   - Check docker-compose.prod.yml backend service environment section
+   - Ensure `${POSTGRES_PASSWORD}` variable is consistent
+
+3. **Wait for PostgreSQL before starting:**
+   - docker-compose.prod.yml backend now includes `depends_on: postgres: condition: service_healthy`
+   - This ensures postgres passes health check before backend starts
+   - entrypoint.sh includes `wait_for_postgres()` function for extra safety
+
+4. **Start services in correct order:**
+   ```bash
+   # Start postgres and let it initialize
+   docker-compose -f docker-compose.prod.yml up -d postgres
+   
+   # Wait 10-15 seconds for postgres to be ready
+   sleep 15
+   
+   # Then start all services
+   docker-compose -f docker-compose.prod.yml up -d
+   ```
+
+5. **Check logs for details:**
+   ```bash
+   # See postgres service logs
+   docker-compose -f docker-compose.prod.yml logs postgres
+   
+   # See backend service logs
+   docker-compose -f docker-compose.prod.yml logs backend
+   ```
+
+**For Development (docker-compose.yml):**
+
+1. **Ensure logs directory exists:**
+   ```bash
+   mkdir -p logs
+   ```
+
+2. **Set DATABASE_URL if not using defaults:**
+   ```bash
+   # Verify in .env:
+   DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
+   ```
+
+3. **Restart postgres container:**
+   ```bash
+   docker-compose down postgres
+   docker-compose up -d postgres
+   sleep 5
+   docker-compose up backend
+   ```
+
+### Backend Health Check Failing
+
+**Error message:**
+```
+WARNING: unhealthy (in interval 10, having failed 5/5 checks)
+```
+
+**Causes:**
+- Database migrations failed (check logs)
+- API not responding on `http://localhost:8000/api/health`
+- Insufficient time for startup (increase `start_period` in healthcheck)
+
+**Solution:**
+```bash
+# Check logs for actual error
+docker-compose logs backend
+```
+
 ### Progressive Processing
 - TTS starts immediately when each segment translation completes
 - 30-40% faster than sequential processing

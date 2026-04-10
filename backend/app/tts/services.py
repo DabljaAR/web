@@ -1,6 +1,8 @@
 """
 TTS Service — for TTS synthesis with Job tracking.
 
+Uses SILMA-TTS model for high-quality Arabic speech synthesis.
+
 Async TTS:
   1. Creates a Job row (JobType.TTS_SYNTHESIZE)
   2. Dispatches synthesize_tts task to the ai_tts Celery queue
@@ -8,6 +10,7 @@ Async TTS:
 """
 
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -24,7 +27,7 @@ class TTSService:
     """
     Service for TTS synthesis with Job tracking.
     
-    Uses Habibi-TTS model to synthesize Arabic speech from translated text.
+    Uses SILMA-TTS model to synthesize Arabic speech from translated text.
     """
 
     def __init__(self, db: AsyncSession):
@@ -33,7 +36,6 @@ class TTSService:
     async def submit_tts(
         self,
         text: str,
-        dialect: str = "MSA",
         job_id: Optional[str] = None,
         user_id: Optional[int] = None,
         video_id: Optional[int] = None,
@@ -41,6 +43,10 @@ class TTSService:
         ref_text: Optional[str] = None,
         speed: Optional[float] = None,
         cfg_strength: Optional[float] = None,
+        nfe_step: Optional[int] = None,
+        sway_sampling_coef: Optional[float] = None,
+        target_rms: Optional[float] = None,
+        seed: Optional[int] = None,
         target_lang: str = "arb_Arab",
         upload_to_minio: bool = False,
         minio_key: Optional[str] = None,
@@ -54,12 +60,28 @@ class TTSService:
             job_id: The Job ID for polling status
         """
         from app.jobs.celery_app import synthesize_tts
+        from app.config import settings
+
+        normalized_text = text if isinstance(text, str) else ("" if text is None else str(text))
+        if not normalized_text.strip():
+            raise ValueError("TTS text is required")
+
+        # SILMA-TTS requires a reference audio file.
+        if ref_audio_path:
+            if not os.path.exists(ref_audio_path):
+                raise ValueError(f"ref_audio_path not found: {ref_audio_path}")
+        else:
+            if not settings.SILMA_REFERENCE_AUDIO:
+                raise ValueError(
+                    "SILMA_REFERENCE_AUDIO is not configured and no ref_audio_path was provided"
+                )
+            if not os.path.exists(settings.SILMA_REFERENCE_AUDIO):
+                raise ValueError(
+                    f"SILMA_REFERENCE_AUDIO not found: {settings.SILMA_REFERENCE_AUDIO}"
+                )
         
         if not job_id:
             job_id = str(uuid.uuid4())
-        
-        # Generate ID for the Job record
-        job_id = str(uuid.uuid4())
         
         job = Job(
             id=job_id,
@@ -69,12 +91,14 @@ class TTSService:
             video_id=video_id,
             progress=0.0,
             input_data={
-                "text": text,
-                "dialect": dialect,
+                "text": normalized_text,
                 "ref_audio_path": ref_audio_path,
                 "ref_text": ref_text,
                 "speed": speed,
                 "cfg_strength": cfg_strength,
+                "nfe_step": nfe_step,
+                "sway_sampling_coef": sway_sampling_coef,
+                "target_rms": target_rms,
                 "target_lang": target_lang,
                 "upload_to_minio": upload_to_minio,
                 "minio_key": minio_key,
@@ -89,18 +113,21 @@ class TTSService:
         await self.db.refresh(job)
         
         logger.info(
-            "[TTS Service] Created job %s for video_id=%s dialect=%s",
-            job.id, video_id, dialect
+            "[TTS Service] Created job %s for video_id=%s",
+            job.id, video_id
         )
         
         result = synthesize_tts.apply_async(
             kwargs={
-                "text": text,
-                "dialect": dialect,
+                "text": normalized_text,
                 "ref_audio_path": ref_audio_path,
                 "ref_text": ref_text,
                 "speed": speed,
                 "cfg_strength": cfg_strength,
+                "nfe_step": nfe_step,
+                "sway_sampling_coef": sway_sampling_coef,
+                "target_rms": target_rms,
+                "seed": seed,
                 "job_id": job.id,
                 "upload_to_minio": upload_to_minio,
                 "minio_key": minio_key,
@@ -138,16 +165,16 @@ class TTSService:
     def get_health(self) -> dict:
         """Get TTS service health status."""
         from app.config import settings
-        from app.tts.models import HabibiTTSModelManager
+        from app.tts.models import SilmaTTSModelManager
         
-        # Check if model manager has loaded models
-        model_loaded = len(HabibiTTSModelManager._models) > 0
+        # Check if model manager has loaded model
+        model_loaded = SilmaTTSModelManager._model is not None
         device = "unknown"
         
         # Get device from the model manager
         try:
             # Try to instantiate and get device (lazy load)
-            mgr = HabibiTTSModelManager()
+            mgr = SilmaTTSModelManager()
             device = mgr.device
         except Exception:
             pass
@@ -156,7 +183,7 @@ class TTSService:
             "status": "healthy" if model_loaded else "starting",
             "model_loaded": model_loaded,
             "device": device,
-            "dialect": "MSA",
+            "model": "SILMA-TTS",
             "version": "1.0.0",
-            "habibi_device": settings.HABIBI_DEVICE,
+            "silma_device": settings.SILMA_DEVICE,
         }

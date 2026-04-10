@@ -18,19 +18,9 @@ module "dabljaar" {
   machine_type   = "n1-standard-8" # More CPU for production
   gpu_type       = "nvidia-tesla-t4"
   gpu_count      = 1
-  enable_spot    = true # Still use spot for cost savings
+  enable_spot    = false # Use standard instances for stability
   boot_disk_size = 100
   data_disk_size = 500 # More storage for production
-
-  # Secrets
-  db_password      = var.db_password
-  secret_key       = var.secret_key
-  minio_access_key = var.minio_access_key
-  minio_secret_key = var.minio_secret_key
-
-  # App
-  app_repo_url    = var.app_repo_url
-  app_repo_branch = "main"
 }
 
 # Variables
@@ -53,43 +43,7 @@ variable "admin_cidr_blocks" {
   default = []
 }
 
-variable "db_password" {
-  type      = string
-  sensitive = true
-}
-
-variable "secret_key" {
-  type      = string
-  sensitive = true
-}
-
-variable "minio_access_key" {
-  type      = string
-  sensitive = true
-}
-
-variable "minio_secret_key" {
-  type      = string
-  sensitive = true
-}
-
-variable "app_repo_url" {
-  type = string
-}
-
 # Outputs
-output "frontend_url" {
-  value = module.dabljaar.frontend_url
-}
-
-output "backend_url" {
-  value = module.dabljaar.backend_url
-}
-
-output "api_docs_url" {
-  value = module.dabljaar.api_docs_url
-}
-
 output "ssh_command" {
   value = module.dabljaar.ssh_command
 }
@@ -98,6 +52,6 @@ output "ssh_tunnel_command" {
   value = module.dabljaar.ssh_tunnel_command
 }
 
-output "model_bucket" {
-  value = module.dabljaar.model_bucket
+output "storage_bucket_name" {
+  value = module.dabljaar.storage_bucket_name
 }

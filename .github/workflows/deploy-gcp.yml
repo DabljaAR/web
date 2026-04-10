@@ -1,0 +1,191 @@
+name: Deploy to GCP VM
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Deployment reason (optional)"
+        required: false
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+      - frontend/**
+      - docker-compose.yaml
+      - docker-compose.prod.yml
+      - Caddyfile
+      - .github/workflows/deploy-gcp.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: deploy-gcp
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      TARGET_BRANCH: main
+      APP_DIR: ~/web
+      ENV_FILE: .env.production
+      BOOTSTRAP_MARKER: /var/lib/vm-bootstrap.done
+      REQUIRE_BOOTSTRAP_MARKER: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          VM_HOST: ${{ secrets.GCP_VM_HOST }}
+          VM_USER: ${{ secrets.GCP_VM_USER }}
+          VM_PORT: ${{ secrets.GCP_VM_PORT }}
+          VM_SSH_KEY: ${{ secrets.GCP_VM_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$VM_HOST" ] || [ -z "$VM_USER" ] || [ -z "$VM_SSH_KEY" ]; then
+            echo "Missing required secrets: GCP_VM_HOST, GCP_VM_USER, GCP_VM_SSH_KEY"
+            exit 1
+          fi
+
+          VM_PORT="${VM_PORT:-22}"
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$VM_PORT" -H "$VM_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy on VM
+        env:
+          VM_HOST: ${{ secrets.GCP_VM_HOST }}
+          VM_USER: ${{ secrets.GCP_VM_USER }}
+          VM_PORT: ${{ secrets.GCP_VM_PORT }}
+          TARGET_BRANCH: ${{ env.TARGET_BRANCH }}
+          APP_DIR: ${{ env.APP_DIR }}
+          ENV_FILE: ${{ env.ENV_FILE }}
+          BOOTSTRAP_MARKER: ${{ env.BOOTSTRAP_MARKER }}
+          REQUIRE_BOOTSTRAP_MARKER: ${{ env.REQUIRE_BOOTSTRAP_MARKER }}
+          REPO_SSH_URL: ${{ secrets.GIT_REPO_SSH_URL }}
+          REPO_FALLBACK: git@github.com:${{ github.repository }}.git
+        run: |
+          set -euo pipefail
+          VM_PORT="${VM_PORT:-22}"
+
+          ssh -p "$VM_PORT" "$VM_USER@$VM_HOST" \
+            "TARGET_BRANCH='$TARGET_BRANCH' APP_DIR='$APP_DIR' ENV_FILE='$ENV_FILE' BOOTSTRAP_MARKER='$BOOTSTRAP_MARKER' REQUIRE_BOOTSTRAP_MARKER='$REQUIRE_BOOTSTRAP_MARKER' REPO_SSH_URL='$REPO_SSH_URL' REPO_FALLBACK='$REPO_FALLBACK' bash -se" <<'EOF'
+          set -euo pipefail
+
+          if ! command -v git >/dev/null 2>&1; then
+            echo "git is not installed on VM"
+            exit 1
+          fi
+
+          REPO_URL="${REPO_SSH_URL:-$REPO_FALLBACK}"
+
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "docker is not installed on VM"
+            exit 1
+          fi
+
+          # Expand leading ~ for user-owned deployment path.
+          case "$APP_DIR" in
+            "~"|"~/"*) APP_DIR="${HOME}${APP_DIR#\~}" ;;
+          esac
+
+          if [ "${REQUIRE_BOOTSTRAP_MARKER:-false}" = "true" ] && [ ! -f "$BOOTSTRAP_MARKER" ]; then
+            echo "Required bootstrap marker is missing: $BOOTSTRAP_MARKER"
+            exit 1
+          fi
+
+          if [ "${REQUIRE_BOOTSTRAP_MARKER:-false}" != "true" ] && [ ! -f "$BOOTSTRAP_MARKER" ]; then
+            echo "Warning: bootstrap marker not found ($BOOTSTRAP_MARKER). Continuing because REQUIRE_BOOTSTRAP_MARKER=false."
+          fi
+
+          # Bootstrap repository on first deploy if it does not exist yet.
+          if [ ! -d "$APP_DIR/.git" ]; then
+            mkdir -p "$APP_DIR"
+            git clone -b "$TARGET_BRANCH" "$REPO_URL" "$APP_DIR" || {
+              echo "Failed to clone repository. Ensure VM has GitHub SSH access for private repo."
+              echo "Tried URL: $REPO_URL"
+              exit 1
+            }
+          fi
+
+          cd "$APP_DIR"
+
+          if [ ! -r "$ENV_FILE" ]; then
+            echo "Required env file is missing or unreadable: $APP_DIR/$ENV_FILE"
+            exit 1
+          fi
+
+          require_env() {
+            local key="$1"
+            if ! grep -Eq "^[[:space:]]*${key}=" "$ENV_FILE"; then
+              echo "Missing required key in $ENV_FILE: $key"
+              exit 1
+            fi
+          }
+
+          require_env DOMAIN
+          require_env ACME_EMAIL
+
+          git fetch --prune origin
+          git checkout "$TARGET_BRANCH"
+          git pull --ff-only origin "$TARGET_BRANCH"
+
+          COMPOSE_CMD="docker compose"
+          if ! docker compose version >/dev/null 2>&1; then
+            if command -v docker-compose >/dev/null 2>&1; then
+              COMPOSE_CMD="docker-compose"
+            else
+              echo "Neither docker compose nor docker-compose is available on VM"
+              exit 1
+            fi
+          fi
+
+          # Build frontend static assets to host path mounted by Caddy at /srv.
+          docker run --rm \
+            -v "$APP_DIR/frontend:/frontend" \
+            -w /frontend \
+            -e VITE_API_BASE_URL=/api \
+            node:24-alpine \
+            sh -c "npm ci --legacy-peer-deps && npm run build"
+
+          if [ ! -f "$APP_DIR/frontend/dist/index.html" ]; then
+            echo "Frontend build did not produce frontend/dist/index.html"
+            exit 1
+          fi
+
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yaml -f docker-compose.prod.yml ps
+
+          for _ in 1 2 3 4 5; do
+            if curl -fsS http://localhost:8000/api/health >/dev/null; then
+              break
+            fi
+            sleep 3
+          done
+
+          curl -fsS http://localhost:8000/api/health >/dev/null
+          git rev-parse --short HEAD
+          EOF
+
+      - name: Deployment summary
+        run: |
+          {
+            echo "## Production Deployment"
+            echo "- Workflow: deploy-gcp"
+            echo "- Trigger: ${{ github.event_name }}"
+            echo "- Repository SHA: ${{ github.sha }}"
+            echo "- Target branch: ${{ env.TARGET_BRANCH }}"
+            echo "- Target VM path: ${{ env.APP_DIR }}"
+            echo "- Compose profile: docker-compose.yaml + docker-compose.prod.yml"
+          } >> "$GITHUB_STEP_SUMMARY"

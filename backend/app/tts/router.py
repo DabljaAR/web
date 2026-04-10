@@ -1,4 +1,4 @@
-"""TTS FastAPI router for Habibi-TTS synthesis."""
+"""TTS FastAPI router for SILMA-TTS synthesis."""
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
@@ -13,7 +13,6 @@ from app.tts.schema import (
     TTSStatusResponse,
     TTSJobResponse,
     TTSErrorResponse,
-    ArabicDialect,
     TTSHealthResponse,
 )
 from app.jobs.celery_app import celery_app
@@ -39,19 +38,19 @@ async def synthesize(
     
     Creates a Job record and dispatches Celery task.
     """
-    if req.dialect.upper() not in ("MSA", "EGY"):
-        raise HTTPException(400, f"Unknown dialect '{req.dialect}'. Use MSA or EGY.")
-
     try:
         job_id = await svc.submit_tts(
             text=req.text,
-            dialect=req.dialect,
             job_id=req.job_id,
             user_id=current_user.user_id,
             ref_audio_path=req.ref_audio_path,
             ref_text=req.ref_text,
             speed=req.speed,
             cfg_strength=req.cfg_strength,
+            nfe_step=req.nfe_step,
+            sway_sampling_coef=req.sway_sampling_coef,
+            target_rms=req.target_rms,
+            seed=req.seed,
             upload_to_minio=req.upload_to_minio,
             minio_key=req.minio_key,
         )

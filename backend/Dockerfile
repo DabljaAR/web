@@ -1,21 +1,31 @@
 
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 WORKDIR /app
 
+# Install uv from a pinned image tag (pin to a digest for stricter reproducibility)
+COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /uvx /bin/
+
 # Install system dependencies (minimal, only what's needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    libc6-dev \
     postgresql-client \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip and install dependencies directly to system Python
-RUN pip install --upgrade pip setuptools wheel
+# Configure uv for Docker builds and install into system Python for bind-mounted /app compatibility
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    UV_NO_DEV=1 \
+    UV_PYTHON_DOWNLOADS=0
 
-# Copy requirements and install Python packages
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy lock and project metadata first for dependency-layer caching
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project
 
 # Copy application code
 COPY . .
@@ -31,9 +41,7 @@ USER appuser
 # Set Python environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONHASHSEED=random \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PYTHONHASHSEED=random
 
 # Health check - simple HTTP check without database dependency
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \

@@ -75,6 +75,10 @@ die() {
 }
 
 ensure_sudo_access() {
+    if [[ "${SKIP_SUDO:-0}" -eq 1 ]]; then
+        log_warn "SKIP_SUDO=1 set; skipping sudo checks."
+        return 0
+    fi
     if [[ "$EUID" -ne 0 ]]; then
         log_info "Checking sudo access (will prompt for password once if needed)..."
         if ! sudo -v; then
@@ -489,13 +493,17 @@ ensure_frontend_deps() {
 
 ensure_system_services() {
     log_info "Ensuring Redis and PostgreSQL are enabled and running."
-    
-    if ! run_with_sudo systemctl enable --now redis-server; then
-        die "Failed to enable/start Redis. Check: sudo systemctl status redis-server"
-    fi
-    
-    if ! run_with_sudo systemctl enable --now postgresql; then
-        die "Failed to enable/start PostgreSQL. Check: sudo systemctl status postgresql"
+
+    if [[ "${SKIP_SUDO:-0}" -eq 1 ]]; then
+        log_warn "SKIP_SUDO=1: skipping systemctl enable/start for redis/postgresql. Assuming they are already running."
+    else
+        if ! run_with_sudo systemctl enable --now redis-server; then
+            die "Failed to enable/start Redis. Check: sudo systemctl status redis-server"
+        fi
+        
+        if ! run_with_sudo systemctl enable --now postgresql; then
+            die "Failed to enable/start PostgreSQL. Check: sudo systemctl status postgresql"
+        fi
     fi
 
     if ! wait_for_port 6379 30 1; then
@@ -699,7 +707,7 @@ cmd_run() {
     fi
 
     start_managed_process "worker_stt" "$BACKEND_DIR" "'$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
-    start_managed_process "worker_nmt" "$BACKEND_DIR" "'$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app worker --loglevel=info -Q ai_nmt,ai_tts,pipeline --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
+    start_managed_process "worker_nmt" "$BACKEND_DIR" "'$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app worker --loglevel=info -Q ai_nmt,ai_tts,pipeline --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
 
     if [[ "$ENABLE_FLOWER" -eq 1 ]]; then
         start_managed_process "flower" "$BACKEND_DIR" "FLOWER_UNAUTHENTICATED_API=true '$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app flower --port='$FLOWER_PORT'"

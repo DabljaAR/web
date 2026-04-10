@@ -66,6 +66,10 @@ class VideoTask(Base):
     # Each element: {start, end, original_text, translated_text, tts_key, audio_url}
     segments: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
+    # ── TTS combined output ──────────────────────────────────────────────────
+    # MinIO key for the single merged audio file produced by tts_combine_results
+    combined_audio_key: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+
     # ── Link to the root STT job that started this pipeline ──────────────────
     root_job_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True,

@@ -61,6 +61,10 @@ class VideoTaskDetail(VideoTaskSummary):
     error_message: Optional[str]
     started_at: Optional[datetime]
     root_job_id: Optional[str]
+    combined_audio_key: Optional[str] = None
+    # Presigned URLs injected at request time
+    original_audio_url: Optional[str] = None
+    combined_audio_url: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -92,10 +96,35 @@ async def get_task(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> VideoTaskDetail:
-    """Return a single task with full output data."""
+    """Return a single task with full output data including presigned audio URLs."""
     task = await db.get(VideoTask, task_id)
     if not task:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     if task.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-    return task
+
+    original_audio_url: Optional[str] = None
+    combined_audio_url: Optional[str] = None
+
+    try:
+        from app.media.storage import get_storage_service
+        from app.media.models import Video
+        storage = get_storage_service()
+
+        # Original audio: use the video's audio_path (or file_path as fallback)
+        video = await db.get(Video, task.video_id)
+        if video:
+            audio_key = video.audio_path or video.file_path
+            if audio_key:
+                original_audio_url = await storage.get_url(audio_key)
+
+        # Combined TTS audio
+        if task.combined_audio_key:
+            combined_audio_url = await storage.get_url(task.combined_audio_key)
+    except Exception:
+        pass  # audio URLs are best-effort; don't fail the request
+
+    detail = VideoTaskDetail.model_validate(task)
+    detail.original_audio_url = original_audio_url
+    detail.combined_audio_url = combined_audio_url
+    return detail

@@ -1,6 +1,6 @@
 import { getStorage } from '../utils/authUtils';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://136.112.92.233:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:8000/api' : '/api');
 
 // Helper function to get auth token (checks both storages)
 const getAuthToken = () => {

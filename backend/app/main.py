@@ -1,12 +1,10 @@
 import gc
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 
 from app.api.job_router import router as job_router
@@ -18,12 +16,10 @@ from app.core.rate_limiter import limiter
 from app.core.router import router as core_router
 from app.dependencies import connect_to_db, disconnect_from_db
 from app.nmt.router import router as nmt_router
-from app.shared.logging import setup_logging
-from app.shared.middleware import ExceptionLoggingMiddleware
-
-# Routers
 from app.stt.router import router as stt_router
 from app.tts.router import router as tts_router
+from app.shared.logging import setup_logging
+from app.shared.middleware import ExceptionLoggingMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +43,7 @@ async def lifespan(app: FastAPI):
         max_bytes=settings.LOG_MAX_BYTES,
         backup_count=settings.LOG_BACKUP_COUNT,
         enable_console=settings.LOG_ENABLE_CONSOLE,
-        enable_file=settings.LOG_ENABLE_FILE,
+        enable_file=settings.LOG_TO_FILE,
         json_format=settings.LOG_JSON_FORMAT,
     )
 
@@ -134,7 +130,7 @@ app.include_router(job_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
 app.include_router(stt_router)  # already has prefix="/api/transcription"
 app.include_router(nmt_router, prefix="/api")
-app.include_router(tts_router, prefix="/api/tts")
+app.include_router(tts_router, prefix="/api/tts")  # Re-enabled
 
 # ---------------------------------------------------------------------------
 # Root endpoint
@@ -145,11 +141,6 @@ app.include_router(tts_router, prefix="/api/tts")
 async def read_root():
     return {"message": "Welcome to DabljaAR Backend"}
 
-
-# Mount static files for uploaded avatars
-uploads_dir = Path("uploads")
-uploads_dir.mkdir(exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # ---------------------------------------------------------------------------
 # Dev entry point

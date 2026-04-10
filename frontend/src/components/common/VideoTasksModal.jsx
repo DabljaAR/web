@@ -15,18 +15,39 @@ const fmt = (iso) =>
     ? new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
     : '—';
 
-/* ── Text preview (single tab OR side-by-side compare) ──────────────────── */
-function TextPreview({ task, onBack }) {
-  const captionsOnly      = task.output_type === 'captionsOnly';
-  const hasTranslation    = !captionsOnly && Boolean(task.translated_transcript);
-  const [view, setView]   = useState('original'); // 'original' | 'translation' | 'compare'
-  const isRtl = (view === 'translation') && task.target_lang?.includes('Arab');
+/* ── Audio player ─────────────────────────────────────────────────────────── */
+function AudioPlayer({ src, label }) {
+  if (!src) return (
+    <div className="vtm-audio-empty">
+      <span className="vtm-audio-icon">🔇</span>
+      <span>{label} — not available</span>
+    </div>
+  );
+  return (
+    <div className="vtm-audio-player">
+      <div className="vtm-audio-label">{label}</div>
+      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+      <audio controls src={src} className="vtm-audio-element" />
+    </div>
+  );
+}
 
-  useEffect(() => { setView('original'); }, [task.id]);
+/* ── Task preview ─────────────────────────────────────────────────────────── */
+function TaskPreview({ task, onBack }) {
+  const captionsOnly   = task.output_type === 'captionsOnly';
+  const hasTranslation = !captionsOnly && Boolean(task.translated_transcript);
+  const hasTTS         = Boolean(task.combined_audio_url || task.original_audio_url);
+  const isArabicTarget = task.target_lang?.includes('Arab');
+
+  const [tab, setTab] = useState('compare'); // 'original' | 'translation' | 'compare'
+
+  useEffect(() => {
+    setTab(hasTranslation ? 'compare' : 'original');
+  }, [task.id, hasTranslation]);
 
   return (
     <div className="vtm-preview">
-      {/* back + meta */}
+      {/* ── header ── */}
       <div className="vtm-preview-header">
         <button className="btn btn-secondary vtm-back-btn" onClick={onBack}>← Back</button>
         <span className="vtm-meta">
@@ -35,34 +56,44 @@ function TextPreview({ task, onBack }) {
         </span>
       </div>
 
-      {/* tab bar */}
-      {hasTranslation ? (
+      {/* ── audio comparison ── */}
+      {hasTTS && (
+        <div className="vtm-audio-row">
+          <AudioPlayer src={task.original_audio_url} label="🎙 Original audio" />
+          <AudioPlayer src={task.combined_audio_url} label="🔊 Translated audio" />
+        </div>
+      )}
+
+      {/* ── text tabs ── */}
+      {hasTranslation && (
         <div className="tabs vtm-tabs">
-          <button className={`tab ${view === 'original'    ? 'active' : ''}`} onClick={() => setView('original')}>
+          <button className={`tab ${tab === 'original'    ? 'active' : ''}`} onClick={() => setTab('original')}>
             Original
           </button>
-          <button className={`tab ${view === 'translation' ? 'active' : ''}`} onClick={() => setView('translation')}>
+          <button className={`tab ${tab === 'translation' ? 'active' : ''}`} onClick={() => setTab('translation')}>
             Translation
           </button>
-          <button className={`tab ${view === 'compare'     ? 'active' : ''}`} onClick={() => setView('compare')}>
+          <button className={`tab ${tab === 'compare'     ? 'active' : ''}`} onClick={() => setTab('compare')}>
             ⇔ Compare
           </button>
         </div>
-      ) : null}
+      )}
 
-      {/* body */}
-      {view === 'compare' ? (
+      {/* ── text body ── */}
+      {tab === 'compare' ? (
         <div className="vtm-compare-grid">
           <div className="vtm-compare-panel">
             <div className="vtm-compare-label">Original Transcript</div>
-            <div className="vtm-compare-text" dir="ltr">{task.transcript || <em className="vtm-empty">No text.</em>}</div>
+            <div className="vtm-compare-text" dir="ltr">
+              {task.transcript || <em className="vtm-empty">No text.</em>}
+            </div>
           </div>
           <div className="vtm-compare-panel">
             <div className="vtm-compare-label">Translation</div>
             <div
               className="vtm-compare-text"
-              dir={task.target_lang?.includes('Arab') ? 'rtl' : 'ltr'}
-              style={{ textAlign: task.target_lang?.includes('Arab') ? 'right' : 'left' }}
+              dir={isArabicTarget ? 'rtl' : 'ltr'}
+              style={{ textAlign: isArabicTarget ? 'right' : 'left' }}
             >
               {task.translated_transcript || <em className="vtm-empty">No text.</em>}
             </div>
@@ -71,10 +102,10 @@ function TextPreview({ task, onBack }) {
       ) : (
         <div
           className="vtm-text-body"
-          dir={isRtl ? 'rtl' : 'ltr'}
-          style={{ textAlign: isRtl ? 'right' : 'left' }}
+          dir={(tab === 'translation' && isArabicTarget) ? 'rtl' : 'ltr'}
+          style={{ textAlign: (tab === 'translation' && isArabicTarget) ? 'right' : 'left' }}
         >
-          {(view === 'translation' ? task.translated_transcript : task.transcript)
+          {(tab === 'translation' ? task.translated_transcript : task.transcript)
             || <span className="vtm-empty">No text available.</span>}
         </div>
       )}
@@ -109,7 +140,6 @@ function TaskList({ videoTitle, tasks, onSelect, loading }) {
 
         return (
           <div key={task.id} className="vtm-task-row">
-            {/* badge + label */}
             <div className="vtm-task-top">
               <span className={`vtm-status-badge vtm-status-${statusKey}`}>
                 {icons[statusKey]} {task.status}
@@ -119,21 +149,18 @@ function TaskList({ videoTitle, tasks, onSelect, loading }) {
               </span>
             </div>
 
-            {/* date / meta */}
             <div className="vtm-task-date">
               {fmt(task.created_at)}
               {task.completed_at && <> · done {fmt(task.completed_at)}</>}
               <> · {task.source_lang || 'auto'} → {task.target_lang}</>
             </div>
 
-            {/* progress bar */}
             {task.status === 'PROCESSING' && (
               <div className="vtm-progress-bar">
                 <div className="vtm-progress-fill" style={{ width: `${task.progress ?? 0}%` }} />
               </div>
             )}
 
-            {/* action buttons */}
             {canOpen && (
               <div className="vtm-task-actions">
                 <button className="btn btn-secondary vtm-action-btn" onClick={() => onSelect(task.id)}>
@@ -208,7 +235,7 @@ export default function VideoTasksModal({ isOpen, onClose, videoId, videoTitle }
           {detailLoading ? (
             <div className="vtm-state-msg">Loading…</div>
           ) : selected ? (
-            <TextPreview task={selected} onBack={() => setSelected(null)} />
+            <TaskPreview task={selected} onBack={() => setSelected(null)} />
           ) : (
             <TaskList videoTitle={videoTitle} tasks={tasks} loading={loading} onSelect={handleSelect} />
           )}

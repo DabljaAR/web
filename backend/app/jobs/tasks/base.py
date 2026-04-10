@@ -150,6 +150,8 @@ class BaseJobTask(celery.Task):
         error_message: Optional[str] = None,
         started_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
+        combined_audio_key: Optional[str] = None,
+        combined_audio_url: Optional[str] = None,  # ignored — not stored in DB
     ) -> None:
         """Update a video_tasks row — mirrors _patch_job but targets VideoTask."""
         from app.tasks.models import VideoTask
@@ -178,6 +180,8 @@ class BaseJobTask(celery.Task):
                     task.started_at = started_at
                 if completed_at is not None:
                     task.completed_at = completed_at
+                if combined_audio_key is not None:
+                    task.combined_audio_key = combined_audio_key
                 task.updated_at = datetime.utcnow()
                 db.commit()
         finally:
