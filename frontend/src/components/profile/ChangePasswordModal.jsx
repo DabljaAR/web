@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from '../../hooks/useTranslation';
 import api from '../../services/api';
+import { BCRYPT_MAX_PASSWORD_BYTES, validatePasswordByteLength } from '../../features/auth/utils/validation';
 import './ChangePasswordModal.css';
 
 const ChangePasswordModal = ({ isOpen, onClose, userId }) => {
@@ -52,6 +53,13 @@ const ChangePasswordModal = ({ isOpen, onClose, userId }) => {
 
         if (formData.newPassword !== formData.confirmPassword) {
             setError(t('profile.passwordMatchError') || 'Passwords do not match');
+            return;
+        }
+        if (!validatePasswordByteLength(formData.newPassword)) {
+            setError(
+                t('profile.passwordByteLimit') ||
+                `Password is too long for secure hashing. Max ${BCRYPT_MAX_PASSWORD_BYTES} UTF-8 bytes.`
+            );
             return;
         }
 

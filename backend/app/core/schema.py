@@ -22,7 +22,7 @@ def _validate_password_byte_length(password: str) -> str:
     password_bytes = len(password.encode("utf-8"))
     if password_bytes > BCRYPT_MAX_PASSWORD_BYTES:
         raise ValueError(
-            f"Password must not exceed {BCRYPT_MAX_PASSWORD_BYTES} bytes when UTF-8 encoded"
+            f"Password is too long for secure hashing. Max {BCRYPT_MAX_PASSWORD_BYTES} UTF-8 bytes."
         )
     return password
 
@@ -384,6 +384,15 @@ class TokenRefresh(BaseModel):
                 "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
             }
         }
+    )
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Schema for forgot password request."""
+    email: EmailStr = Field(
+        ...,
+        description="Registered user email",
+        examples=["user@example.com"]
     )
 
 

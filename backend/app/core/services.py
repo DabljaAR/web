@@ -3,7 +3,8 @@ from sqlalchemy import true, select
 from app.media.models import Video
 from typing import Optional, List
 from fastapi import HTTPException, status
-from app.core.models import User
+from app.core.models import User, Payment, UserSubscription
+from app.media.storage import StorageService
 from app.core.schema import (
     UserCreate,
     UserUpdate,
@@ -31,7 +32,12 @@ logger = logging.getLogger(__name__)
 class UserService:
     """User service with dependency injection."""
     
-    def __init__(self, user_repo: UserRepository, auth_service: AuthService):
+    def __init__(
+        self,
+        user_repo: UserRepository,
+        auth_service: AuthService,
+        storage_service: Optional[StorageService] = None
+    ):
         """
         Initialize UserService with repository and auth service dependencies.
         
@@ -41,8 +47,9 @@ class UserService:
         """
         self.user_repo = user_repo
         self.auth_service = auth_service
+        self.storage_service = storage_service
     
-    async def signup(self, user_data: UserCreate) -> UserResponse:
+    async def signup(self, user_data: UserCreate) -> UserLoginResponse:
         """
         Register a new user.
         
@@ -88,8 +95,14 @@ class UserService:
         await self.user_repo.db.refresh(db_user)
         
         logger.info(db_user)
-        # Return user response
-        return UserResponse.model_validate(db_user)
+        token_pair = self.auth_service.create_token_pair(db_user)
+        user_response = UserResponse.model_validate(db_user)
+        return UserLoginResponse(
+            access_token=token_pair["access_token"],
+            refresh_token=token_pair["refresh_token"],
+            token_type=token_pair["token_type"],
+            user=user_response
+        )
     
     async def login(self, username: str, password: str) -> UserLoginResponse:
         """
@@ -389,6 +402,10 @@ class UserSubscriptionService:
     async def delete_subscription(self, subscription_id: int) -> bool:
         return await self.user_subscription_repo.delete(subscription_id)
 
+    async def get_user_subscriptions(self, user_id: int) -> List["UserSubscriptionResponse"]:
+        subscriptions = await self.user_subscription_repo.get_by_user_id(user_id)
+        return [UserSubscriptionResponse.model_validate(sub) for sub in subscriptions]
+
 
 class PaymentService:
     def __init__(self, payment_repo: "PaymentRepository"):
@@ -414,3 +431,13 @@ class PaymentService:
 
     async def delete_payment(self, payment_id: int) -> bool:
         return await self.payment_repo.delete(payment_id)
+
+    async def list_user_payments(self, user_id: int) -> List["PaymentResponse"]:
+        stmt = (
+            select(Payment)
+            .join(UserSubscription, Payment.subscription_id == UserSubscription.subscription_id)
+            .where(UserSubscription.user_id == user_id)
+        )
+        result = await self.payment_repo.db.execute(stmt)
+        payments = result.scalars().all()
+        return [PaymentResponse.model_validate(payment) for payment in payments]

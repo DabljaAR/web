@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import TypeVar, Generic, Optional, List, Type
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -5,6 +6,7 @@ from sqlalchemy.orm import DeclarativeBase
 from fastapi import HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import inspect, func
+from app.shared.enums import SubscriptionStatusEnum, PaymentStatusEnum
 
 T = TypeVar("T", bound=DeclarativeBase)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
@@ -25,7 +27,8 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
         return db_obj
     
     async def get_by_id(self, id: int) -> Optional[T]:
-        stmt = select(self.model).where(self.model.user_id == id)
+        pk_col = inspect(self.model).mapper.primary_key[0]
+        stmt = select(self.model).where(pk_col == id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
     
@@ -66,9 +69,9 @@ class BaseRepository(Generic[T, CreateSchemaType, UpdateSchemaType]):
         return True
     
     async def count(self) -> int:
-        stmt = select(self.model)
+        stmt = select(func.count()).select_from(self.model)
         result = await self.db.execute(stmt)
-        return len(result.scalars().all())
+        return result.scalar_one()
 
 
 class UserRepository(BaseRepository):
@@ -156,7 +159,7 @@ class PaymentRepository(BaseRepository):
             select(self.model)
             .where(
                 self.model.subscription_id == subscription_id,
-                self.model.status == PaymentStatusEnum.COMPLETED
+                self.model.status == PaymentStatusEnum.PAID
             )
         )
         result = await self.db.execute(stmt)
