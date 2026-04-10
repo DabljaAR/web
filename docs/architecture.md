@@ -49,7 +49,7 @@ The platform is a **modular monolith**: a single deployable FastAPI application 
 | Job queue | **Celery** | 5.4 | Async task execution |
 | Message broker | **Redis** | 7 | Celery broker + result backend |
 | Rate limiting | **slowapi** | 0.1.9 | Per-IP request throttling |
-| Error monitoring | **sentry-sdk** | 2.48 | Exception tracking |
+| Error monitoring | **TBD** | — | Reserved for future integration |
 | Linting | **ruff** | 0.14 | Fast Python linter + formatter |
 | Testing | **pytest + pytest-asyncio** | 8.3 / 0.24 | Async test suite |
 | Test coverage | **pytest-cov** | 6.0 | Coverage reports |
@@ -178,7 +178,7 @@ backend/
 │
 ├── Dockerfile
 ├── entrypoint.sh
-└── requirements.txt
+└── pyproject.toml + uv.lock
 ```
 
 ### Layering Rules

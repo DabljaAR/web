@@ -12,7 +12,7 @@ on:
     paths:
       - backend/**
       - frontend/**
-      - docker-compose.yaml
+      - docker-compose.yml
       - docker-compose.prod.yml
       - Caddyfile
       - .github/workflows/deploy-gcp.yml
@@ -164,8 +164,8 @@ jobs:
             exit 1
           fi
 
-          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yaml -f docker-compose.prod.yml up -d --build
-          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yaml -f docker-compose.prod.yml ps
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml ps
 
           for _ in 1 2 3 4 5; do
             if curl -fsS http://localhost:8000/api/health >/dev/null; then
@@ -187,5 +187,5 @@ jobs:
             echo "- Repository SHA: ${{ github.sha }}"
             echo "- Target branch: ${{ env.TARGET_BRANCH }}"
             echo "- Target VM path: ${{ env.APP_DIR }}"
-            echo "- Compose profile: docker-compose.yaml + docker-compose.prod.yml"
+            echo "- Compose profile: docker-compose.yml + docker-compose.prod.yml"
           } >> "$GITHUB_STEP_SUMMARY"

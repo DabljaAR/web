@@ -107,6 +107,7 @@ Examples:
     ./start.sh run
     ./start.sh run --no-frontend
     ./start.sh logs backend
+    ./start.sh logs worker_media
     ./start.sh stop
 EOF
 }
@@ -203,7 +204,7 @@ assert_ubuntu_2204() {
         die "This script currently supports Ubuntu only. Detected: ${ID:-unknown}."
     fi
     if [[ "${VERSION_ID:-}" != "22.04" ]]; then
-        log_warn "Detected Ubuntu ${VERSION_ID:-unknown}. Script is optimized for 22.04."
+        log_warn "Detected Ubuntu ${VERSION_ID:-unknown}. Script is tested on 22.04 and 24.04; other versions may work."
     fi
 }
 
@@ -281,35 +282,44 @@ select_python_bin() {
         local major minor
         major="${version%%.*}"
         minor="${version##*.}"
-        if [[ "$major" -eq 3 && "$minor" -ge 10 && "$minor" -le 12 ]]; then
+        if [[ "$major" -eq 3 && "$minor" -ge 12 ]]; then
             SELECTED_PYTHON_BIN="$candidate"
             log_ok "Using Python $version from $candidate"
             return
         fi
     done
 
-    die "No supported Python version found (need Python 3.10-3.12 for local deps like torch). Install python3.12 or python3.11 and rerun setup."
+    die "No supported Python version found (need Python 3.12+). Install python3.12 and rerun setup."
 }
 
 venv_healthy() {
     [[ -x "$BACKEND_VENV/bin/python" ]] || return 1
     "$BACKEND_VENV/bin/python" -c "import sys; print(sys.executable)" >/dev/null 2>&1 || return 1
-    "$BACKEND_VENV/bin/python" -m pip --version >/dev/null 2>&1 || return 1
     return 0
 }
 
-ensure_backend_runtime_deps() {
-    if ! "$BACKEND_VENV/bin/python" -c "import uvicorn" >/dev/null 2>&1; then
-        die "uvicorn is missing in backend virtualenv. Run './start.sh setup' to repair dependencies."
+install_uv_if_needed() {
+    if command -v uv >/dev/null 2>&1; then
+        log_ok "uv already installed ($(uv --version 2>/dev/null || echo 'version unknown'))."
+        return
     fi
 
-    if ! "$BACKEND_VENV/bin/python" -c "import torch" >/dev/null 2>&1; then
-        log_warn "torch is missing in backend virtualenv. Attempting targeted install."
-        if ! "$BACKEND_VENV/bin/pip" install "torch>=2.6.0,<3"; then
-            die "Failed to install torch in backend virtualenv. Ensure selected Python is 3.10-3.12 and rerun './start.sh setup'."
-        fi
-        "$BACKEND_VENV/bin/python" -c "import torch" >/dev/null 2>&1 || die "torch still unavailable after install. Recreate env with './start.sh setup'."
+    log_info "Installing uv..."
+    if ! command -v curl >/dev/null 2>&1; then
+        die "curl is required to install uv but not found."
     fi
+
+    if ! curl -fsSL https://astral.sh/uv/install.sh | sh; then
+        die "Failed to install uv. Check your internet connection."
+    fi
+
+    export PATH="$HOME/.local/bin:$PATH"
+
+    if ! command -v uv >/dev/null 2>&1; then
+        die "uv installation verification failed. Try adding ~/.local/bin to PATH and rerunning."
+    fi
+
+    log_ok "uv installed ($(uv --version))."
 }
 
 install_node_if_needed() {
@@ -428,35 +438,18 @@ normalize_frontend_env_key() {
 }
 
 ensure_python_env() {
-    select_python_bin
-
-    if [[ -d "$BACKEND_VENV" ]] && ! venv_healthy; then
-        log_warn "Detected broken backend virtualenv at $BACKEND_VENV. Recreating it."
-        rm -rf "$BACKEND_VENV"
+    if [[ ! -f "$BACKEND_DIR/pyproject.toml" ]]; then
+        die "Backend pyproject.toml not found at $BACKEND_DIR/pyproject.toml"
     fi
 
-    if [[ ! -x "$BACKEND_VENV/bin/python" ]]; then
-        log_info "Creating backend virtual environment at $BACKEND_VENV using $SELECTED_PYTHON_BIN..."
-        if ! "$SELECTED_PYTHON_BIN" -m venv "$BACKEND_VENV"; then
-            die "Failed to create Python virtual environment. Check disk space and permissions."
-        fi
+    log_info "Installing backend dependencies (uv sync --group ai)..."
+    pushd "$BACKEND_DIR" >/dev/null
+    if ! uv sync --group ai; then
+        popd >/dev/null
+        die "uv sync failed. Check internet connection and pyproject.toml."
     fi
+    popd >/dev/null
 
-    log_info "Installing backend dependencies..."
-    if ! "$BACKEND_VENV/bin/python" -m pip install --upgrade pip setuptools wheel; then
-        die "Failed to upgrade pip/setuptools/wheel. Check internet connection and disk space."
-    fi
-    
-    if [[ ! -f "$BACKEND_DIR/requirements.txt" ]]; then
-        die "Backend requirements.txt not found at $BACKEND_DIR/requirements.txt"
-    fi
-    
-    if ! "$BACKEND_VENV/bin/pip" install -r "$BACKEND_DIR/requirements.txt"; then
-        die "Failed to install backend dependencies. Check requirements.txt and internet connection."
-    fi
-
-    ensure_backend_runtime_deps
-    
     log_ok "Backend Python environment ready."
 }
 
@@ -550,7 +543,7 @@ run_migrations_if_enabled() {
     log_info "Running Alembic migrations (upgrade head)..."
     pushd "$BACKEND_DIR" >/dev/null
     
-    if ! "$BACKEND_VENV/bin/alembic" upgrade head; then
+    if ! uv run alembic upgrade head; then
         popd >/dev/null
         die "Database migrations failed. Check your .env file and database connection."
     fi
@@ -656,6 +649,7 @@ cmd_setup() {
     install_apt_packages_if_missing
     install_node_if_needed
     install_minio_if_needed
+    install_uv_if_needed
 
     ensure_system_services
     ensure_postgres_database
@@ -676,12 +670,10 @@ cmd_run() {
     ensure_runtime_dirs
     ensure_system_services
 
-    if [[ ! -x "$BACKEND_VENV/bin/python" ]] || ! venv_healthy; then
-        log_warn "Backend virtualenv missing or invalid. Repairing it now."
+    if ! venv_healthy; then
+        log_warn "Backend virtualenv missing or invalid. Running uv sync now."
         ensure_python_env
     fi
-
-    ensure_backend_runtime_deps
 
     [[ -f "$BACKEND_ENV_FILE" ]] || die "Missing backend .env. Run './start.sh setup' first."
     [[ -f "$FRONTEND_ENV_FILE" ]] || die "Missing frontend .env. Run './start.sh setup' first."
@@ -693,16 +685,17 @@ cmd_run() {
         die "MinIO failed to become ready on port $MINIO_PORT. Check log: $LOG_DIR/minio.log"
     fi
 
-    start_managed_process "backend" "$BACKEND_DIR" "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True '$BACKEND_VENV/bin/uvicorn' app.main:app --host '$BACKEND_HOST' --port '$BACKEND_PORT'"
+    start_managed_process "backend" "$BACKEND_DIR" "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True uv run uvicorn app.main:app --host '$BACKEND_HOST' --port '$BACKEND_PORT'"
     if ! wait_for_port "$BACKEND_PORT" 30 1; then
         die "Backend failed to become ready on port $BACKEND_PORT. Check log: $LOG_DIR/backend.log"
     fi
 
-    start_managed_process "worker_stt" "$BACKEND_DIR" "'$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
-    start_managed_process "worker_nmt" "$BACKEND_DIR" "'$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app worker --loglevel=info -Q ai_nmt,ai_tts,pipeline --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
+    start_managed_process "worker_media" "$BACKEND_DIR" "uv run celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-media@%h"
+    start_managed_process "worker_stt" "$BACKEND_DIR" "uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
+    start_managed_process "worker_nmt" "$BACKEND_DIR" "uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_nmt,ai_tts,pipeline --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
 
     if [[ "$ENABLE_FLOWER" -eq 1 ]]; then
-        start_managed_process "flower" "$BACKEND_DIR" "FLOWER_UNAUTHENTICATED_API=true '$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app flower --port='$FLOWER_PORT'"
+        start_managed_process "flower" "$BACKEND_DIR" "FLOWER_UNAUTHENTICATED_API=true uv run celery -A app.jobs.celery_app flower --port='$FLOWER_PORT'"
     fi
 
     if [[ "$ENABLE_FRONTEND" -eq 1 ]]; then
@@ -717,6 +710,7 @@ cmd_stop() {
     stop_managed_process "flower"
     stop_managed_process "worker_nmt"
     stop_managed_process "worker_stt"
+    stop_managed_process "worker_media"
     stop_managed_process "backend"
     stop_managed_process "minio"
     log_ok "Stop command completed."
@@ -739,6 +733,7 @@ cmd_status() {
     echo "Managed processes:"
     print_service_status "minio"
     print_service_status "backend"
+    print_service_status "worker_media"
     print_service_status "worker_stt"
     print_service_status "worker_nmt"
     [[ "$ENABLE_FLOWER" -eq 1 ]] && print_service_status "flower"
@@ -776,14 +771,14 @@ cmd_logs() {
             fi
             tail -n 100 -f "${files[@]}"
             ;;
-        backend|minio|worker_stt|worker_nmt|flower|frontend)
+        backend|minio|worker_media|worker_stt|worker_nmt|flower|frontend)
             local file
             file="$(log_file_for "$target")"
             [[ -f "$file" ]] || die "Log file not found: $file"
             tail -n 100 -f "$file"
             ;;
         *)
-            die "Unknown log target '$target'. Use: all, backend, minio, worker_stt, worker_nmt, flower, frontend"
+            die "Unknown log target '$target'. Use: all, backend, minio, worker_media, worker_stt, worker_nmt, flower, frontend"
             ;;
     esac
 }

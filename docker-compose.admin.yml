@@ -1,3 +1,6 @@
+# docker-compose.admin.yml
+# Admin overlay: bind-mounts MinIO and Flower ports to localhost only for secure access on the production host.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.admin.yml up -d
 services:
   minio:
     ports:

@@ -1,6 +1,6 @@
 """
 Unit tests for STT router/API endpoints.
-Location: tests/sst/test_router.py
+Location: tests/stt/test_router.py
 """
 
 import pytest
@@ -200,8 +200,6 @@ class TestTranscriptionValidation:
         # Router accepted it (200) or rejected at schema level (422) — no 500
         assert response.status_code in [200, 422]
         assert response.status_code != 500
-
-
 
     def test_missing_file_upload(self, client):
         """Test missing file in upload request."""

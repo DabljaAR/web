@@ -22,10 +22,16 @@ ENV UV_LINK_MODE=copy \
     UV_NO_DEV=1 \
     UV_PYTHON_DOWNLOADS=0
 
+ARG INSTALL_AI=false
+
 # Copy lock and project metadata first for dependency-layer caching
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-install-project
+    if [ "$INSTALL_AI" = "true" ]; then \
+      uv sync --locked --no-install-project --group ai; \
+    else \
+      uv sync --locked --no-install-project; \
+    fi
 
 # Copy application code
 COPY . .

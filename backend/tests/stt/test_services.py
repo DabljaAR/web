@@ -1,6 +1,6 @@
 """
 Unit tests for STT services.
-Location: tests/sst/test_services.py
+Location: tests/stt/test_services.py
 """
 
 import pytest
