@@ -61,6 +61,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        INSTALL_AI: "true"
     container_name: dabljaar_backend
     environment:
       INSTALL_AI: "true"
