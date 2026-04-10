@@ -108,7 +108,7 @@ Both workflows trigger on `push` and `pull_request` to `main` and use path filte
 
 - Triggers automatically on push to `main` for app/deploy-related paths.
 - Supports manual runs using `workflow_dispatch`.
-- Connects to the VM via SSH and deploys from `/opt/web`.
+- Connects to the VM via SSH and deploys from `~/web`.
 - Updates code with `git fetch` + `git pull --ff-only origin main`.
 - Rebuilds and restarts production containers using:
    - `docker-compose.yml`
@@ -139,13 +139,13 @@ Deployment workflow requires these repository secrets:
 
 One-time VM prerequisites for deployment:
 
-1. Repository is cloned at `/opt/web`.
-2. `.env.production` exists at `/opt/web/.env.production`.
+1. Repository is cloned at `~/web`.
+2. `.env.production` exists at `~/web/.env.production`.
 3. Docker and Docker Compose are installed and usable by the SSH user.
 4. The VM has network access to pull latest git changes.
 5. DNS and ports 80/443 are configured for production traffic.
 
-The deployment workflow can bootstrap first deploy automatically: if `/opt/web/.git` is missing, it clones the repository on the VM before running `docker compose`.
+The deployment workflow can bootstrap first deploy automatically: if `~/web/.git` is missing, it clones the repository on the VM before running `docker compose`.
 
 ### Local Reproduction
 
