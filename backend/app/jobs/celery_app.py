@@ -33,6 +33,19 @@ from app.jobs.models import JobStatus
 
 celery_app = Celery("dabljaar")
 
+_INSTALL_AI = os.getenv("INSTALL_AI", "false").lower() == "true"
+_base_imports = ["app.jobs.tasks.media"]
+_ai_imports = (
+    [
+        "app.jobs.tasks.pipeline",
+        "app.jobs.tasks.nmt",
+        "app.stt.models",
+        "app.tts.models",
+    ]
+    if _INSTALL_AI
+    else []
+)
+
 celery_app.conf.update(
     # Broker & backend
     broker_url=settings.CELERY_BROKER_URL,
@@ -68,22 +81,20 @@ celery_app.conf.update(
         "app.jobs.tasks.tts.synthesize": {"queue": "ai_tts"},
     },
 
-    # Autodiscovery target packages
-    imports=[
-        "app.jobs.tasks.media",
-        "app.jobs.tasks.pipeline",
-        "app.jobs.tasks.nmt",
-        "app.stt.models",
-        "app.tts.models",
-    ],
+    # Autodiscovery target packages (AI modules only when INSTALL_AI=true)
+    imports=_base_imports + _ai_imports,
 )
 
 # Register TTS task (with graceful fallback if silma-tts not installed)
-try:
-    from app.tts.models import register_tts_task
-    synthesize_tts = register_tts_task(celery_app)
-    logger.info("✅ SILMA-TTS task registered successfully")
-except ImportError as e:
-    logger.warning(f"⚠️  SILMA-TTS task not registered: {e}")
-    logger.warning("Install silma-tts to enable TTS functionality: pip install silma-tts")
-    synthesize_tts = None
+synthesize_tts = None
+if _INSTALL_AI:
+    try:
+        from app.tts.models import register_tts_task
+
+        synthesize_tts = register_tts_task(celery_app)
+        logger.info("✅ SILMA-TTS task registered successfully")
+    except ImportError as e:
+        logger.warning(f"⚠️  SILMA-TTS task not registered: {e}")
+        logger.warning(
+            "Install silma-tts to enable TTS functionality: pip install silma-tts"
+        )
