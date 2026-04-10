@@ -119,3 +119,6 @@ AGENTS.md
 logs
 start_dev.sh
 stop_dev.sh
+
+# NMT Model
+models/nmt-v4/
