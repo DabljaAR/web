@@ -4,7 +4,10 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { authService } from '../../services/authService';
+import { BCRYPT_MAX_PASSWORD_BYTES, validatePasswordByteLength } from '../../features/auth/utils/validation';
 import '../../styles/auth.css';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:8000/api' : '/api');
 
 const Register = () => {
   const navigate = useNavigate();
@@ -45,6 +48,12 @@ const Register = () => {
 
   const validatePassword = (password) => {
     const errors = [];
+    if (!validatePasswordByteLength(password)) {
+      errors.push(
+        t('register.passwordByteLimit') ||
+        `Password is too long for secure hashing. Max ${BCRYPT_MAX_PASSWORD_BYTES} UTF-8 bytes.`
+      );
+    }
     if (password.length < 8) {
       errors.push(t('register.passwordHint'));
     }
@@ -142,6 +151,16 @@ const Register = () => {
         registrationData.avatar_url = formData.avatarUrl.trim();
       }
 
+      // If an avatar file was selected, upload it before signup and include its URL.
+      if (avatarFile) {
+        setUploadingAvatar(true);
+        try {
+          registrationData.avatar_url = await uploadAvatar(avatarFile);
+        } finally {
+          setUploadingAvatar(false);
+        }
+      }
+
       // Verify password is present before sending
       if (!registrationData.password || registrationData.password.length === 0) {
         setErrors(prev => ({ ...prev, password: 'Password is required' }));
@@ -152,33 +171,8 @@ const Register = () => {
       // Debug: Log the data being sent (remove in production)
       console.log('Registration data:', { ...registrationData, password: '***' });
 
-      // 1. Create the user first (Backend now returns tokens on success)
-      const response = await authService.register(registrationData);
-
-      // 2. If registration successful and we have an avatar file, upload it now
-      if (avatarFile) {
-        setUploadingAvatar(true);
-        try {
-          // Save tokens to storage so update request is authenticated
-          // if (response.access_token) {
-          //   localStorage.setItem('access_token', response.access_token);
-          //   localStorage.setItem('refresh_token', response.refresh_token);
-          // }
-
-          // Upload the file
-          const avatarUrl = await uploadAvatar(avatarFile);
-
-          // Update the user with the new avatar URL
-          const userId = response.user.user_id || response.user.id;
-          await authService.updateUser(userId, { avatar_url: avatarUrl });
-        } catch (uploadError) {
-          console.error('Optional avatar upload failed:', uploadError);
-          // We don't fail the whole registration if just the avatar upload fails
-          // but we could notify the user
-        } finally {
-          setUploadingAvatar(false);
-        }
-      }
+      // Create the user (backend returns login-style payload).
+      await authService.register(registrationData);
 
       // Success - show message and redirect to login
       alert(t('register.accountCreated') || 'Account created successfully! Please login with your credentials.');
@@ -261,7 +255,6 @@ const Register = () => {
     formData.append('file', file);
 
     try {
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://136.112.92.233:8000/api';
       const response = await fetch(`${API_BASE_URL}/upload/avatar`, {
         method: 'POST',
         body: formData,

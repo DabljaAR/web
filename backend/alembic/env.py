@@ -95,5 +95,8 @@ def do_run_migrations(connection):
     with context.begin_transaction():
         context.run_migrations()
 
-    with context.begin_transaction():
-        context.run_migrations()
+# Run the migrations
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    asyncio.run(run_migrations_online())

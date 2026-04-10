@@ -24,12 +24,16 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 BCRYPT_MAX_PASSWORD_BYTES = 72
 
 
+class PasswordValidationError(ValueError):
+    """Raised when password input violates validation constraints."""
+
+
 def _validate_bcrypt_password_length(password: str) -> None:
     """Validate password byte length against bcrypt backend limits."""
     password_bytes = len(password.encode("utf-8"))
     if password_bytes > BCRYPT_MAX_PASSWORD_BYTES:
-        raise ValueError(
-            f"Password must not exceed {BCRYPT_MAX_PASSWORD_BYTES} bytes when UTF-8 encoded"
+        raise PasswordValidationError(
+            f"Password is too long for secure hashing. Max {BCRYPT_MAX_PASSWORD_BYTES} UTF-8 bytes."
         )
 
 

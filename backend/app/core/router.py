@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.schema import (
     UserCreate, UserLogin, TokenRefresh, UserLoginResponse, TokenResponse, 
     UserResponse, UserUpdate, PasswordChangeRequest, SubscriptionPlanCreate, SubscriptionPlanResponse,
-    SubscriptionPlanUpdate, UserSubscriptionCreate, UserSubscriptionResponse,
+    SubscriptionPlanUpdate, UserSubscriptionCreate, UserSubscriptionResponse, ForgotPasswordRequest,
     UserSubscriptionUpdate, PaymentCreate, PaymentResponse, PaymentUpdate
 )
 from app.core.db import get_db
@@ -18,7 +18,7 @@ from app.core.repository import (
     UserRepository, SubscriptionPlanRepository, 
     UserSubscriptionRepository, PaymentRepository
 )
-from app.core.auth import AuthService, get_auth_service, get_current_user
+from app.core.auth import AuthService, PasswordValidationError, get_auth_service, get_current_user
 from app.core.services import UserService, SubscriptionPlanService, UserSubscriptionService, PaymentService
 from app.core.exceptions import UserAlreadyExistsException, InvalidCredentialsException, TokenExpiredException
 from app.core.rate_limiter import limiter
@@ -51,21 +51,7 @@ def get_user_service(
         UserService instance with injected dependencies
     """
     user_repo = UserRepository(db, User)
-    return UserService(user_repo, auth_service)
-
-def get_subscription_plan_service(
-    db: AsyncSession = Depends(get_db)
-) -> SubscriptionPlanService:
-    """Dependency injection factory for SubscriptionPlanService."""
-    repo = SubscriptionPlanRepository(db, SubscriptionPlan)
-    return SubscriptionPlanService(repo)
-
-def get_subscription_plan_service(
-    db: AsyncSession = Depends(get_db)
-) -> SubscriptionPlanService:
-    """Dependency injection factory for SubscriptionPlanService."""
-    repo = SubscriptionPlanRepository(db, SubscriptionPlan)
-    return SubscriptionPlanService(repo)
+    return UserService(user_repo, auth_service, storage_service)
 
 def get_subscription_plan_service(
     db: AsyncSession = Depends(get_db)
@@ -91,39 +77,7 @@ def get_payment_service(
     return PaymentService(repo)
 
 
-def get_user_subscription_service(
-    db: AsyncSession = Depends(get_db)
-) -> UserSubscriptionService:
-    """Dependency injection factory for UserSubscriptionService."""
-    repo = UserSubscriptionRepository(db, UserSubscription)
-    return UserSubscriptionService(repo)
-
-
-def get_payment_service(
-    db: AsyncSession = Depends(get_db)
-) -> PaymentService:
-    """Dependency injection factory for PaymentService."""
-    repo = PaymentRepository(db, Payment)
-    return PaymentService(repo)
-
-
-def get_user_subscription_service(
-    db: AsyncSession = Depends(get_db)
-) -> UserSubscriptionService:
-    """Dependency injection factory for UserSubscriptionService."""
-    repo = UserSubscriptionRepository(db, UserSubscription)
-    return UserSubscriptionService(repo)
-
-
-def get_payment_service(
-    db: AsyncSession = Depends(get_db)
-) -> PaymentService:
-    """Dependency injection factory for PaymentService."""
-    repo = PaymentRepository(db, Payment)
-    return PaymentService(repo)
-
-
-@router.post("/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
+@router.post("/signup", response_model=UserLoginResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
 @limiter.limit("5/minute")
 async def signup(
     request: Request,
@@ -150,7 +104,7 @@ async def signup(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(e.detail)
         )
-    except ValueError as e:
+    except PasswordValidationError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e)
@@ -220,6 +174,27 @@ async def refresh_token(
             detail=str(e.detail),
             headers={"WWW-Authenticate": "Bearer"}
         )
+
+
+@router.get("/auth/me", response_model=UserResponse, tags=["auth"])
+async def auth_me(current_user: User = Depends(get_current_user)):
+    """Get the current authenticated user."""
+    return UserResponse.model_validate(current_user)
+
+
+@router.post("/auth/logout", tags=["auth"])
+async def logout(current_user: User = Depends(get_current_user)):
+    """Logout endpoint placeholder for token-based clients."""
+    return {"message": "Logged out successfully"}
+
+
+@router.post("/auth/forgot-password", tags=["auth"])
+async def forgot_password(payload: ForgotPasswordRequest):
+    """Placeholder forgot-password endpoint to keep API contract consistent."""
+    return {
+        "message": "If the email exists, a password reset link has been sent.",
+        "email": payload.email,
+    }
 
 
 @router.get("/users/{user_id}", response_model=UserResponse, tags=["users"])
@@ -588,7 +563,7 @@ async def my_subscriptions(
     return await service.get_user_subscriptions(current_user.user_id)
 
 
-@   router.get("/subscriptions/{subscription_id}", response_model=UserSubscriptionResponse, tags=["subscriptions"])
+@router.get("/subscriptions/{subscription_id}", response_model=UserSubscriptionResponse, tags=["subscriptions"])
 async def get_subscription(
     subscription_id: int,
     service: UserSubscriptionService = Depends(get_user_subscription_service),
@@ -693,7 +668,7 @@ async def create_payment(
     return await service.create_payment(data)
 
 
-@router.get("", response_model=List[PaymentResponse], tags=["payments"])
+@router.get("/payments", response_model=List[PaymentResponse], tags=["payments"])
 async def list_payments(
     skip: int = Query(0, ge=0),
     limit: int = Query(10, ge=1, le=100),
@@ -715,7 +690,7 @@ async def list_payments(
     return await service.get_all_payments(skip=skip, limit=limit)
 
 
-@router.get("/me", response_model=List[PaymentResponse], tags=["payments"])
+@router.get("/payments/me", response_model=List[PaymentResponse], tags=["payments"])
 async def my_payments(
     service: PaymentService = Depends(get_payment_service),
     current_user: User = Depends(get_current_user)
@@ -731,7 +706,7 @@ async def my_payments(
     return await service.list_user_payments(current_user.user_id)
 
 
-@router.get("/{payment_id}", response_model=PaymentResponse, tags=["payments"])
+@router.get("/payments/{payment_id}", response_model=PaymentResponse, tags=["payments"])
 async def get_payment(
     payment_id: int,
     service: PaymentService = Depends(get_payment_service),
@@ -754,7 +729,7 @@ async def get_payment(
     return await service.get_payment_by_id(payment_id)
 
 
-@router.put("/{payment_id}", response_model=PaymentResponse, tags=["payments"])
+@router.put("/payments/{payment_id}", response_model=PaymentResponse, tags=["payments"])
 async def update_payment(
     payment_id: int,
     data: PaymentUpdate,
@@ -781,7 +756,7 @@ async def update_payment(
     return await service.update_payment(payment_id, data)
 
 
-@router.delete("/{payment_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["payments"])
+@router.delete("/payments/{payment_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["payments"])
 async def delete_payment(
     payment_id: int,
     service: PaymentService = Depends(get_payment_service),
@@ -802,4 +777,4 @@ async def delete_payment(
         404 Not Found: Payment not found
     """
     await service.delete_payment(payment_id)
-    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat() + "Z"}
+    return None

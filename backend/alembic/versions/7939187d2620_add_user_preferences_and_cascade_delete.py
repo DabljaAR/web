@@ -1,7 +1,7 @@
 """add user preferences and cascade delete
 
 Revision ID: 7939187d2620
-Revises: d298f1b34c73
+Revises: f1a2b3c4d5e6
 Create Date: 2026-02-19 09:41:37.340745
 
 """
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = '7939187d2620'
-down_revision: Union[str, Sequence[str], None] = 'd298f1b34c73'
+down_revision: Union[str, Sequence[str], None] = 'f1a2b3c4d5e6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -74,11 +74,11 @@ def upgrade() -> None:
                existing_type=sa.BOOLEAN(),
                nullable=False,
                existing_server_default=sa.text('true'))
-    op.drop_index(op.f('ix_users_facebook_id'), table_name='users')
-    op.drop_index(op.f('ix_users_google_id'), table_name='users')
-    op.drop_column('users', 'is_password_set')
-    op.drop_column('users', 'google_id')
-    op.drop_column('users', 'facebook_id')
+    op.drop_index(op.f('ix_users_facebook_id'), table_name='users', if_exists=True)
+    op.drop_index(op.f('ix_users_google_id'), table_name='users', if_exists=True)
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS is_password_set")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS google_id")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS facebook_id")
     op.drop_constraint(op.f('videos_user_id_fkey'), 'videos', type_='foreignkey')
     op.create_foreign_key(None, 'videos', 'users', ['user_id'], ['user_id'], ondelete='CASCADE')
     # ### end Alembic commands ###
