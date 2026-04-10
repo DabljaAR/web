@@ -1,5 +1,6 @@
 import gc
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -14,10 +15,13 @@ from app.core import init_db
 from app.core.rate_limiter import limiter
 from app.core.router import router as core_router
 from app.dependencies import connect_to_db, disconnect_from_db
-from app.nmt.router import router as nmt_router
-from app.stt.router import router as stt_router
-from app.tts.router import router as tts_router
 from app.shared.logging import setup_logging
+
+_INSTALL_AI = os.getenv("INSTALL_AI", "false").lower() == "true"
+if _INSTALL_AI:
+    from app.nmt.router import router as nmt_router
+    from app.stt.router import router as stt_router
+    from app.tts.router import router as tts_router
 from app.shared.middleware import ExceptionLoggingMiddleware
 
 logger = logging.getLogger(__name__)
@@ -126,9 +130,10 @@ app.add_middleware(
 app.include_router(core_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 app.include_router(job_router, prefix="/api")
-app.include_router(stt_router)  # Re-enabled, has prefix="/api/transcription"
-app.include_router(nmt_router, prefix="/api")
-app.include_router(tts_router, prefix="/api/tts")  # Re-enabled
+if _INSTALL_AI:
+    app.include_router(stt_router)  # has prefix="/api/transcription"
+    app.include_router(nmt_router, prefix="/api")
+    app.include_router(tts_router, prefix="/api/tts")
 
 # ---------------------------------------------------------------------------
 # Root endpoint

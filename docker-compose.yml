@@ -63,6 +63,7 @@ services:
       dockerfile: Dockerfile
     container_name: dabljaar_backend
     environment:
+      INSTALL_AI: "true"
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
       ALGORITHM: HS256
@@ -151,6 +152,7 @@ services:
     entrypoint: []
     command: celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=1 --hostname=worker-ai@%h
     environment:
+      INSTALL_AI: "true"
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
       CELERY_BROKER_URL: redis://redis:6379/0
