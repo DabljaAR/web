@@ -25,9 +25,11 @@ SELECTED_PYTHON_BIN=""
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+FRONTEND_NODE_MAJOR="${FRONTEND_NODE_MAJOR:-24}"
 FLOWER_PORT="${FLOWER_PORT:-5555}"
 MINIO_PORT="${MINIO_PORT:-9000}"
 MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9001}"
+NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
 PG_DB="${PG_DB:-dabljaar}"
 PG_USER="${PG_USER:-postgres}"
@@ -322,49 +324,56 @@ install_uv_if_needed() {
     log_ok "uv installed ($(uv --version))."
 }
 
+ensure_nvm_loaded() {
+    if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
+        die "nvm is not installed or nvm.sh not found at $NVM_DIR/nvm.sh"
+    fi
+    # shellcheck disable=SC1090
+    source "$NVM_DIR/nvm.sh"
+}
+
+use_frontend_node() {
+    ensure_nvm_loaded
+    if ! nvm use "$FRONTEND_NODE_MAJOR" >/dev/null 2>&1; then
+        die "Node v${FRONTEND_NODE_MAJOR} is not available in nvm. Run './start.sh setup' to install it."
+    fi
+}
+
 install_node_if_needed() {
-    local has_node=0
-    if command -v node >/dev/null 2>&1; then
-        has_node=1
-        local version
-        version="$(node -v 2>/dev/null | sed 's/^v//' || echo '0')"
-        if version_ge "$version" "20.0.0"; then
-            log_ok "Node.js $version detected."
-            return
-        fi
-        log_warn "Node.js $version detected (<20). Upgrading to Node.js 20.x."
-    fi
-
-    if [[ "$has_node" -eq 0 ]]; then
-        log_info "Node.js not found. Installing Node.js 20.x."
-    fi
-
     if ! command -v curl >/dev/null 2>&1; then
-        die "curl is required to install Node.js but not found."
+        die "curl is required to install nvm/Node.js but not found."
     fi
 
-    log_info "Adding NodeSource repository..."
-    local setup_script
-    if ! setup_script="$(mktemp /tmp/setup_node.XXXXXX)" || ! curl -fsSL https://deb.nodesource.com/setup_20.x -o "$setup_script"; then
-        die "Failed to download NodeSource setup script. Check your internet connection."
-    fi
-    
-    if [[ "$EUID" -eq 0 ]]; then
-        bash "$setup_script" || die "Failed to configure NodeSource repository."
+    if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
+        log_info "Installing nvm..."
+        if ! curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash; then
+            die "Failed to install nvm. Check your internet connection."
+        fi
     else
-        sudo bash "$setup_script" || die "Failed to configure NodeSource repository."
+        log_ok "nvm already installed."
     fi
-    rm -f "$setup_script"
 
-    if ! run_with_sudo apt-get install -y nodejs; then
-        die "Failed to install Node.js. Check apt output above."
+    ensure_nvm_loaded
+
+    if ! nvm use "$FRONTEND_NODE_MAJOR" >/dev/null 2>&1; then
+        log_info "Installing Node.js v${FRONTEND_NODE_MAJOR} via nvm..."
+        if ! nvm install "$FRONTEND_NODE_MAJOR"; then
+            die "Failed to install Node.js v${FRONTEND_NODE_MAJOR} with nvm."
+        fi
     fi
+
+    nvm alias default "$FRONTEND_NODE_MAJOR" >/dev/null 2>&1 || true
+    nvm use "$FRONTEND_NODE_MAJOR" >/dev/null 2>&1 || die "Failed to activate Node.js v${FRONTEND_NODE_MAJOR}."
 
     require_cmd node
     require_cmd npm
     local final_version
-    final_version="$(node -v 2>/dev/null || echo 'unknown')"
-    log_ok "Node.js $final_version installed."
+    final_version="$(node -v 2>/dev/null | sed 's/^v//' || echo 'unknown')"
+    local major="${final_version%%.*}"
+    if [[ "$major" != "$FRONTEND_NODE_MAJOR" ]]; then
+        die "Activated Node.js version is $final_version, expected v${FRONTEND_NODE_MAJOR}. Check your nvm setup."
+    fi
+    log_ok "Node.js v$final_version ready via nvm."
 }
 
 install_minio_if_needed() {
@@ -454,7 +463,7 @@ ensure_python_env() {
 }
 
 ensure_frontend_deps() {
-    require_cmd npm
+    use_frontend_node
 
     if [[ ! -d "$FRONTEND_DIR" ]]; then
         die "Frontend directory not found at $FRONTEND_DIR"
@@ -505,7 +514,8 @@ ensure_system_services() {
 ensure_postgres_database() {
     log_info "Ensuring PostgreSQL role/database exist."
 
-    if ! run_with_sudo -u postgres psql --no-password >/dev/null 2>&1; then
+    if ! run_with_sudo -u postgres env PGCONNECT_TIMEOUT=5 \
+        psql -w -d postgres -tAc "SELECT 1" >/dev/null 2>&1; then
         die "Cannot connect to PostgreSQL. Ensure the service is running: sudo systemctl status postgresql"
     fi
 
@@ -570,7 +580,7 @@ start_managed_process() {
     log_info "Starting $name"
     (
         cd "$working_dir"
-        exec bash -lc "$command"
+        exec setsid bash -c "$command"
     ) >>"$log_file" 2>&1 &
 
     local pid=$!
@@ -603,8 +613,8 @@ stop_managed_process() {
         return
     fi
 
-    log_info "Stopping $name (pid $pid)."
-    kill "$pid" >/dev/null 2>&1 || true
+    log_info "Stopping $name (pid/pgid $pid)."
+    kill -- -"$pid" >/dev/null 2>&1 || kill "$pid" >/dev/null 2>&1 || true
 
     for _ in $(seq 1 20); do
         if ! is_pid_running "$pid"; then
@@ -616,8 +626,24 @@ stop_managed_process() {
     done
 
     log_warn "$name did not stop gracefully; sending SIGKILL."
-    kill -9 "$pid" >/dev/null 2>&1 || true
+    kill -9 -- -"$pid" >/dev/null 2>&1 || kill -9 "$pid" >/dev/null 2>&1 || true
     rm -f "$pid_file"
+}
+
+kill_port_orphans() {
+    local port="$1"
+    local pids=""
+
+    # Extract unique listeners on the requested TCP port.
+    pids="$(ss -tlnp "( sport = :$port )" 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u | tr '\n' ' ' | xargs || true)"
+
+    if [[ -z "$pids" ]]; then
+        return
+    fi
+
+    log_warn "Port $port already bound by PID(s): $pids. Attempting cleanup."
+    kill $pids >/dev/null 2>&1 || true
+    sleep 1
 }
 
 print_runtime_summary() {
@@ -680,11 +706,13 @@ cmd_run() {
 
     log_info "Starting managed services..."
 
+    kill_port_orphans "$MINIO_PORT"
     start_managed_process "minio" "$ROOT_DIR" "MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin minio server '$MINIO_DATA_DIR' --address ':$MINIO_PORT' --console-address ':$MINIO_CONSOLE_PORT'"
     if ! wait_for_port "$MINIO_PORT" 30 1; then
         die "MinIO failed to become ready on port $MINIO_PORT. Check log: $LOG_DIR/minio.log"
     fi
 
+    kill_port_orphans "$BACKEND_PORT"
     start_managed_process "backend" "$BACKEND_DIR" "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True uv run uvicorn app.main:app --host '$BACKEND_HOST' --port '$BACKEND_PORT'"
     if ! wait_for_port "$BACKEND_PORT" 30 1; then
         die "Backend failed to become ready on port $BACKEND_PORT. Check log: $LOG_DIR/backend.log"
@@ -695,11 +723,19 @@ cmd_run() {
     start_managed_process "worker_nmt" "$BACKEND_DIR" "uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_nmt,ai_tts,pipeline --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
 
     if [[ "$ENABLE_FLOWER" -eq 1 ]]; then
-        start_managed_process "flower" "$BACKEND_DIR" "FLOWER_UNAUTHENTICATED_API=true uv run celery -A app.jobs.celery_app flower --port='$FLOWER_PORT'"
+        if uv run python -c "import flower" >/dev/null 2>&1; then
+            start_managed_process "flower" "$BACKEND_DIR" "FLOWER_UNAUTHENTICATED_API=true uv run celery -A app.jobs.celery_app flower --port='$FLOWER_PORT'"
+        else
+            log_warn "Flower is not installed in the backend environment. Skipping Flower startup."
+            log_warn "To enable Flower, run: cd backend && uv sync --group dev"
+            log_warn "Or run without Flower: ./start.sh run --no-flower"
+        fi
     fi
 
     if [[ "$ENABLE_FRONTEND" -eq 1 ]]; then
-        start_managed_process "frontend" "$FRONTEND_DIR" "npm run dev -- --host 0.0.0.0 --port '$FRONTEND_PORT'"
+        kill_port_orphans "$FRONTEND_PORT"
+        rm -rf "$FRONTEND_DIR/node_modules/.vite"
+        start_managed_process "frontend" "$FRONTEND_DIR" "export NVM_DIR='$NVM_DIR'; [ -s '$NVM_DIR/nvm.sh' ] && . '$NVM_DIR/nvm.sh'; nvm use '$FRONTEND_NODE_MAJOR' >/dev/null && npm run dev -- --host 0.0.0.0 --port '$FRONTEND_PORT'"
     fi
 
     print_runtime_summary

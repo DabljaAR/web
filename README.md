@@ -46,6 +46,13 @@ Optional flags:
 ./start.sh run --no-frontend --no-flower
 ```
 
+Note: Flower is an optional monitoring UI. To enable it in native mode, install backend dev extras:
+
+```bash
+cd backend
+uv sync --group dev
+```
+
 The script is idempotent and manages local runtime files under `.runtime/`.
 
 ## Technologies Used

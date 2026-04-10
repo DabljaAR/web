@@ -86,6 +86,7 @@ uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt,pipeline,a
 Flower:
 
 ```bash
+uv sync --group dev
 uv run celery -A app.jobs.celery_app flower --port=5555
 ```
 
