@@ -5,7 +5,7 @@ Sync transcription (transcribe_file) is unchanged — still runs in-process.
 Async transcription (submit_async_transcription) now:
   1. Looks up the Video record for the supplied video_id
   2. Creates a Job row (JobType.STT_TRANSCRIBE)
-  3. Dispatches transcribe_task to the ai_stt Celery queue
+  3. Dispatches ``stt_transcribe`` to the ai_stt Celery queue
   4. Returns the job_id for polling
 """
 
@@ -180,8 +180,8 @@ class TranscriptionService:
         await self.db.refresh(job)
 
         # 3. Dispatch Celery task
-        from app.jobs.tasks.pipeline import stt_transcribe as transcribe_task
-        celery_result = transcribe_task.apply_async(
+        from app.jobs.tasks.pipeline import stt_transcribe
+        celery_result = stt_transcribe.apply_async(
             kwargs={
                 "job_id": job.id,
                 "video_id": video_id,
