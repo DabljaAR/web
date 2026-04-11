@@ -11,9 +11,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from celery import chain
+
 from app.jobs.celery_app import celery_app
 from app.jobs.tasks.base import BaseJobTask
 from app.jobs.tasks.buffer import SegmentBuffer
+from app.jobs.tasks.nmt import nmt_translate
 from app.jobs.models import JobStatus
 
 logger = logging.getLogger(__name__)
@@ -41,8 +44,8 @@ def stt_transcribe(
     """
     Transcribe the audio track of *video_id*.
 
-    Downloads the file from MinIO, runs Whisper via the shared
-    ``transcribe_task`` model instance (loaded once per worker), then
+    Downloads the file from MinIO, runs Whisper via a
+    ``WhisperModelManager`` instance (loaded once per worker), then
     stores the result in the Job row.
 
     As segments are transcribed, they are immediately dispatched to the
@@ -426,6 +429,7 @@ def dispatch_full_dubbing_pipeline(
     """
     pipeline = chain(
         stt_transcribe.s(job_id, video_id, source_lang, target_lang),
+        nmt_translate.s(source_lang=source_lang, target_lang=target_lang),
         tts_synthesize.s(video_id, target_lang=target_lang),
         dubbing_merge.si(job_id, video_id, audio_key=None),
     )

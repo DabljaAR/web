@@ -2,7 +2,6 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Any, Optional
-from uuid import uuid4
 
 from app.core.db import AsyncSessionLocal
 from app.jobs.celery_app import celery_app
@@ -41,24 +40,18 @@ def nmt_translate(
       - The dispatcher is the only component allowed to enqueue Celery tasks.
       - This task is invoked with ``job_id`` as the first argument.
     """
-    # Compatibility: if someone calls this with a dict (legacy chain), extract job_id.
+    # Compatibility: Celery chain passes prior task return (dict) as first arg.
     if isinstance(job_id, dict):
         job_id = job_id.get("job_id")
 
-    self._run_sync(
-        self._patch_job(
-            job_id,
-            JobStatus.PROCESSING,
-            celery_task_id=self.request.id,
-            started_at=datetime.utcnow(),
-        )
-    )
+    if not job_id:
+        raise ValueError("nmt_translate: job_id is required")
 
     async def _load_context():
         async with AsyncSessionLocal() as db:
             job = await db.get(Job, job_id)
             if not job:
-                raise ValueError(f"NMT job {job_id} not found")
+                raise ValueError(f"Job {job_id} not found")
 
             parent = None
             if job.parent_job_id:
@@ -67,7 +60,31 @@ def nmt_translate(
 
     nmt_job, parent_job = self._run_sync(_load_context())
 
-    if not parent_job or not parent_job.output_data:
+    # Dedicated NMT row: mark PROCESSING and read STT output from parent.
+    if nmt_job.job_type == JobType.NMT_TRANSLATE:
+        self._patch_job(
+            job_id,
+            JobStatus.PROCESSING,
+            celery_task_id=self.request.id,
+            started_at=datetime.utcnow(),
+        )
+    # Chained after ``stt_transcribe``: same row is STT — already COMPLETED; do not
+    # flip it back to PROCESSING. Use this job's persisted output_data as STT source.
+    elif nmt_job.job_type == JobType.STT_TRANSCRIBE:
+        pass
+    else:
+        self._patch_job(
+            job_id,
+            JobStatus.PROCESSING,
+            celery_task_id=self.request.id,
+            started_at=datetime.utcnow(),
+        )
+
+    if nmt_job.job_type == JobType.STT_TRANSCRIBE and (nmt_job.output_data or {}).get(
+        "segments"
+    ):
+        parent_job = nmt_job
+    elif not parent_job or not parent_job.output_data:
         raise ValueError(f"NMT job {job_id} has no parent STT output")
 
     parent_output = parent_job.output_data or {}
@@ -121,19 +138,57 @@ def nmt_translate(
             }
         )
 
-    output = {
-        "job_id": job_id,
-        "video_id": nmt_job.video_id,
-        "source_job_id": parent_job.id,
-        "source_lang": resolved_source_lang,
-        "target_lang": resolved_target_lang,
-        "segments": output_segments,
-        "metadata": {
-            **(translated.get("metadata") or {}),
+    if nmt_job.job_type == JobType.STT_TRANSCRIBE:
+        existing = dict(nmt_job.output_data or {})
+        merged_segments = list(existing.get("segments") or [])
+        for i, out_seg in enumerate(output_segments):
+            if i < len(merged_segments):
+                merged_segments[i]["translated_text"] = out_seg.get(
+                    "translated_text"
+                ) or merged_segments[i].get("translated_text", "")
+            else:
+                merged_segments.append(
+                    {
+                        "start": out_seg.get("start"),
+                        "end": out_seg.get("end"),
+                        "text": out_seg.get("original_text", ""),
+                        "translated_text": out_seg.get("translated_text", ""),
+                    }
+                )
+        new_translated = " ".join(
+            s.get("translated_text", "") for s in merged_segments
+        ).strip()
+        output = {
+            **existing,
+            "job_id": job_id,
+            "video_id": nmt_job.video_id,
+            "source_job_id": parent_job.id,
             "source_lang": resolved_source_lang,
             "target_lang": resolved_target_lang,
-        },
-    }
+            "segments": merged_segments,
+            "translated_transcript": new_translated
+            or existing.get("translated_transcript", ""),
+            "metadata": {
+                **(existing.get("metadata") or {}),
+                **(translated.get("metadata") or {}),
+                "source_lang": resolved_source_lang,
+                "target_lang": resolved_target_lang,
+            },
+        }
+    else:
+        output = {
+            "job_id": job_id,
+            "video_id": nmt_job.video_id,
+            "source_job_id": parent_job.id,
+            "source_lang": resolved_source_lang,
+            "target_lang": resolved_target_lang,
+            "segments": output_segments,
+            "metadata": {
+                **(translated.get("metadata") or {}),
+                "source_lang": resolved_source_lang,
+                "target_lang": resolved_target_lang,
+            },
+        }
 
     self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
     self.update_progress(job_id, 95.0)
