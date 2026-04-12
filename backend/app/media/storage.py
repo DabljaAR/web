@@ -239,16 +239,19 @@ class S3StorageService:
             scheme = "https" if settings.S3_SECURE else "http"
             raw_endpoint = f"{scheme}://{raw_endpoint}"
         self.endpoint_url: str | None = raw_endpoint or None
-        self.access_key = settings.S3_ACCESS_KEY_ID
-        self.secret_key = settings.S3_SECRET_ACCESS_KEY
+        self.access_key = (settings.S3_ACCESS_KEY_ID or "").strip()
+        self.secret_key = (settings.S3_SECRET_ACCESS_KEY or "").strip()
         self.bucket_name = settings.S3_MEDIA_BUCKET
         self.region = (settings.S3_REGION or "").strip() or None
         self.session = aioboto3.Session()
         from botocore.config import Config
 
+        # GCS / R2: botocore 1.36+ default checksum headers break S3-interop PutObject.
         self.config = Config(
             signature_version="s3v4",
             s3={"addressing_style": "path"},
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
         )
 
     def _client_kwargs(self) -> dict:
