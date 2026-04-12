@@ -38,7 +38,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local /usr/local
 COPY . .
 
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Create non-root user, own /app, and pre-create the model-cache dir so
+# Docker initialises the named volume with the correct ownership on first start.
+RUN useradd -m -u 1000 appuser \
+    && chown -R appuser:appuser /app \
+    && mkdir -p /model-cache \
+    && chown appuser:appuser /model-cache
 
 COPY --chown=appuser:appuser --chmod=755 entrypoint.sh /app/entrypoint.sh
 

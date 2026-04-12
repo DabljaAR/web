@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 import torch
 from typing import List, Optional
 from threading import Lock
@@ -9,8 +8,6 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from langdetect import detect, DetectorFactory
 
 from pathlib import Path
-import shutil
-import tempfile
 from app.media.storage import get_storage_service, S3StorageService
 from app.config import settings
 
@@ -18,10 +15,6 @@ from app.config import settings
 DetectorFactory.seed = 0
 
 logger = logging.getLogger(__name__)
-
-# v4 model paths
-MODEL_MOUNT_V4 = os.path.expanduser("~/minio-model/model")
-MODEL_LOCAL_V4 = os.path.abspath("models/nmt-v4")
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -85,72 +78,79 @@ def _download_from_minio(storage, file_key: str, local_path: Path, bucket_name: 
         except (NotImplementedError, Exception):
              return None
 
-def resolve_default_model():
-    """
-    Decide which model to use based on available paths.
-    Tries: Mount -> Local Download -> Old Version -> HF Hub.
-    """
-    # Use print() here because logger might not be fully configured at import time
-    print(f"[NMT] Starting model resolution. Local path: {MODEL_LOCAL_V4}")
-    
-    # 1. Check mounted drive (Priority)
-    if os.path.exists(MODEL_MOUNT_V4) and any(os.scandir(MODEL_MOUNT_V4)):
-        logger.info(f"Using model from mounted drive: {MODEL_MOUNT_V4}")
-        return MODEL_MOUNT_V4
-    
-    # 2. Check local downloaded path - VALIDATE INTEGRITY
-    if os.path.exists(MODEL_LOCAL_V4) and os.path.isdir(MODEL_LOCAL_V4):
-        # Check for critical files. If missing, the cache is corrupted/partial
-        has_model = any(os.path.exists(os.path.join(MODEL_LOCAL_V4, f)) for f in ["model.safetensors", "pytorch_model.bin", "model.bin"])
-        has_tokenizer = any(os.path.exists(os.path.join(MODEL_LOCAL_V4, f)) for f in ["tokenizer.json", "tokenizer_config.json"])
-        
-        if has_model and has_tokenizer:
-            logger.info(f"Using verified model from local cache: {MODEL_LOCAL_V4}")
-            return MODEL_LOCAL_V4
-        else:
-            logger.warning(f"[NMT] Local cache at {MODEL_LOCAL_V4} is incomplete (has_model={has_model}, has_tokenizer={has_tokenizer}). Skipping.")
+# ---------------------------------------------------------------------------
+# Model integrity validation
+# ---------------------------------------------------------------------------
 
-    # 3. Attempt download from MinIO
-    # Based on findings, model is likely in bucket 'model' or 'dablajaar' under 'model/'
-    model_url = os.getenv("NMT_MODEL_URL", "http://localhost:9001/browser/model/")
-    model_bucket = os.getenv("NMT_MODEL_BUCKET", "model")
-    model_key = os.getenv("NMT_MODEL_KEY", "")
+_REQUIRED_WEIGHT_FILES    = {"model.safetensors", "pytorch_model.bin"}
+_REQUIRED_TOKENIZER_FILES = {"tokenizer.json", "tokenizer_config.json"}
 
-    if settings.MINIO_ENDPOINT:
+
+def _validate_model_dir(path: str) -> bool:
+    """Return True only if *path* contains at least one weight file and one tokenizer file."""
+    if not os.path.isdir(path):
+        return False
+    files = set(os.listdir(path))
+    return bool(files & _REQUIRED_WEIGHT_FILES) and bool(files & _REQUIRED_TOKENIZER_FILES)
+
+
+def resolve_default_model() -> str:
+    """
+    Resolve the NMT model path using a priority chain:
+
+    1. Local cache (``NMT_MODEL_LOCAL_PATH``) — fast, no network.
+    2. MinIO download → populate local cache (requires ``MINIO_ENDPOINT`` + ``NMT_MODEL_KEY``).
+    3. HuggingFace Hub (``NMT_HF_FALLBACK``) — requires internet access.
+    """
+    local_path  = settings.NMT_MODEL_LOCAL_PATH
+    bucket      = settings.NMT_MODEL_BUCKET
+    key         = settings.NMT_MODEL_KEY
+    hf_fallback = settings.NMT_HF_FALLBACK
+
+    logger.info(
+        "[NMT] Resolving model | local_path=%s bucket=%s key=%s",
+        local_path, bucket, key,
+    )
+
+    # 1. Local cache hit — fastest path, no I/O beyond a directory listing
+    if _validate_model_dir(local_path):
+        logger.info("[NMT] Using verified local cache: %s", local_path)
+        return local_path
+
+    # 2. MinIO download
+    if settings.MINIO_ENDPOINT and key:
+        logger.info(
+            "[NMT] Downloading from MinIO | bucket=%s key=%s → %s",
+            bucket, key, local_path,
+        )
         try:
-            from urllib.parse import urlparse, unquote
-            if model_url:
-                parsed_url = urlparse(model_url)
-                path_parts = [p for p in unquote(parsed_url.path).split('/') if p]
-                if len(path_parts) >= 2 and path_parts[0] == "browser":
-                    model_bucket = path_parts[1]
-                    model_key = "/".join(path_parts[2:]) if len(path_parts) > 2 else ""
-
-            logger.info(f"[NMT] Attempting MinIO download | bucket={model_bucket} | key={model_key}")
-            os.makedirs(MODEL_LOCAL_V4, exist_ok=True)
-            
+            os.makedirs(local_path, exist_ok=True)
             storage = get_storage_service()
-            _download_from_minio(storage, model_key, Path(MODEL_LOCAL_V4), bucket_name=model_bucket)
-            
-            # Check if download succeeded - tokenizer.json or tokenizer_config.json
-            if any(os.path.exists(os.path.join(MODEL_LOCAL_V4, f)) for f in ["tokenizer.json", "tokenizer_config.json"]):
-                logger.info(f"Successfully downloaded model from MinIO to {MODEL_LOCAL_V4}")
-                return MODEL_LOCAL_V4
-            else:
-                logger.warning(f"[NMT] Download finished but critical skip: tokenizer files missing in {MODEL_LOCAL_V4}")
-        except Exception as e:
-            logger.error(f"[NMT] MinIO Download Error: {e}")
+            _download_from_minio(storage, key, Path(local_path), bucket_name=bucket)
+            if _validate_model_dir(local_path):
+                logger.info("[NMT] MinIO download complete — using %s", local_path)
+                return local_path
+            logger.warning(
+                "[NMT] MinIO download finished but model validation failed at %s "
+                "(missing weight or tokenizer files). Falling back to HF Hub.",
+                local_path,
+            )
+        except Exception as exc:
+            logger.error("[NMT] MinIO download failed: %s", exc)
     else:
-        logger.warning("[NMT] No MINIO_ENDPOINT configured.")
+        logger.warning(
+            "[NMT] Skipping MinIO download (MINIO_ENDPOINT=%r, NMT_MODEL_KEY=%r). "
+            "Set both env vars to use a custom model without internet access.",
+            settings.MINIO_ENDPOINT, key,
+        )
 
-    # 4. Check v3
-    if os.path.exists("nllb-edu-en-ar-finetuned-v3"):
-        logger.info("[NMT] Falling back to v3 model.")
-        return "nllb-edu-en-ar-finetuned-v3"
-        
-    # 5. Last resort: HF Hub
-    logger.info("[NMT] FALLBACK: Using HuggingFace Hub (Online). Check if your disk is full!")
-    return "facebook/nllb-200-distilled-600M"
+    # 3. HuggingFace Hub — last resort
+    logger.warning(
+        "[NMT] Falling back to HuggingFace Hub: %s. "
+        "Configure NMT_MODEL_BUCKET + NMT_MODEL_KEY to avoid this.",
+        hf_fallback,
+    )
+    return hf_fallback
 
 
 # ===========================================================================
@@ -189,10 +189,12 @@ class NLLBTranslatorWrapper:
         if NLLBTranslatorWrapper._tokenizer is None:
             with NLLBTranslatorWrapper._lock:
                 if NLLBTranslatorWrapper._tokenizer is None:
-                    logger.info(f"[NMT] Loading tokenizer from '{self.model_name}'")
+                    logger.info("[NMT] Loading tokenizer from '%s'", self.model_name)
+                    _local = os.path.isdir(self.model_name)
                     NLLBTranslatorWrapper._tokenizer = AutoTokenizer.from_pretrained(
                         self.model_name,
-                        local_files_only=os.path.isdir(self.model_name)
+                        local_files_only=_local,
+                        token=settings.HF_TOKEN or None,
                     )
         return NLLBTranslatorWrapper._tokenizer
 
@@ -202,19 +204,22 @@ class NLLBTranslatorWrapper:
         if NLLBTranslatorWrapper._model is None:
             with NLLBTranslatorWrapper._lock:
                 if NLLBTranslatorWrapper._model is None:
-                    logger.info(f"[NMT] Loading model from '{self.model_name}' on {self.device}")
-                    local_files_only = os.path.isdir(self.model_name)
-                    
-                    # Use float16 for significant VRAM savings (2.5GB -> 1.2GB)
-                    model_kwargs = {"local_files_only": local_files_only}
+                    logger.info("[NMT] Loading model from '%s' on %s", self.model_name, self.device)
+                    _local = os.path.isdir(self.model_name)
+
+                    # float16 saves ~1.3 GB VRAM on GPU
+                    model_kwargs: dict = {
+                        "local_files_only": _local,
+                        "token": settings.HF_TOKEN or None,
+                    }
                     if "cuda" in self.device:
                         model_kwargs["torch_dtype"] = torch.float16
-                    
+
                     NLLBTranslatorWrapper._model = AutoModelForSeq2SeqLM.from_pretrained(
                         self.model_name,
-                        **model_kwargs
+                        **model_kwargs,
                     ).to(self.device)
-                    logger.info("✅ NMT model loaded successfully (float16 if GPU)")
+                    logger.info("[NMT] Model loaded successfully (float16 if GPU)")
         return NLLBTranslatorWrapper._model
 
     def _get_device(self):

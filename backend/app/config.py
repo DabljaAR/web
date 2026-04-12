@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     TTS_DEFAULT_SWAY_COEF: float = float(os.getenv("TTS_DEFAULT_SWAY_COEF", "-1.0"))  # Sway sampling coefficient
     TTS_DEFAULT_TARGET_RMS: float = float(os.getenv("TTS_DEFAULT_TARGET_RMS", "0.12"))  # Target RMS for audio normalization
     
+    # ========== NEURAL MACHINE TRANSLATION (NMT) ==========
+    NMT_MODEL_LOCAL_PATH: str = os.getenv("NMT_MODEL_LOCAL_PATH", "/model-cache/nmt-v4")
+    NMT_MODEL_BUCKET: str     = os.getenv("NMT_MODEL_BUCKET", "model")
+    NMT_MODEL_KEY: str        = os.getenv("NMT_MODEL_KEY", "nmt-v4")
+    NMT_HF_FALLBACK: str      = os.getenv("NMT_HF_FALLBACK", "facebook/nllb-200-distilled-600M")
+
     # ========== HUGGINGFACE AUTHENTICATION ==========
     HF_TOKEN: str = os.getenv("HF_TOKEN", "")  # HuggingFace access token for model downloads
     

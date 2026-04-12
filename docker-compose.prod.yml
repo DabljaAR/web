@@ -111,7 +111,8 @@ services:
       dockerfile: Dockerfile.prod
       args:
         INSTALL_AI: "true"
-    volumes: []
+    volumes:
+      - nmt_model_cache:/model-cache
     environment:
       INSTALL_AI: "true"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
@@ -127,6 +128,11 @@ services:
       DEBUG: "false"
       STT_DEVICE: ${STT_DEVICE:-cpu}
       HABIBI_DEVICE: ${HABIBI_DEVICE:-cpu}
+      NMT_MODEL_LOCAL_PATH: /model-cache/nmt-v4
+      NMT_MODEL_BUCKET: ${NMT_MODEL_BUCKET:?NMT_MODEL_BUCKET is required in production}
+      NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
+      NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
+      HF_TOKEN: ${HF_TOKEN:-}
     tmpfs:
       - /tmp
     security_opt:
@@ -139,3 +145,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  nmt_model_cache:

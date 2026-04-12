@@ -164,9 +164,15 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      NMT_MODEL_LOCAL_PATH: /model-cache/nmt-v4
+      NMT_MODEL_BUCKET: ${NMT_MODEL_BUCKET:-model}
+      NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
+      NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
+      HF_TOKEN: ${HF_TOKEN:-}
     volumes:
       - ./backend:/app
       - /app/__pycache__
+      - nmt_model_cache:/model-cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -202,6 +208,7 @@ volumes:
   dabljaar_postgres_data:
   dabljaar_redis_data:
   dabljaar_minio_data:
+  nmt_model_cache:
 
 networks:
   dabljaar_network:
