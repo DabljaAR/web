@@ -246,7 +246,10 @@ class S3StorageService:
         self.session = aioboto3.Session()
         from botocore.config import Config
 
-        self.config = Config(signature_version="s3v4")
+        self.config = Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+        )
 
     def _client_kwargs(self) -> dict:
         """Common kwargs for every aioboto3 S3 client."""
