@@ -241,7 +241,7 @@ class S3StorageService:
         self.endpoint_url: str | None = raw_endpoint or None
         self.access_key = settings.S3_ACCESS_KEY_ID
         self.secret_key = settings.S3_SECRET_ACCESS_KEY
-        self.bucket_name = settings.S3_BUCKET_NAME
+        self.bucket_name = settings.S3_MEDIA_BUCKET
         self.region = (settings.S3_REGION or "").strip() or None
         self.session = aioboto3.Session()
         from botocore.config import Config

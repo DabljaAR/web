@@ -7,6 +7,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _env_s3_media_bucket() -> str:
+    """Resolve primary bucket for user media (uploads, pipeline, presigned URLs)."""
+    return (
+        os.getenv("S3_MEDIA_BUCKET")
+        or os.getenv("S3_BUCKET_NAME")
+        or os.getenv("MINIO_BUCKET_NAME")
+        or "dablaja-videos"
+    )
+
+
+def _env_s3_models_bucket() -> str:
+    """Resolve bucket for AI model artifacts (NMT weights from object storage; STT/TTS if added)."""
+    return os.getenv("S3_MODELS_BUCKET") or os.getenv("NMT_MODEL_BUCKET") or "model"
+
+
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
@@ -59,9 +74,12 @@ class Settings(BaseSettings):
     S3_SECRET_ACCESS_KEY: str = os.getenv(
         "S3_SECRET_ACCESS_KEY", os.getenv("MINIO_SECRET_KEY", "")
     )
-    S3_BUCKET_NAME: str = os.getenv(
-        "S3_BUCKET_NAME", os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
-    )
+    # Media vs models buckets (may be the same name). Primary env: S3_MEDIA_BUCKET / S3_MODELS_BUCKET.
+    S3_MEDIA_BUCKET: str = _env_s3_media_bucket()
+    S3_BUCKET_NAME: str = _env_s3_media_bucket()  # alias of S3_MEDIA_BUCKET for backward compatibility
+    # NMT (and future STT/TTS weights in object storage) use this bucket + model-specific keys/prefixes.
+    S3_MODELS_BUCKET: str = _env_s3_models_bucket()
+    NMT_MODEL_BUCKET: str = _env_s3_models_bucket()  # alias of S3_MODELS_BUCKET for backward compatibility
     S3_REGION: str = os.getenv("S3_REGION", "")
     S3_SECURE: bool = os.getenv(
         "S3_SECURE", os.getenv("MINIO_SECURE", "False")
@@ -106,7 +124,7 @@ class Settings(BaseSettings):
     
     # ========== NEURAL MACHINE TRANSLATION (NMT) ==========
     NMT_MODEL_LOCAL_PATH: str = os.getenv("NMT_MODEL_LOCAL_PATH", "/model-cache/nmt-v4")
-    NMT_MODEL_BUCKET: str     = os.getenv("NMT_MODEL_BUCKET", "model")
+    # Model object-storage prefix (bucket = S3_MODELS_BUCKET / NMT_MODEL_BUCKET above)
     NMT_MODEL_KEY: str        = os.getenv("NMT_MODEL_KEY", "nmt-v4")
     NMT_HF_FALLBACK: str      = os.getenv("NMT_HF_FALLBACK", "facebook/nllb-200-distilled-600M")
 

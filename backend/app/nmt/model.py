@@ -77,7 +77,7 @@ def resolve_default_model() -> str:
     3. HuggingFace Hub (``NMT_HF_FALLBACK``) — requires internet access.
     """
     local_path  = settings.NMT_MODEL_LOCAL_PATH
-    bucket      = settings.NMT_MODEL_BUCKET
+    bucket      = settings.S3_MODELS_BUCKET
     key         = settings.NMT_MODEL_KEY
     hf_fallback = settings.NMT_HF_FALLBACK
 
@@ -121,7 +121,7 @@ def resolve_default_model() -> str:
     # 3. HuggingFace Hub — last resort
     logger.warning(
         "[NMT] Falling back to HuggingFace Hub: %s. "
-        "Configure NMT_MODEL_BUCKET + NMT_MODEL_KEY to avoid this.",
+        "Configure S3_MODELS_BUCKET + NMT_MODEL_KEY to avoid this.",
         hf_fallback,
     )
     return hf_fallback

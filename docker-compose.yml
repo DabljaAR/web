@@ -78,6 +78,8 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
     ports:
       - "8000:8000"
@@ -130,6 +132,8 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
     volumes:
       - ./backend:/app
@@ -166,9 +170,10 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       NMT_MODEL_LOCAL_PATH: /model-cache/nmt-v4
-      NMT_MODEL_BUCKET: ${NMT_MODEL_BUCKET:-model}
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
       NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
       HF_TOKEN: ${HF_TOKEN:-}
