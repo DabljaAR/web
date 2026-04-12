@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-label="Video file">
+  <!-- Video camera / film rectangle -->
+  <rect x="2" y="5" width="14" height="14" rx="2"/>
+  <!-- Camera lens cap on right -->
+  <polyline points="16,10 22,7 22,17 16,14"/>
+</svg>

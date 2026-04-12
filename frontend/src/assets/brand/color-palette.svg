@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 460" role="img" aria-label="DabljaAR Brand Color Palette">
+  <!--
+    DabljaAR Brand Color Palette Reference Sheet
+    Use this file as a visual reference. Do not use as a runtime asset.
+  -->
+
+  <!-- Background -->
+  <rect width="760" height="460" fill="#F8FAFC"/>
+
+  <!-- ─── Title ─── -->
+  <text x="40" y="48" font-family="Cairo, system-ui, sans-serif" font-weight="700" font-size="22" fill="#1E1B4B">DabljaAR — Brand Color Palette</text>
+  <text x="40" y="70" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#64748B">Web · Presentation · Print</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- ROW 1 — Primary Colors                     -->
+  <!-- ═══════════════════════════════════════════ -->
+  <text x="40" y="105" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#64748B" letter-spacing="1.5">PRIMARY</text>
+
+  <!-- Indigo 700 — Brand Primary -->
+  <rect x="40"  y="115" width="100" height="100" rx="12" fill="#4338CA"/>
+  <text x="90"  y="235" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Brand Primary</text>
+  <text x="90"  y="250" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#4338CA</text>
+  <text x="90"  y="265" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Indigo 700</text>
+
+  <!-- Violet 600 — Brand Secondary -->
+  <rect x="160" y="115" width="100" height="100" rx="12" fill="#7C3AED"/>
+  <text x="210" y="235" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Brand Secondary</text>
+  <text x="210" y="250" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#7C3AED</text>
+  <text x="210" y="265" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Violet 600</text>
+
+  <!-- Amber 600 — AR Accent -->
+  <rect x="280" y="115" width="100" height="100" rx="12" fill="#D97706"/>
+  <text x="330" y="235" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">AR Accent</text>
+  <text x="330" y="250" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#D97706</text>
+  <text x="330" y="265" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Amber 600</text>
+
+  <!-- Navy 900 — Deep Dark -->
+  <rect x="400" y="115" width="100" height="100" rx="12" fill="#1E1B4B"/>
+  <text x="450" y="235" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Deep Dark</text>
+  <text x="450" y="250" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#1E1B4B</text>
+  <text x="450" y="265" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Indigo 950</text>
+
+  <!-- Indigo 100 — Soft Tint -->
+  <rect x="520" y="115" width="100" height="100" rx="12" fill="#E0E7FF" stroke="#C7D2FE" stroke-width="1"/>
+  <text x="570" y="235" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Soft Tint</text>
+  <text x="570" y="250" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#E0E7FF</text>
+  <text x="570" y="265" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">Indigo 100</text>
+
+  <!-- White Surface -->
+  <rect x="640" y="115" width="100" height="100" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="1.5"/>
+  <text x="690" y="235" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Surface</text>
+  <text x="690" y="250" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#FFFFFF</text>
+  <text x="690" y="265" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#94A3B8" text-anchor="middle">White</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- ROW 2 — Semantic / Status Colors           -->
+  <!-- ═══════════════════════════════════════════ -->
+  <text x="40" y="305" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#64748B" letter-spacing="1.5">SEMANTIC</text>
+
+  <!-- Success -->
+  <rect x="40"  y="315" width="100" height="60" rx="10" fill="#059669"/>
+  <text x="90"  y="392" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Success</text>
+  <text x="90"  y="407" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#059669</text>
+
+  <!-- Warning -->
+  <rect x="160" y="315" width="100" height="60" rx="10" fill="#D97706"/>
+  <text x="210" y="392" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Warning</text>
+  <text x="210" y="407" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#D97706</text>
+
+  <!-- Error -->
+  <rect x="280" y="315" width="100" height="60" rx="10" fill="#DC2626"/>
+  <text x="330" y="392" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Error</text>
+  <text x="330" y="407" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#DC2626</text>
+
+  <!-- Info -->
+  <rect x="400" y="315" width="100" height="60" rx="10" fill="#0891B2"/>
+  <text x="450" y="392" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Info</text>
+  <text x="450" y="407" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#0891B2</text>
+
+  <!-- ═══════════════════════════════════════════ -->
+  <!-- ROW 2 — Neutrals (right side)              -->
+  <!-- ═══════════════════════════════════════════ -->
+  <text x="520" y="305" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#64748B" letter-spacing="1.5">NEUTRAL</text>
+
+  <!-- Slate 600 — Body text -->
+  <rect x="520" y="315" width="100" height="60" rx="10" fill="#475569"/>
+  <text x="570" y="392" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Body Text</text>
+  <text x="570" y="407" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#475569</text>
+
+  <!-- Slate 100 — Background -->
+  <rect x="640" y="315" width="100" height="60" rx="10" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1"/>
+  <text x="690" y="392" font-family="Inter, system-ui, sans-serif" font-weight="600" font-size="11" fill="#1E1B4B" text-anchor="middle">Background</text>
+  <text x="690" y="407" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#475569" text-anchor="middle">#F1F5F9</text>
+
+  <!-- Footer note -->
+  <text x="40" y="450" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#94A3B8">DabljaAR Brand Kit · v1.0 · 2026</text>
+</svg>

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" role="img" aria-label="DabljaAR — AI Video Dubbing Platform">
+  <!--
+    DabljaAR Primary Logo (Horizontal)
+    Requires: Cairo font (Google Fonts) for best rendering
+    Colors: Indigo #4338CA · Violet #7C3AED · Amber #D97706 · Navy #1E1B4B
+  -->
+  <defs>
+    <linearGradient id="iconGrad" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#4338CA"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ── Icon mark (64×64 at 8,8) ── -->
+  <rect x="8" y="8" width="64" height="64" rx="14" fill="url(#iconGrad)"/>
+
+  <!-- Waveform bars (arch, centered at y=40 in global coords) -->
+  <rect x="20" y="28" width="5" height="24" rx="2.5" fill="white" opacity="0.70"/>
+  <rect x="29" y="22" width="5" height="36" rx="2.5" fill="white" opacity="0.85"/>
+  <rect x="38" y="16" width="5" height="48" rx="2.5" fill="white" opacity="1.00"/>
+  <rect x="47" y="22" width="5" height="36" rx="2.5" fill="white" opacity="0.85"/>
+  <rect x="56" y="28" width="5" height="24" rx="2.5" fill="white" opacity="0.70"/>
+
+  <!-- Amber AR accent dot on icon -->
+  <circle cx="62" cy="62" r="5" fill="#D97706"/>
+
+  <!-- ── Wordmark ── -->
+  <!-- "Dablja" in bold navy, "AR" in amber — single text run so they track naturally -->
+  <text
+    x="88" y="46"
+    font-family="Cairo, system-ui, sans-serif"
+    font-weight="700"
+    font-size="30"
+    letter-spacing="-0.5"
+  >
+    <tspan fill="#1E1B4B">Dablja</tspan><tspan fill="#D97706">AR</tspan>
+  </text>
+
+  <!-- Tagline -->
+  <text
+    x="89" y="63"
+    font-family="Inter, system-ui, sans-serif"
+    font-weight="500"
+    font-size="10"
+    fill="#6366F1"
+    letter-spacing="2.5"
+  >AI VIDEO DUBBING</text>
+</svg>
