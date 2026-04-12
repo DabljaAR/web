@@ -59,3 +59,25 @@
         -Server
     }
 }
+
+minio.{$DOMAIN} {
+    reverse_proxy minio:9001
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}
+
+flower.{$DOMAIN} {
+    reverse_proxy flower:5555
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+}
