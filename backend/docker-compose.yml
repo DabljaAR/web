@@ -70,6 +70,9 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
     ports:
       - "8000:8000"
@@ -101,6 +104,9 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
     volumes:
       - .:/app
       - /app/__pycache__
@@ -132,6 +138,9 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
     volumes:
       - .:/app
       - /app/__pycache__

@@ -67,6 +67,8 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-dablaja-videos}
       MINIO_SECURE: "false"
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-${MINIO_BUCKET_NAME:-dablaja-videos}}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       ENVIRONMENT: production
       DEBUG: "false"
@@ -99,6 +101,8 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-dablaja-videos}
       MINIO_SECURE: "false"
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-${MINIO_BUCKET_NAME:-dablaja-videos}}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       ENVIRONMENT: production
       DEBUG: "false"
@@ -126,13 +130,14 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-dablaja-videos}
       MINIO_SECURE: "false"
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-${MINIO_BUCKET_NAME:-dablaja-videos}}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       ENVIRONMENT: production
       DEBUG: "false"
       STT_DEVICE: ${STT_DEVICE:-cpu}
       SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
       NMT_MODEL_LOCAL_PATH: /model-cache/nmt-v4
-      NMT_MODEL_BUCKET: ${NMT_MODEL_BUCKET:?NMT_MODEL_BUCKET is required in production}
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
       NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
       HF_TOKEN: ${HF_TOKEN:-}
