@@ -1,27 +1,15 @@
 import { useState, useEffect } from 'react';
-import { dashboardService } from '../services/dashboardService';
+import { useFetch } from '../../../hooks/useFetch';
 
 export const useDashboard = () => {
   const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const { data, loading, error } = useFetch('/api/dashboard/stats');
 
   useEffect(() => {
-    const loadStats = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data = await dashboardService.getStats();
-        setStats(data);
-      } catch (err) {
-        setError(err.message || 'Failed to load dashboard stats');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadStats();
-  }, []);
+    if (data) {
+      setStats(data);
+    }
+  }, [data]);
 
   return {
     stats,
