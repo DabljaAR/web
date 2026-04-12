@@ -1,5 +1,6 @@
 # docker-compose.admin.yml
-# Admin overlay: bind-mounts MinIO and Flower ports to localhost only for secure access on the production host.
+# Optional fallback: bind MinIO and Flower ports to localhost only (e.g. SSH tunnel) when not using Caddy subdomains.
+# Preferred production path: Caddy proxies https://minio.DOMAIN and https://flower.DOMAIN (see Caddyfile + docker-compose.prod.yml).
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.admin.yml up -d
 services:
   minio:
