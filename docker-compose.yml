@@ -203,11 +203,17 @@ services:
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      # Milliseconds; default 1000 is too low when workers are still booting (especially celery-worker-ai).
+      FLOWER_INSPECT_TIMEOUT: ${FLOWER_INSPECT_TIMEOUT:-15000}
     ports:
       - "5555:5555"
     depends_on:
       redis:
         condition: service_healthy
+      celery-worker-media:
+        condition: service_started
+      celery-worker-ai:
+        condition: service_started
     restart: unless-stopped
     networks:
       - dabljaar_network

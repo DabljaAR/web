@@ -168,6 +168,7 @@ services:
     ports: []
     environment:
       FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:?FLOWER_BASIC_AUTH is required}
+      FLOWER_INSPECT_TIMEOUT: ${FLOWER_INSPECT_TIMEOUT:-15000}
 
 volumes:
   caddy_data:
