@@ -1,5 +1,5 @@
 import os
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
@@ -64,15 +64,15 @@ class Settings(BaseSettings):
         "STORAGE_BACKEND",
         "s3" if os.getenv("MINIO_ENDPOINT") else "local",
     )
-    # Generic S3 credentials — S3_* override MINIO_* when set.
-    S3_ENDPOINT_URL: str = os.getenv(
-        "S3_ENDPOINT_URL", os.getenv("MINIO_ENDPOINT", "")
+    # Generic S3 credentials — S3_* override MINIO_* when set (empty string = unset, for Docker Compose).
+    S3_ENDPOINT_URL: str = (os.getenv("S3_ENDPOINT_URL") or "").strip() or os.getenv(
+        "MINIO_ENDPOINT", ""
     )
-    S3_ACCESS_KEY_ID: str = os.getenv(
-        "S3_ACCESS_KEY_ID", os.getenv("MINIO_ACCESS_KEY", "")
+    S3_ACCESS_KEY_ID: str = (os.getenv("S3_ACCESS_KEY_ID") or "").strip() or os.getenv(
+        "MINIO_ACCESS_KEY", ""
     )
-    S3_SECRET_ACCESS_KEY: str = os.getenv(
-        "S3_SECRET_ACCESS_KEY", os.getenv("MINIO_SECRET_KEY", "")
+    S3_SECRET_ACCESS_KEY: str = (os.getenv("S3_SECRET_ACCESS_KEY") or "").strip() or os.getenv(
+        "MINIO_SECRET_KEY", ""
     )
     # Media vs models buckets (may be the same name). Primary env: S3_MEDIA_BUCKET / S3_MODELS_BUCKET.
     S3_MEDIA_BUCKET: str = _env_s3_media_bucket()
@@ -81,9 +81,20 @@ class Settings(BaseSettings):
     S3_MODELS_BUCKET: str = _env_s3_models_bucket()
     NMT_MODEL_BUCKET: str = _env_s3_models_bucket()  # alias of S3_MODELS_BUCKET for backward compatibility
     S3_REGION: str = os.getenv("S3_REGION", "")
-    S3_SECURE: bool = os.getenv(
-        "S3_SECURE", os.getenv("MINIO_SECURE", "False")
-    ).lower() == "true"
+    S3_SECURE: bool = (
+        (os.getenv("S3_SECURE") or os.getenv("MINIO_SECURE", "False")).lower() == "true"
+    )
+
+    @model_validator(mode="after")
+    def _s3_empty_env_falls_back_to_minio(self) -> "Settings":
+        """Docker Compose may set S3_* to empty strings; treat as unset and use MinIO_*."""
+        if not (self.S3_ENDPOINT_URL or "").strip():
+            object.__setattr__(self, "S3_ENDPOINT_URL", self.MINIO_ENDPOINT)
+        if not (self.S3_ACCESS_KEY_ID or "").strip():
+            object.__setattr__(self, "S3_ACCESS_KEY_ID", self.MINIO_ACCESS_KEY)
+        if not (self.S3_SECRET_ACCESS_KEY or "").strip():
+            object.__setattr__(self, "S3_SECRET_ACCESS_KEY", self.MINIO_SECRET_KEY)
+        return self
 
     # ========== LOCAL STORAGE CONFIGURATION ==========
     # Used when STORAGE_BACKEND=local (filesystem under LOCAL_STORAGE_DIR).
