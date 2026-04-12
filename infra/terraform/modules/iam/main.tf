@@ -17,10 +17,16 @@ resource "google_project_iam_member" "vm_roles" {
   member   = "serviceAccount:${google_service_account.vm.email}"
 }
 
-# Grant access to GCS bucket
-resource "google_storage_bucket_iam_member" "vm_bucket_access" {
+# Grant read/write access to GCS bucket (for downloading and uploading models)
+resource "google_storage_bucket_iam_member" "vm_bucket_read" {
   bucket = var.gcs_bucket
   role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.vm.email}"
+}
+
+resource "google_storage_bucket_iam_member" "vm_bucket_write" {
+  bucket = var.gcs_bucket
+  role   = "roles/storage.objectCreator"
   member = "serviceAccount:${google_service_account.vm.email}"
 }
 
