@@ -411,8 +411,9 @@ const Dashboard = () => {
 
       } catch (error) {
         console.error("Upload failed", error);
-        setUploadError("Upload failed: " + (error.message || "Unknown error"));
-        alert(t('dashboard.uploadError') || "Upload failed. Please try again.");
+        const errMsg = error.message || "Unknown error";
+        setUploadError("Upload failed: " + errMsg);
+        alert("Upload failed: " + errMsg);
       } finally {
         setIsUploading(false);
       }

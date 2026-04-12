@@ -21,9 +21,6 @@ export const authService = {
   refreshToken: async (refreshToken) => {
     return api.post('/auth/refresh', { refresh_token: refreshToken });
   },
-  forgotPassword: async (email) => {
-    return api.post('/auth/forgot-password', { email });
-  },
   updateUser: async (userId, userData) => {
     return api.put(`/users/${userId}`, userData);
   },

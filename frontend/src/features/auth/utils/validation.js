@@ -9,12 +9,6 @@ export const validatePassword = (password) => {
   return passwordRegex.test(password);
 };
 
-export const BCRYPT_MAX_PASSWORD_BYTES = 72;
-
-export const validatePasswordByteLength = (password) => {
-  return new TextEncoder().encode(password).length <= BCRYPT_MAX_PASSWORD_BYTES;
-};
-
 export const validateLoginForm = (formData) => {
   const errors = {};
   

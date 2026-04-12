@@ -1,10 +1,13 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../../hooks/useTranslation';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
 import MediaPreviewModal from '../../components/common/MediaPreviewModal';
+import VideoTasksModal from '../../components/common/VideoTasksModal';
+import RedubModal from '../../components/common/RedubModal';
 import { mediaService } from '../../services/mediaService';
+import taskService from '../../services/taskService';
 import '../../styles/history.css';
 
 const History = () => {
@@ -40,6 +43,14 @@ const History = () => {
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewJob, setPreviewJob] = useState(null);
   const [comparisonPreview, setComparisonPreview] = useState(null);
+
+  // Tasks Modal State
+  const [tasksModalOpen, setTasksModalOpen] = useState(false);
+  const [tasksModalVideo, setTasksModalVideo] = useState(null); // { id, title }
+
+  // Redub Modal State
+  const [redubModalOpen, setRedubModalOpen] = useState(false);
+  const [redubModalVideo, setRedubModalVideo] = useState(null); // { id, title }
 
   // Track deleting items
   const deletingIds = React.useRef(new Set());
@@ -322,7 +333,14 @@ const History = () => {
   };
 
   const handleRedub = (id) => {
-    alert(`${t('history.redub')} ${id} (Demo)`);
+    const item = historyItems.find(i => i.id === id);
+    if (!item) return;
+    setRedubModalVideo({ id: item.id, title: item.title });
+    setRedubModalOpen(true);
+  };
+
+  const handleRedubSubmit = async (videoId, outputType) => {
+    await taskService.startTask(videoId, outputType);
   };
 
   const handleDelete = async (id) => {
@@ -398,15 +416,6 @@ const History = () => {
     }
   };
 
-  const handleRetry = (id) => {
-    alert(`Retry video ${id} (Demo)`);
-  };
-
-  const handleCancelProcessing = (id) => {
-    if (window.confirm(t('history.cancelConfirm'))) {
-      alert(`Cancel processing video ${id} (Demo)`);
-    }
-  };
 
   const getStatusClass = (status) => {
     switch (status) {
@@ -697,6 +706,18 @@ const History = () => {
                     </div>
 
                     <div className="item-actions">
+                      {/* Tasks button — always visible so user can see task history */}
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          setTasksModalVideo({ id: item.id, title: item.title });
+                          setTasksModalOpen(true);
+                        }}
+                      >
+                        <span>📋</span>
+                        <span>Tasks</span>
+                      </button>
+
                       {item.status === 'completed' && (
                         <>
                           {item.transcriptUrl && item.translationUrl && (
@@ -809,6 +830,29 @@ const History = () => {
         primaryTitle={t('dashboard.previewTranscript') || 'Original Transcript'}
         type={previewJob?.mediaType}
         title={previewJob?.name}
+      />
+
+      {/* Tasks Modal */}
+      <VideoTasksModal
+        isOpen={tasksModalOpen}
+        onClose={() => {
+          setTasksModalOpen(false);
+          setTasksModalVideo(null);
+        }}
+        videoId={tasksModalVideo?.id}
+        videoTitle={tasksModalVideo?.title}
+      />
+
+      {/* Redub Modal */}
+      <RedubModal
+        isOpen={redubModalOpen}
+        onClose={() => {
+          setRedubModalOpen(false);
+          setRedubModalVideo(null);
+        }}
+        videoId={redubModalVideo?.id}
+        videoTitle={redubModalVideo?.title}
+        onSubmit={handleRedubSubmit}
       />
     </div >
   );
