@@ -78,6 +78,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
     ports:
       - "8000:8000"
     volumes:
@@ -129,6 +130,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
     volumes:
       - ./backend:/app
       - /app/__pycache__
@@ -164,6 +166,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       NMT_MODEL_LOCAL_PATH: /model-cache/nmt-v4
       NMT_MODEL_BUCKET: ${NMT_MODEL_BUCKET:-model}
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}

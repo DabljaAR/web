@@ -62,7 +62,7 @@ def stt_transcribe(
             "nmt_tasks_submitted": int,      # number of NMT tasks dispatched
         }
     """
-    from app.media.storage import S3StorageService, get_storage_service
+    from app.media.storage import get_storage_service
     from app.stt.models import WhisperModelManager
     from app.jobs.tasks.nmt import nmt_translate_segment
 
@@ -96,28 +96,16 @@ def stt_transcribe(
 
     self.update_progress(job_id, 10.0)
 
-    # ── 3. Download from MinIO ───────────────────────────────────────────────
+    # ── 3. Download from object storage (S3-compatible) or local uploads ───────
     with tempfile.TemporaryDirectory() as tmp_dir:
         suffix     = Path(file_key).suffix or ".mp3"
         local_path = Path(tmp_dir) / f"audio{suffix}"
 
-        if isinstance(storage, S3StorageService):
-            async def _download():
-                async with storage.session.client(
-                    "s3",
-                    endpoint_url=storage.endpoint_url,
-                    aws_access_key_id=storage.access_key,
-                    aws_secret_access_key=storage.secret_key,
-                ) as s3:
-                    await s3.download_file(
-                        storage.bucket_name, file_key, str(local_path)
-                    )
-
-            self._run_sync(_download())
-            logger.info("[STT pipeline] downloaded %s → %s", file_key, local_path)
-        else:
-            # Local storage — point directly at the file, no copy needed
+        downloaded = self._run_sync(storage.download(file_key, str(local_path)))
+        if not downloaded:
             local_path = Path(storage.get_absolute_path(file_key))
+        else:
+            logger.info("[STT pipeline] downloaded %s → %s", file_key, local_path)
 
         self.update_progress(job_id, 25.0)
 

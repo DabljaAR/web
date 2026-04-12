@@ -336,7 +336,7 @@ Set in environment:
 
 ```env
 STT_DEVICE=cuda
-HABIBI_DEVICE=cuda
+SILMA_DEVICE=cuda
 STT_COMPUTE_TYPE=float16
 ```
 

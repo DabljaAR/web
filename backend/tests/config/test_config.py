@@ -58,7 +58,7 @@ class TestSettings:
         assert settings.LOG_MAX_BYTES > 0
         assert settings.LOG_BACKUP_COUNT > 0
         assert isinstance(settings.LOG_ENABLE_CONSOLE, bool)
-        assert isinstance(settings.LOG_ENABLE_FILE, bool)
+        assert isinstance(settings.LOG_TO_FILE, bool)
     
     def test_stt_model_size_default(self):
         """Test STT_MODEL_SIZE default value."""
