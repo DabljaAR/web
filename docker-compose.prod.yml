@@ -69,6 +69,11 @@ services:
       MINIO_SECURE: "false"
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-${MINIO_BUCKET_NAME:-dablaja-videos}}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_SECURE: ${S3_SECURE:-false}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       ENVIRONMENT: production
       DEBUG: "false"
@@ -103,6 +108,11 @@ services:
       MINIO_SECURE: "false"
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-${MINIO_BUCKET_NAME:-dablaja-videos}}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_SECURE: ${S3_SECURE:-false}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       ENVIRONMENT: production
       DEBUG: "false"
@@ -132,6 +142,11 @@ services:
       MINIO_SECURE: "false"
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-${MINIO_BUCKET_NAME:-dablaja-videos}}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_SECURE: ${S3_SECURE:-false}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       ENVIRONMENT: production
       DEBUG: "false"
