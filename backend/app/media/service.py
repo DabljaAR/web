@@ -9,7 +9,7 @@ from fastapi import UploadFile, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, and_, or_, exists, func, not_
 from app.media.models import Video, VideoStatus, MediaType
-from app.media.storage import get_storage_service, S3StorageService
+from app.media.storage import get_storage_service
 from app.media.ffmpeg_service import FFmpegService, MediaProcessingError
 from app.core.db import AsyncSessionLocal
 from app.jobs.models import Job, JobStatus, JobType
@@ -39,13 +39,9 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
             # 2. Prepare file
             with tempfile.TemporaryDirectory() as temp_dir:
                 local_video_path = Path(temp_dir) / "input_video"
-                
-                if isinstance(storage, S3StorageService):
-                    async with storage.session.client("s3", endpoint_url=storage.endpoint_url, aws_access_key_id=storage.access_key, aws_secret_access_key=storage.secret_key) as s3:
-                         await s3.download_file(storage.bucket_name, file_path_key, str(local_video_path))
-                else:
-                    abs_path = storage.get_absolute_path(file_path_key)
-                    local_video_path = Path(abs_path) 
+                downloaded = await storage.download(file_path_key, str(local_video_path))
+                if not downloaded:
+                    local_video_path = Path(storage.get_absolute_path(file_path_key))
 
                 # 3. Extract Metadata
                 metadata = await ffmpeg.get_metadata(str(local_video_path))
@@ -175,18 +171,9 @@ async def process_video_hls_task(video_id: str, file_path_key: str):
                 output_hls_dir = Path(temp_dir) / "hls"
                 output_hls_dir.mkdir()
                 
-                # Check if storage is S3 or Local
-                if isinstance(storage, S3StorageService):
-                    # Download from S3
-                    async with storage.session.client("s3", 
-                        endpoint_url=storage.endpoint_url,
-                        aws_access_key_id=storage.access_key,
-                        aws_secret_access_key=storage.secret_key
-                    ) as s3:
-                         await s3.download_file(storage.bucket_name, file_path_key, str(local_video_path))
-                else:
-                    abs_path = storage.get_absolute_path(file_path_key)
-                    local_video_path = Path(abs_path) 
+                downloaded = await storage.download(file_path_key, str(local_video_path))
+                if not downloaded:
+                    local_video_path = Path(storage.get_absolute_path(file_path_key))
 
                 # 3. Generate HLS
                 success = await ffmpeg.generate_hls(str(local_video_path), str(output_hls_dir))

@@ -67,6 +67,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-dablaja-videos}
       MINIO_SECURE: "false"
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       ENVIRONMENT: production
       DEBUG: "false"
     healthcheck:
@@ -98,6 +99,7 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-dablaja-videos}
       MINIO_SECURE: "false"
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       ENVIRONMENT: production
       DEBUG: "false"
     tmpfs:
@@ -124,10 +126,11 @@ services:
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-dablaja-videos}
       MINIO_SECURE: "false"
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       ENVIRONMENT: production
       DEBUG: "false"
       STT_DEVICE: ${STT_DEVICE:-cpu}
-      HABIBI_DEVICE: ${HABIBI_DEVICE:-cpu}
+      SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
       NMT_MODEL_LOCAL_PATH: /model-cache/nmt-v4
       NMT_MODEL_BUCKET: ${NMT_MODEL_BUCKET:?NMT_MODEL_BUCKET is required in production}
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}

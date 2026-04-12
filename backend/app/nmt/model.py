@@ -8,7 +8,7 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from langdetect import detect, DetectorFactory
 
 from pathlib import Path
-from app.media.storage import get_storage_service, S3StorageService
+from app.media.storage import get_storage_service
 from app.config import settings
 
 # Seed for consistent langdetect results
@@ -20,63 +20,37 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _download_from_minio(storage, file_key: str, local_path: Path, bucket_name: Optional[str] = None) -> Optional[Path]:
+def _download_model_files(
+    storage,
+    file_key: str,
+    local_path: Path,
+    bucket_name: Optional[str] = None,
+) -> bool:
     """
-    Download file_key from MinIO to local_path.
-    If file_key is a prefix (directory), downloads all contents.
-    Uses an isolated asyncio.run() — safe because it has no shared loop state.
+    Download all objects under *file_key* prefix into *local_path*.
+
+    Uses ``StorageService.download_prefix`` (S3-compatible or local uploads dir).
+    Safe in Celery: isolated ``asyncio.run()`` with no shared loop state.
     """
     import asyncio as _asyncio
-    from app.media.storage import S3StorageService
 
-    # Use specified bucket or fallback to storage default
-    bucket = bucket_name or storage.bucket_name
-
-    if isinstance(storage, S3StorageService):
-        async def _dl():
-            async with storage.session.client(
-                "s3",
-                endpoint_url=storage.endpoint_url,
-                aws_access_key_id=storage.access_key,
-                aws_secret_access_key=storage.secret_key,
-            ) as s3:
-                # 1. List objects with this prefix
-                paginator = s3.get_paginator('list_objects_v2')
-                objects = []
-                async for page in paginator.paginate(Bucket=bucket, Prefix=file_key):
-                    if 'Contents' in page:
-                        objects.extend(page['Contents'])
-                
-                if not objects:
-                    logger.warning(f"[NMT] No objects found in bucket '{bucket}' for key: {file_key}")
-                    return
-
-                # 2. Download each object
-                for obj in objects:
-                    key = obj['Key']
-                    # Calculate local relative path
-                    if key.endswith('/'): continue # skip directories
-                    
-                    rel_path = os.path.relpath(key, file_key)
-                    # Handle case where file_key is the file itself
-                    if rel_path == ".":
-                        rel_path = os.path.basename(key)
-                        
-                    dest = local_path / rel_path
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    
-                    logger.info(f"[NMT] Downloading {key} → {dest}")
-                    await s3.download_file(bucket, key, str(dest))
-
-        _asyncio.run(_dl())
-        logger.info(f"[NMT] Downloaded model {file_key} from bucket '{bucket}' → {local_path}")
-        return local_path
+    ok = _asyncio.run(
+        storage.download_prefix(file_key, str(local_path), bucket_name=bucket_name or "")
+    )
+    if ok:
+        logger.info(
+            "[NMT] Downloaded model prefix=%s bucket=%s → %s",
+            file_key,
+            bucket_name or getattr(storage, "bucket_name", ""),
+            local_path,
+        )
     else:
-        # Local storage: just return the absolute path to the key in the storage base
-        try:
-             return Path(storage.get_absolute_path(file_key))
-        except (NotImplementedError, Exception):
-             return None
+        logger.warning(
+            "[NMT] download_prefix returned no data for prefix=%s (bucket=%s)",
+            file_key,
+            bucket_name or getattr(storage, "bucket_name", ""),
+        )
+    return ok
 
 # ---------------------------------------------------------------------------
 # Model integrity validation
@@ -99,7 +73,7 @@ def resolve_default_model() -> str:
     Resolve the NMT model path using a priority chain:
 
     1. Local cache (``NMT_MODEL_LOCAL_PATH``) — fast, no network.
-    2. MinIO download → populate local cache (requires ``MINIO_ENDPOINT`` + ``NMT_MODEL_KEY``).
+    2. Object storage download → populate local cache (requires ``STORAGE_BACKEND=s3`` + ``NMT_MODEL_KEY``).
     3. HuggingFace Hub (``NMT_HF_FALLBACK``) — requires internet access.
     """
     local_path  = settings.NMT_MODEL_LOCAL_PATH
@@ -117,31 +91,31 @@ def resolve_default_model() -> str:
         logger.info("[NMT] Using verified local cache: %s", local_path)
         return local_path
 
-    # 2. MinIO download
-    if settings.MINIO_ENDPOINT and key:
+    # 2. Object storage download (S3-compatible: MinIO, GCP interop, AWS)
+    if settings.STORAGE_BACKEND.lower() == "s3" and key:
         logger.info(
-            "[NMT] Downloading from MinIO | bucket=%s key=%s → %s",
+            "[NMT] Downloading from object storage | bucket=%s key=%s → %s",
             bucket, key, local_path,
         )
         try:
             os.makedirs(local_path, exist_ok=True)
             storage = get_storage_service()
-            _download_from_minio(storage, key, Path(local_path), bucket_name=bucket)
+            _download_model_files(storage, key, Path(local_path), bucket_name=bucket)
             if _validate_model_dir(local_path):
-                logger.info("[NMT] MinIO download complete — using %s", local_path)
+                logger.info("[NMT] Object storage download complete — using %s", local_path)
                 return local_path
             logger.warning(
-                "[NMT] MinIO download finished but model validation failed at %s "
+                "[NMT] Object storage download finished but model validation failed at %s "
                 "(missing weight or tokenizer files). Falling back to HF Hub.",
                 local_path,
             )
         except Exception as exc:
-            logger.error("[NMT] MinIO download failed: %s", exc)
+            logger.error("[NMT] Object storage download failed: %s", exc)
     else:
         logger.warning(
-            "[NMT] Skipping MinIO download (MINIO_ENDPOINT=%r, NMT_MODEL_KEY=%r). "
-            "Set both env vars to use a custom model without internet access.",
-            settings.MINIO_ENDPOINT, key,
+            "[NMT] Skipping object-storage download (STORAGE_BACKEND=%r, NMT_MODEL_KEY=%r). "
+            "Use STORAGE_BACKEND=s3 and set NMT_MODEL_KEY to use a custom model without internet access.",
+            settings.STORAGE_BACKEND, key,
         )
 
     # 3. HuggingFace Hub — last resort

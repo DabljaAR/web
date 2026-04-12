@@ -36,16 +36,39 @@ class Settings(BaseSettings):
     AUTH0_CLIENT_SECRET: str = os.getenv("AUTH0_CLIENT_SECRET", "")
     AUTH0_AUDIENCE: str = os.getenv("AUTH0_AUDIENCE", "")
 
-    # ========== MINIO / S3 CONFIGURATION ==========
+    # ========== MINIO / S3 CONFIGURATION (legacy names, still supported) ==========
     MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT", "localhost:9000")
     MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
     MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "False").lower() == "true"
-    
+
+    # ========== STORAGE BACKEND (S3-compatible: MinIO, GCP interop, AWS S3) ==========
+    # Choices: "local" | "s3". Default: s3 if MINIO_ENDPOINT is set in the environment.
+    STORAGE_BACKEND: str = os.getenv(
+        "STORAGE_BACKEND",
+        "s3" if os.getenv("MINIO_ENDPOINT") else "local",
+    )
+    # Generic S3 credentials — S3_* override MINIO_* when set.
+    S3_ENDPOINT_URL: str = os.getenv(
+        "S3_ENDPOINT_URL", os.getenv("MINIO_ENDPOINT", "")
+    )
+    S3_ACCESS_KEY_ID: str = os.getenv(
+        "S3_ACCESS_KEY_ID", os.getenv("MINIO_ACCESS_KEY", "")
+    )
+    S3_SECRET_ACCESS_KEY: str = os.getenv(
+        "S3_SECRET_ACCESS_KEY", os.getenv("MINIO_SECRET_KEY", "")
+    )
+    S3_BUCKET_NAME: str = os.getenv(
+        "S3_BUCKET_NAME", os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
+    )
+    S3_REGION: str = os.getenv("S3_REGION", "")
+    S3_SECURE: bool = os.getenv(
+        "S3_SECURE", os.getenv("MINIO_SECURE", "False")
+    ).lower() == "true"
+
     # ========== LOCAL STORAGE CONFIGURATION ==========
-    # Used only when MINIO_ENDPOINT is not configured. 
-    # For local development fallback only; production should use MinIO.
+    # Used when STORAGE_BACKEND=local (filesystem under LOCAL_STORAGE_DIR).
     LOCAL_STORAGE_DIR: str = os.getenv("LOCAL_STORAGE_DIR", "uploads")
     LOCAL_STORAGE_URL_PREFIX: str = os.getenv("LOCAL_STORAGE_URL_PREFIX", "/uploads")
     
