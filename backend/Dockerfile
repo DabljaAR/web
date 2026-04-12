@@ -36,8 +36,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Copy application code
 COPY . .
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Create non-root user, own /app, and pre-create the model-cache dir so
+# Docker initialises the named volume with the correct ownership on first start.
+RUN useradd -m -u 1000 appuser \
+    && chown -R appuser:appuser /app \
+    && mkdir -p /model-cache \
+    && chown appuser:appuser /model-cache
 
 # Copy entrypoint script with proper permissions
 COPY --chown=appuser:appuser --chmod=755 entrypoint.sh /app/entrypoint.sh
