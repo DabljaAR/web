@@ -24,6 +24,7 @@ dependencies = [
     "redis>=7.4.0",
     "python-multipart>=0.0.24",
     "bcrypt>=4.0.1,<4.1",
+    "flower>=2.0.1",
 ]
 
 [dependency-groups]
@@ -39,7 +40,6 @@ dev = [
     "coverage>=7.2.0",
     "coverage[toml]>=7.2.0",
     "faker>=19.0.0",
-    "flower>=2.0.1",
     "freezegun>=1.2.0",
     "mypy>=1.4.0",
     "pytest>=9.0.2",
