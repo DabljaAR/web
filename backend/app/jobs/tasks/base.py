@@ -144,6 +144,7 @@ class BaseJobTask(celery.Task):
         *,
         progress: Optional[float] = None,
         transcript: Optional[str] = None,
+        stt_segments: Optional[list] = None,
         translated_transcript: Optional[str] = None,
         segments: Optional[list] = None,
         stt_metadata: Optional[dict] = None,
@@ -168,6 +169,8 @@ class BaseJobTask(celery.Task):
                     task.progress = progress
                 if transcript is not None:
                     task.transcript = transcript
+                if stt_segments is not None:
+                    task.stt_segments = stt_segments
                 if translated_transcript is not None:
                     task.translated_transcript = translated_transcript
                 if segments is not None:

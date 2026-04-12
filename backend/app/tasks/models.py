@@ -56,7 +56,8 @@ class VideoTask(Base):
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # ── STT output ───────────────────────────────────────────────────────────
-    transcript: Mapped[Optional[str]]   = mapped_column(Text, nullable=True)
+    transcript: Mapped[Optional[str]]    = mapped_column(Text, nullable=True)
+    stt_segments: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # [{start, end, text}, ...]
     stt_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     # ── NMT output ───────────────────────────────────────────────────────────

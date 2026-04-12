@@ -62,9 +62,6 @@ celery_app.conf.update(
     task_routes={
         "app.jobs.tasks.media.*":    {"queue": "media"},
         "app.jobs.tasks.pipeline.stt_transcribe": {"queue": "ai_stt"},
-        "app.jobs.tasks.pipeline.tts_pipeline":   {"queue": "ai_tts"},
-        "app.jobs.tasks.pipeline.tts_synthesize": {"queue": "ai_tts"},
-        "app.jobs.tasks.pipeline.dubbing_merge":  {"queue": "pipeline"},
         "app.jobs.tasks.nmt.nmt_translate":      {"queue": "ai_nmt"},
         "app.jobs.tasks.nmt.translate_segment":  {"queue": "ai_nmt"},
         "app.jobs.tasks.tts.synthesize": {"queue": "ai_tts"},

@@ -8,7 +8,6 @@ Parallel-chord approach:
                         them, writes ONE combined DB record, dispatches TTS.
 """
 import logging
-import os
 from datetime import datetime
 from typing import Any, Optional
 
@@ -57,32 +56,31 @@ def nmt_translate(
         started_at=datetime.utcnow(),
     )
 
-    # ── 1. Load parent STT output ────────────────────────────────────────────
+    # ── 1. Load STT output from VideoTask ───────────────────────────────────
     engine, SessionLocal = BaseJobTask._make_db()
     try:
         with SessionLocal() as db:
             nmt_job = db.get(Job, job_id)
             if not nmt_job:
                 raise ValueError(f"NMT job {job_id} not found")
-            parent = db.get(Job, nmt_job.parent_job_id) if nmt_job.parent_job_id else None
+            task_id = (nmt_job.input_data or {}).get("task_id")
+            if not task_id:
+                raise ValueError(f"NMT job {job_id} has no task_id in input_data")
+            from app.tasks.models import VideoTask
+            task = db.get(VideoTask, task_id)
+            if not task or task.stt_segments is None:
+                raise ValueError(f"VideoTask {task_id} has no STT segments yet")
+            stt_segments            = list(task.stt_segments)
+            full_transcript         = task.transcript or ""
+            resolved_source_lang    = task.source_lang or source_lang
+            resolved_target_lang    = task.target_lang or target_lang
+            output_type             = task.output_type
+            num_beams               = task.num_beams
+            english_ratio_threshold = task.english_ratio_threshold
     finally:
         engine.dispose()
 
-    if not parent or not parent.output_data:
-        raise ValueError(f"NMT job {job_id} has no parent STT output")
-
-    parent_output    = dict(parent.output_data)
-    stt_segments     = parent_output.get("segments") or []
-    full_transcript  = parent_output.get("transcript", "")
-
-    input_data                = nmt_job.input_data or {}
-    resolved_source_lang      = input_data.get("source_lang", source_lang)
-    resolved_target_lang      = input_data.get("target_lang", target_lang)
-    actual_src_lang           = None if resolved_source_lang == "auto" else resolved_source_lang
-    output_type               = input_data.get("output_type", "fullDubbing")
-    num_beams                 = int(input_data.get("num_beams", 5))
-    english_ratio_threshold   = float(input_data.get("english_ratio_threshold", 0.5))
-    task_id                   = input_data.get("task_id")
+    actual_src_lang = None if resolved_source_lang == "auto" else resolved_source_lang
 
     logger.info(
         "[NMT] job=%s | segments=%d | %s → %s",
@@ -114,10 +112,6 @@ def nmt_translate(
     tts_context: Optional[dict] = None
 
     if output_type in TTS_REQUIRED and stt_segments:
-        import asyncio
-        import subprocess
-        import tempfile
-
         tts_job_id = BaseJobTask._create_next_job(
             job_id,
             JobType.TTS_SYNTHESIZE,
@@ -128,76 +122,10 @@ def nmt_translate(
             },
         )
 
-        # Extract 15-second voice clip from the video and upload to MinIO.
-        # Voice cloning with SILMA only works when the reference audio is in the
-        # same language as the output (Arabic). If the source is not Arabic,
-        # skip extraction — tts_synthesize_segment will fall back to the bundled
-        # Arabic sample which produces clean, consistent Arabic speech.
-        _source_is_arabic = resolved_source_lang in {"auto", "arb_Arab", "ar", "ara"}
-        ref_clip_minio_key: Optional[str] = None
-
-        if _source_is_arabic:
-            ref_clip_minio_key = f"tts/{nmt_job.video_id}/ref_clip_{tts_job_id}.wav"
-            try:
-                engine_v, SL_v = BaseJobTask._make_db()
-                try:
-                    with SL_v() as db:
-                        from app.media.models import Video as _V
-                        _vrow = db.get(_V, nmt_job.video_id)
-                        _audio_key = (_vrow.audio_path or _vrow.file_path) if _vrow else None
-                finally:
-                    engine_v.dispose()
-
-                if not _audio_key:
-                    raise ValueError("no audio key on video")
-
-                from app.media.storage import get_storage_service
-                with tempfile.TemporaryDirectory() as _td:
-                    _raw  = os.path.join(_td, "src")
-                    _clip = os.path.join(_td, "ref.wav")
-                    _loop = asyncio.new_event_loop()
-                    try:
-                        _loop.run_until_complete(get_storage_service().download(_audio_key, _raw))
-                    finally:
-                        _loop.close()
-                    subprocess.run(
-                        ["ffmpeg", "-y", "-i", _raw, "-t", "15", "-ar", "24000", "-ac", "1", _clip],
-                        check=True, capture_output=True,
-                    )
-                    with open(_clip, "rb") as _f:
-                        _clip_bytes = _f.read()
-
-                _loop2 = asyncio.new_event_loop()
-                try:
-                    _loop2.run_until_complete(
-                        get_storage_service().upload_bytes(_clip_bytes, ref_clip_minio_key, "audio/wav")
-                    )
-                finally:
-                    _loop2.close()
-                logger.info("[NMT] TTS ref clip uploaded | key=%s | job=%s", ref_clip_minio_key, job_id)
-
-            except Exception as _exc:
-                logger.warning("[NMT] could not extract TTS ref clip: %s", _exc)
-                ref_clip_minio_key = None
-        else:
-            logger.info(
-                "[NMT] source_lang=%s is not Arabic — skipping voice cloning, "
-                "TTS will use bundled Arabic reference | job=%s",
-                resolved_source_lang, job_id,
-            )
-
-        # Redis counter so tts_synthesize_segment knows when all N segments finish
-        try:
-            celery_app.backend.client.set(
-                f"tts:pending:{tts_job_id}", len(stt_segments), ex=7200
-            )
-        except Exception as _exc:
-            logger.warning("[NMT] could not set TTS Redis counter: %s", _exc)
-
         tts_context = {
             "tts_job_id":          tts_job_id,
             "total_segments":      len(stt_segments),
-            "ref_clip_minio_key":  ref_clip_minio_key,
+            "ref_clip_minio_key":  None,
             "task_id":             task_id,
             "output_type":         output_type,
             "video_id":            str(nmt_job.video_id),

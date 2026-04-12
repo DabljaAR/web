@@ -5,7 +5,7 @@ Each task follows the same contract:
   - Returns a dict that downstream tasks in a chain can consume.
 
 Pipeline flow (each stage is independent — reads input from DB, writes output to DB):
-  stt_transcribe  →  nmt_translate  →  tts_pipeline
+  stt_transcribe  →  nmt_translate  →  tts_synthesize_segment (×N)  →  tts_combine_results
 """
 import logging
 import os
@@ -83,16 +83,20 @@ def stt_transcribe(
     task_id     = _input_data.get("task_id")
 
     # ── 2. Resolve the MinIO key ─────────────────────────────────────────────
-    async def _get_file_key() -> str:
-        from app.core.db import AsyncSessionLocal
-        from app.media.models import Video
-        async with AsyncSessionLocal() as db:
-            video = await db.get(Video, video_id)
-            if not video:
-                raise ValueError(f"Video {video_id} not found.")
-            return video.audio_path or video.file_path
+    def _get_file_key() -> str:
+        from app.media.models import Video  # noqa: F401 - needed for SQLAlchemy mapper resolution
+        engine, SessionLocal = self._make_db()
+        try:
+            with SessionLocal() as db:
+                video = db.get(Video, video_id)
+                if not video:
+                    raise ValueError(f"Video {video_id} not found.")
+                # Prefer the extracted audio track; fall back to the raw file
+                return video.audio_path or video.file_path
+        finally:
+            engine.dispose()
 
-    file_key: str = self._run_sync(_get_file_key())
+    file_key: str = _get_file_key()
     logger.info("[STT] job=%s video=%s file_key=%s", job_id, video_id, file_key)
 
     self.update_progress(job_id, 10.0)
@@ -189,6 +193,7 @@ def stt_transcribe(
                 task_id,
                 TaskStatus.COMPLETED if captions_only else TaskStatus.PROCESSING,
                 transcript=full_transcript,
+                stt_segments=structured_segments,
                 stt_metadata=metadata,
                 progress=100.0 if captions_only else 10.0,
                 started_at=datetime.utcnow(),
@@ -228,144 +233,8 @@ def stt_transcribe(
 
 
 # ===========================================================================
-# Text-to-Speech pipeline stage
-# ===========================================================================
-
-@celery_app.task(
-    bind=True,
-    base=BaseJobTask,
-    name="app.jobs.tasks.pipeline.tts_pipeline",
-    max_retries=2,
-    default_retry_delay=30,
-    queue="ai_tts",
-)
-def tts_pipeline(self, job_id: str) -> dict:
-    """
-    TTS orchestrator — mirrors the NMT chord pattern.
-
-    1. Extract a 15-second voice clip from the video and upload it to MinIO
-       so every segment task can access the same reference voice.
-    2. Fan out one tts_synthesize_segment task per translated segment.
-    3. tts_combine_results (chord callback) collects results and writes the DB.
-    """
-    import asyncio
-    import subprocess
-    import tempfile
-    from celery import chord, group
-    from app.jobs.models import Job
-
-    self._patch_job(
-        job_id,
-        JobStatus.PROCESSING,
-        celery_task_id=self.request.id,
-        started_at=datetime.utcnow(),
-    )
-
-    # ── 1. Load NMT output ───────────────────────────────────────────────────
-    engine, SessionLocal = BaseJobTask._make_db()
-    try:
-        with SessionLocal() as db:
-            tts_job = db.get(Job, job_id)
-            if not tts_job:
-                raise ValueError(f"TTS job {job_id} not found")
-            parent = db.get(Job, tts_job.parent_job_id) if tts_job.parent_job_id else None
-            if not parent or not parent.output_data:
-                raise ValueError(f"TTS job {job_id} has no parent NMT output")
-            nmt_output  = dict(parent.output_data)
-            video_id    = tts_job.video_id
-            tts_input   = dict(tts_job.input_data or {})
-    finally:
-        engine.dispose()
-
-    task_id  = tts_input.get("task_id")
-    segments: list = nmt_output.get("segments", [])
-    metadata: dict = nmt_output.get("metadata", {})
-
-    logger.info("[TTS] job=%s video=%s segments=%d", job_id, video_id, len(segments))
-
-    # ── 2. Extract reference voice clip from the video, upload to MinIO ──────
-    ref_clip_minio_key = f"tts/{video_id}/ref_clip_{job_id}.wav"
-
-    try:
-        engine2, SessionLocal2 = BaseJobTask._make_db()
-        try:
-            with SessionLocal2() as db:
-                from app.media.models import Video as _Video
-                _video_row = db.get(_Video, video_id)
-                _audio_key = (_video_row.audio_path or _video_row.file_path) if _video_row else None
-        finally:
-            engine2.dispose()
-
-        if not _audio_key:
-            raise ValueError("No audio key found for video")
-
-        from app.media.storage import get_storage_service
-
-        with tempfile.TemporaryDirectory() as _tmp:
-            _raw  = os.path.join(_tmp, "source_audio")
-            _clip = os.path.join(_tmp, "ref_clip.wav")
-
-            _loop = asyncio.new_event_loop()
-            try:
-                _loop.run_until_complete(get_storage_service().download(_audio_key, _raw))
-            finally:
-                _loop.close()
-
-            subprocess.run(
-                ["ffmpeg", "-y", "-i", _raw,
-                 "-t", "15", "-ar", "24000", "-ac", "1", _clip],
-                check=True, capture_output=True,
-            )
-
-            with open(_clip, "rb") as _f:
-                clip_bytes = _f.read()
-
-        _loop2 = asyncio.new_event_loop()
-        try:
-            _loop2.run_until_complete(
-                get_storage_service().upload_bytes(clip_bytes, ref_clip_minio_key, "audio/wav")
-            )
-        finally:
-            _loop2.close()
-
-        logger.info("[TTS] ref clip uploaded | key=%s | job=%s", ref_clip_minio_key, job_id)
-
-    except Exception as _exc:
-        logger.warning("[TTS] could not extract video voice, using fallback | %s", _exc)
-        ref_clip_minio_key = None  # segment tasks will use bundled default
-
-    # ── 3. Fan out one task per segment ──────────────────────────────────────
-    segment_tasks = [
-        tts_synthesize_segment.s(
-            idx,
-            str(job_id),
-            seg.get("translated_text") or seg.get("text") or "",
-            seg.get("start"),
-            seg.get("end"),
-            f"tts/{job_id}/segment_{idx}.wav",
-            ref_clip_minio_key,
-        )
-        for idx, seg in enumerate(segments)
-    ]
-
-    chord(group(segment_tasks))(
-        tts_combine_results.s(
-            job_id=job_id,
-            task_id=task_id,
-            video_id=video_id,
-            ref_clip_minio_key=ref_clip_minio_key,
-            metadata=metadata,
-            output_type=tts_input.get("output_type", "fullDubbing"),
-        )
-    )
-
-    logger.info("[TTS] chord dispatched | job=%s | tasks=%d", job_id, len(segment_tasks))
-    return {"_skip_completion": True, "job_id": job_id, "segment_count": len(segment_tasks)}
-
-
-# ---------------------------------------------------------------------------
 # Per-segment TTS worker
-# ---------------------------------------------------------------------------
+# ===========================================================================
 
 @celery_app.task(
     bind=True,
@@ -452,16 +321,17 @@ def tts_synthesize_segment(
     if tts_job_id and total_segments:
         try:
             r = celery_app.backend.client
-            counter_key = f"tts:pending:{tts_job_id}"
+            counter_key = f"tts:done:{tts_job_id}"
             result_key  = f"tts:result:{tts_job_id}:{segment_id}"
 
             r.set(result_key, json.dumps(result), ex=7200)
-            remaining = r.decr(counter_key)
+            done = r.incr(counter_key)
+            r.expire(counter_key, 7200)
 
-            logger.debug("[TTS] counter %s → %d remaining | job=%s",
-                         counter_key, remaining, tts_job_id)
+            logger.debug("[TTS] counter %s → %d/%d done | job=%s",
+                         counter_key, done, total_segments, tts_job_id)
 
-            if remaining <= 0:
+            if done >= total_segments:
                 # Last segment — collect all results and trigger combine
                 all_results = []
                 for i in range(total_segments):
@@ -472,7 +342,7 @@ def tts_synthesize_segment(
                                         "tts_error": "result missing"})
                 # Clean up Redis keys
                 r.delete(counter_key)
-                for i in range(total_segments):
+                for i in range(total_segments):  # segment result keys
                     r.delete(f"tts:result:{tts_job_id}:{i}")
 
                 tts_combine_results.apply_async(
@@ -771,47 +641,3 @@ def tts_combine_results(
     )
     return output
 
-
-# ===========================================================================
-# Stubs kept for compatibility
-# ===========================================================================
-
-@celery_app.task(
-    bind=True,
-    base=BaseJobTask,
-    name="app.jobs.tasks.pipeline.tts_synthesize",
-    max_retries=3,
-    default_retry_delay=60,
-    queue="ai_tts",
-)
-def tts_synthesize(
-    self,
-    job_id: str,
-    video_id: str,
-    translation_key: Optional[str] = None,
-    target_lang: str = "en",
-) -> dict:
-    """Legacy stub — use tts_pipeline for the pipeline flow."""
-    if isinstance(job_id, dict):
-        video_id = job_id.get("video_id")
-        job_id = job_id.get("job_id")
-    self._patch_job(job_id, JobStatus.PROCESSING, celery_task_id=self.request.id, started_at=datetime.utcnow())
-    logger.info("[STUB] tts_synthesize job=%s video=%s lang=%s", job_id, video_id, target_lang)
-    output = {"job_id": job_id, "video_id": video_id, "audio_key": None}
-    self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
-    return output
-
-
-@celery_app.task(
-    bind=True,
-    base=BaseJobTask,
-    name="app.jobs.tasks.pipeline.dubbing_merge",
-    max_retries=3,
-    default_retry_delay=30,
-    queue="pipeline",
-)
-def dubbing_merge(self, job_id: str, video_id: str, audio_key: str) -> dict:
-    """Stub: merge synthesised audio with the original video."""
-    self._patch_job(job_id, JobStatus.PROCESSING, celery_task_id=self.request.id, started_at=datetime.utcnow())
-    logger.info("[STUB] dubbing_merge job=%s video=%s", job_id, video_id)
-    return {"job_id": job_id, "video_id": video_id, "output_key": None}

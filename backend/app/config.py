@@ -138,7 +138,15 @@ class Settings(BaseSettings):
         return self.STT_COMPUTE_TYPE
     
     def get_silma_reference_audio(self) -> str:
-        """Return the SILMA reference audio path, auto-detecting the bundled sample if not set."""
+        """Return the SILMA reference audio path as a WAV file, auto-detecting the bundled sample if not set."""
+        candidate = self._resolve_silma_audio_path()
+        if not candidate:
+            return self.SILMA_REFERENCE_AUDIO
+        if os.path.splitext(candidate)[1].lower() == ".wav":
+            return candidate
+        return self._convert_to_wav(candidate)
+
+    def _resolve_silma_audio_path(self) -> str:
         if self.SILMA_REFERENCE_AUDIO and os.path.exists(self.SILMA_REFERENCE_AUDIO):
             return self.SILMA_REFERENCE_AUDIO
         try:
@@ -156,7 +164,23 @@ class Settings(BaseSettings):
                         return bundled
         except Exception:
             pass
-        return self.SILMA_REFERENCE_AUDIO
+        return None
+
+    def _convert_to_wav(self, src: str) -> str:
+        """Convert *src* to a 24 kHz mono WAV and return the new path. Falls back to *src* on error."""
+        import subprocess
+        import tempfile
+        wav_path = os.path.join(tempfile.gettempdir(), os.path.splitext(os.path.basename(src))[0] + "_ref.wav")
+        if os.path.exists(wav_path):
+            return wav_path
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", src, "-ar", "24000", "-ac", "1", wav_path],
+                check=True, capture_output=True,
+            )
+            return wav_path
+        except Exception:
+            return src
 
     @property
     def is_production(self) -> bool:
