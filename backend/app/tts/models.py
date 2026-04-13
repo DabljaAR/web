@@ -10,9 +10,13 @@ TTS inference is blocking and not fork-safe).
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
+import subprocess
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 import soundfile as sf
@@ -98,6 +102,53 @@ class SilmaTTSModelManager(Task):
 
         return self._model
 
+    def _ensure_short_reference_audio(self, ref_audio_path: str, *, max_seconds: float = 8.0) -> str:
+        """Create (and cache) a short WAV clip of the reference audio.
+
+        Providing an already-short clip avoids silma_tts's internal "audio was cut"
+        auto-transcription path. Uses ffmpeg if available; falls back to original.
+        """
+        src = Path(ref_audio_path)
+        if not src.exists():
+            return ref_audio_path
+
+        stat = src.stat()
+        cache_key = (
+            f"{src.resolve()}|{stat.st_mtime_ns}|{stat.st_size}|{max_seconds}"
+            .encode("utf-8")
+        )
+        digest = hashlib.sha256(cache_key).hexdigest()[:16]
+
+        cache_dir = Path(tempfile.gettempdir()) / "dabljaar" / "tts_ref_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        out_path = cache_dir / f"ref_{digest}_{int(max_seconds * 1000)}ms.wav"
+        if out_path.exists() and out_path.stat().st_size > 0:
+            return str(out_path)
+
+        tmp_out = out_path.with_name(out_path.name + ".tmp.wav")
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(src),
+            "-f", "wav", "-t", str(max_seconds),
+            "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le",
+            str(tmp_out),
+        ]
+        try:
+            subprocess.run(cmd, check=True)
+            tmp_out.replace(out_path)
+            logger.info("Prepared short reference audio clip: %s", out_path)
+            return str(out_path)
+        except FileNotFoundError:
+            logger.warning("ffmpeg not found; using original reference audio: %s", src)
+            if tmp_out.exists():
+                tmp_out.unlink(missing_ok=True)
+            return ref_audio_path
+        except subprocess.CalledProcessError as e:
+            logger.warning("Failed to prepare short reference clip: %s; using original", e)
+            if tmp_out.exists():
+                tmp_out.unlink(missing_ok=True)
+            return ref_audio_path
+
     # ------------------------------------------------------------------
     # Public synthesis API
     # ------------------------------------------------------------------
@@ -148,9 +199,15 @@ class SilmaTTSModelManager(Task):
         # Load model
         model = self._load_model()
 
-        # Resolve reference audio and text
-        _ref_audio = ref_audio_path or settings.SILMA_REFERENCE_AUDIO
-        _ref_text = ref_text or settings.SILMA_REFERENCE_TEXT or None
+        # Resolve reference audio: explicit path → auto-detect bundled sample
+        _ref_audio = ref_audio_path or settings.get_silma_reference_audio()
+        _ref_text = ref_text if ref_text is not None else settings.SILMA_REFERENCE_TEXT
+        if not isinstance(_ref_text, str):
+            _ref_text = str(_ref_text) if _ref_text is not None else ""
+        if not _ref_text.strip():
+            # Empty ref_text triggers silma_tts auto-transcription (Whisper download).
+            # Use None so silma_tts handles it gracefully.
+            _ref_text = None
 
         if not _ref_audio:
             raise ValueError(
@@ -160,6 +217,9 @@ class SilmaTTSModelManager(Task):
 
         if not os.path.exists(_ref_audio):
             raise FileNotFoundError(f"Reference audio not found: {_ref_audio}")
+
+        # Clip reference audio to ≤8s to avoid silma_tts auto-transcription path
+        _ref_audio = self._ensure_short_reference_audio(_ref_audio, max_seconds=8.0)
 
         # Use defaults from settings if not provided
         _nfe_step = nfe_step if nfe_step is not None else settings.TTS_DEFAULT_NFE_STEP
