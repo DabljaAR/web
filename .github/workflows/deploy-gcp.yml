@@ -152,9 +152,31 @@ jobs:
           fi
 
           # Build frontend static assets to host path mounted by Caddy at /srv.
+          if [ -d "$APP_DIR/frontend/node_modules" ] && [ ! -w "$APP_DIR/frontend/node_modules" ]; then
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chown -R "$(id -u):$(id -g)" "$APP_DIR/frontend/node_modules"
+            else
+              echo "frontend/node_modules is not writable and sudo is unavailable; fix ownership manually."
+              exit 1
+            fi
+          fi
+          rm -rf "$APP_DIR/frontend/node_modules"
+
+          if [ -d "$APP_DIR/frontend/dist" ] && [ ! -w "$APP_DIR/frontend/dist" ]; then
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chown -R "$(id -u):$(id -g)" "$APP_DIR/frontend/dist"
+            else
+              echo "frontend/dist is not writable and sudo is unavailable; fix ownership manually."
+              exit 1
+            fi
+          fi
+          rm -rf "$APP_DIR/frontend/dist"
           docker run --rm \
+            --user "$(id -u):$(id -g)" \
             -v "$APP_DIR/frontend:/frontend" \
             -w /frontend \
+            -e HOME=/tmp \
+            -e npm_config_cache=/tmp/.npm \
             -e VITE_API_BASE_URL=/api \
             node:24-alpine \
             sh -c "npm ci --legacy-peer-deps && npm run build"
@@ -166,6 +188,8 @@ jobs:
 
           $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d --build
           $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml ps
+
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml restart caddy
 
           for _ in 1 2 3 4 5; do
             if curl -fsS http://localhost:8000/api/health >/dev/null; then
