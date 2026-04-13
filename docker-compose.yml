@@ -121,8 +121,9 @@ services:
       dockerfile: Dockerfile
     container_name: dabljaar_worker_media
     entrypoint: []
-    command: celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=2 --hostname=worker-media@%h
+    command: celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=${MEDIA_WORKER_CONCURRENCY:-2} --hostname=worker-media@%h
     environment:
+      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
       CELERY_BROKER_URL: redis://redis:6379/0
@@ -150,6 +151,9 @@ services:
       - dabljaar_network
 
   # Celery worker — AI queues (STT, NMT, TTS, pipeline)
+  # STT: populate MinIO bucket S3_MODELS_BUCKET (default: model) under STT_MODEL_KEY (e.g. whisper-small/)
+  # with CTranslate2 files (model.bin, config.json, …) to avoid Hugging Face on cold start.
+  # Optional env (not set by default): HF_HOME=/model-cache/hf HF_HUB_DISABLE_XET=1 HF_HUB_ENABLE_HF_TRANSFER=1
   celery-worker-ai:
     build:
       context: ./backend
@@ -158,8 +162,9 @@ services:
         INSTALL_AI: "true"
     container_name: dabljaar_worker_ai
     entrypoint: []
-    command: celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=1 --hostname=worker-ai@%h
+    command: celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
     environment:
+      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
       INSTALL_AI: "true"
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
@@ -177,6 +182,9 @@ services:
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
       NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
       HF_TOKEN: ${HF_TOKEN:-}
+      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
+      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
+      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
     volumes:
       - ./backend:/app
       - /app/__pycache__

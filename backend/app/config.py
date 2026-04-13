@@ -1,3 +1,5 @@
+import hashlib
+import logging
 import os
 from pydantic import ConfigDict, model_validator
 from pydantic_settings import BaseSettings
@@ -5,6 +7,11 @@ from dotenv import load_dotenv
 
 # Load environment variables from a .env file
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# Cache S3-downloaded SILMA reference paths by object key (worker process lifetime).
+_silma_ref_audio_cache: dict[str, str] = {}
 
 
 def _env_s3_media_bucket() -> str:
@@ -20,6 +27,35 @@ def _env_s3_media_bucket() -> str:
 def _env_s3_models_bucket() -> str:
     """Resolve bucket for AI model artifacts (NMT weights from object storage; STT/TTS if added)."""
     return os.getenv("S3_MODELS_BUCKET") or os.getenv("NMT_MODEL_BUCKET") or "model"
+
+
+def _download_silma_reference(s3_key: str) -> str:
+    """Download SILMA reference audio from object storage (media bucket) to a temp file."""
+    if s3_key in _silma_ref_audio_cache:
+        cached = _silma_ref_audio_cache[s3_key]
+        if os.path.exists(cached):
+            return cached
+
+    import asyncio as _asyncio
+    import tempfile as _tmp
+
+    from app.media.storage import get_storage_service
+
+    digest = hashlib.sha256(s3_key.encode("utf-8")).hexdigest()[:16]
+    ext = os.path.splitext(s3_key)[1] or ".wav"
+    dest_dir = os.path.join(_tmp.gettempdir(), "dabljaar", "silma_ref")
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, f"ref_{digest}{ext}")
+
+    try:
+        ok = _asyncio.run(get_storage_service().download(s3_key, dest))
+        if ok and os.path.exists(dest):
+            _silma_ref_audio_cache[s3_key] = dest
+            logger.info("[TTS] Downloaded SILMA reference audio key=%s → %s", s3_key, dest)
+            return dest
+    except Exception as exc:
+        logger.error("[TTS] S3 reference audio download failed: %s", exc)
+    return ""
 
 
 class Settings(BaseSettings):
@@ -122,6 +158,9 @@ class Settings(BaseSettings):
     STT_GPU_MEMORY_THRESHOLD: float = float(os.getenv("STT_GPU_MEMORY_THRESHOLD", "0.9"))
     STT_RETRY_ATTEMPTS: int = int(os.getenv("STT_RETRY_ATTEMPTS", "3"))
     STT_RETRY_DELAY: int = int(os.getenv("STT_RETRY_DELAY", "2"))
+    # Whisper (faster-whisper / CTranslate2): optional S3 prefix under S3_MODELS_BUCKET → STT_MODEL_LOCAL_PATH
+    STT_MODEL_KEY: str = os.getenv("STT_MODEL_KEY", "")
+    STT_MODEL_LOCAL_PATH: str = os.getenv("STT_MODEL_LOCAL_PATH", "")
     
     # ========== TEXT-TO-SPEECH (TTS - SILMA) ==========
     SILMA_DEVICE: str = os.getenv("SILMA_DEVICE", "auto")  # "auto", "cpu", "cuda"
@@ -200,12 +239,13 @@ class Settings(BaseSettings):
 
         Resolution order:
           1. SILMA_REFERENCE_AUDIO env var (if it points to an existing file)
-          2. Auto-detect bundled ar.ref.24k.wav shipped with silma_tts package
-          3. Return empty string (caller handles missing case)
+          2. Object storage (S3): same env value as object key in S3_MEDIA_BUCKET when not a local path
+          3. Auto-detect bundled ar.ref.24k.wav shipped with silma_tts package
+          4. Return empty string (caller handles missing case)
         """
         candidate = self._resolve_silma_audio_path()
         if not candidate:
-            return self.SILMA_REFERENCE_AUDIO
+            return ""
         if os.path.splitext(candidate)[1].lower() == ".wav":
             return candidate
         return self._convert_to_wav(candidate)
@@ -213,6 +253,12 @@ class Settings(BaseSettings):
     def _resolve_silma_audio_path(self) -> str:
         if self.SILMA_REFERENCE_AUDIO and os.path.exists(self.SILMA_REFERENCE_AUDIO):
             return self.SILMA_REFERENCE_AUDIO
+
+        if self.SILMA_REFERENCE_AUDIO and self.STORAGE_BACKEND.lower() == "s3":
+            cached = _download_silma_reference(self.SILMA_REFERENCE_AUDIO)
+            if cached:
+                return cached
+
         try:
             import importlib.util
             spec = importlib.util.find_spec("silma_tts")
