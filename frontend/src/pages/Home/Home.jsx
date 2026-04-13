@@ -18,7 +18,7 @@ const Home = () => {
       <Navbar />
       <HeroSection />
       <ProblemSection />
-      <FeaturesSection />
+      {/* <FeaturesSection /> */}
       <HowItWorksSection />
       <TryItNowSection />
       {/* <DemoSection /> */}

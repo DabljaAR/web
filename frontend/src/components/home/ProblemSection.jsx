@@ -15,33 +15,21 @@ const ProblemSection = () => {
         <div className="problem-cards-wrapper">
           <div className="problem-card-modern">
             <div className="card-decoration"></div>
-            <div className="problem-icon-modern">📚</div>
-            <h3>{t('problem.card1Title')}</h3>
-            <p>{t('problem.card1Text')}</p>
-            <div className="card-stat">
-              <span className="stat-number">78%</span>
-              <span className="stat-label">{t('problem.card1Stat')}</span>
-            </div>
+            <div className="feature-number">01</div>
+            <h3>{t('features.feature1Title')}</h3>
+            <p>{t('features.feature1Text')}</p>
           </div>
           <div className="problem-card-modern">
             <div className="card-decoration"></div>
-            <div className="problem-icon-modern">🗣️</div>
-            <h3>{t('problem.card2Title')}</h3>
-            <p>{t('problem.card2Text')}</p>
-            <div className="card-stat">
-              <span className="stat-number">450M</span>
-              <span className="stat-label">{t('problem.card2Stat')}</span>
-            </div>
+            <div className="feature-number">02</div>
+            <h3>{t('features.feature2Title')}</h3>
+            <p>{t('features.feature2Text')}</p>
           </div>
           <div className="problem-card-modern">
             <div className="card-decoration"></div>
-            <div className="problem-icon-modern">💰</div>
-            <h3>{t('problem.card3Title')}</h3>
-            <p>{t('problem.card3Text')}</p>
-            <div className="card-stat">
-              <span className="stat-number">$5K+</span>
-              <span className="stat-label">{t('problem.card3Stat')}</span>
-            </div>
+            <div className="feature-number">03</div>
+            <h3>{t('features.feature3Title')}</h3>
+            <p>{t('features.feature3Text')}</p>
           </div>
         </div>
       </div>
