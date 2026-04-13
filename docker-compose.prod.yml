@@ -100,6 +100,8 @@ services:
       dockerfile: Dockerfile.prod
     volumes: []
     environment:
+      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
+      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       CELERY_BROKER_URL: redis://redis:6379/0
@@ -133,6 +135,8 @@ services:
     volumes:
       - nmt_model_cache:/model-cache
     environment:
+      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
+      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
       INSTALL_AI: "true"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
@@ -154,9 +158,12 @@ services:
       ENVIRONMENT: production
       DEBUG: "false"
       STT_DEVICE: ${STT_DEVICE:-cpu}
+      STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-auto}
+      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
+      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
+      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
       SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
-      # SILMA voice-cloning reference (mount your reference audio into the container
-      # at the path below, or set SILMA_REFERENCE_AUDIO to a different container path)
+      # SILMA reference: container filesystem path, or S3 object key in S3_MEDIA_BUCKET (downloaded on first use)
       SILMA_REFERENCE_AUDIO: ${SILMA_REFERENCE_AUDIO:-}
       SILMA_REFERENCE_TEXT: ${SILMA_REFERENCE_TEXT:-ويدقق النظر في القرآن الكريم وسائر الكتب السماوية ويتبع مسالك الرسل العظام عليهم الصلاة والسلام.}
       # TTS quality tuning — defaults match config.py

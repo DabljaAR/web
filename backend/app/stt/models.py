@@ -8,6 +8,7 @@ The model is loaded lazily via a @property — nothing loads at import time.
 All original WhisperModelManager logic is unchanged.
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -20,6 +21,7 @@ from celery import Task
 from faster_whisper import WhisperModel
 
 from app.config import settings
+from app.media.storage import get_storage_service
 from app.shared.enums import AudioVideoExtension
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,91 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_WHISPER_REQUIRED_FILES = frozenset({"model.bin", "config.json"})
+
+
+def _validate_whisper_model_dir(path: str) -> bool:
+    """True if *path* looks like a CTranslate2 / faster-whisper model directory."""
+    if not path or not os.path.isdir(path):
+        return False
+    try:
+        names = set(os.listdir(path))
+    except OSError:
+        return False
+    return bool(names & _WHISPER_REQUIRED_FILES)
+
+
+def resolve_whisper_model() -> str:
+    """
+    Resolve Whisper model path / id: local cache → S3 (S3_MODELS_BUCKET + STT_MODEL_KEY) → HuggingFace Hub.
+    """
+    local_path = (settings.STT_MODEL_LOCAL_PATH or "").strip()
+    key = (settings.STT_MODEL_KEY or "").strip()
+    bucket = settings.S3_MODELS_BUCKET
+    hf_name = settings.STT_MODEL_SIZE
+
+    logger.info(
+        "[STT] Resolving Whisper model | local_path=%s key=%s bucket=%s hf=%s",
+        local_path or "(none)",
+        key or "(none)",
+        bucket,
+        hf_name,
+    )
+
+    if local_path and _validate_whisper_model_dir(local_path):
+        logger.info("[STT] Using verified local Whisper cache: %s", local_path)
+        return local_path
+
+    if settings.STORAGE_BACKEND.lower() == "s3" and key and local_path:
+        logger.info(
+            "[STT] Downloading Whisper from object storage | bucket=%s key=%s → %s",
+            bucket,
+            key,
+            local_path,
+        )
+        try:
+            os.makedirs(local_path, exist_ok=True)
+            storage = get_storage_service()
+
+            ok = asyncio.run(
+                storage.download_prefix(key, local_path, bucket_name=bucket)
+            )
+            if not ok:
+                logger.warning(
+                    "[STT] Object storage download_prefix returned no files | bucket=%s key=%s. "
+                    "Falling back to HuggingFace Hub.",
+                    bucket,
+                    key,
+                )
+            elif _validate_whisper_model_dir(local_path):
+                logger.info("[STT] Object storage download complete — using %s", local_path)
+                return local_path
+            else:
+                logger.warning(
+                    "[STT] Object storage download finished but validation failed at %s "
+                    "(missing model.bin or config.json). Falling back to HuggingFace Hub.",
+                    local_path,
+                )
+        except Exception as exc:
+            logger.error("[STT] Object storage download failed: %s", exc)
+    elif key and not local_path:
+        logger.warning(
+            "[STT] STT_MODEL_KEY is set but STT_MODEL_LOCAL_PATH is empty; "
+            "skipping S3 download. Set STT_MODEL_LOCAL_PATH to enable cache + S3 pull.",
+        )
+    elif not key and local_path:
+        logger.warning(
+            "[STT] STT_MODEL_LOCAL_PATH is set but STT_MODEL_KEY is empty; skipping S3 download.",
+        )
+
+    logger.warning(
+        "[STT] Falling back to HuggingFace Hub / size id: %s. "
+        "Configure S3_MODELS_BUCKET + STT_MODEL_KEY + STT_MODEL_LOCAL_PATH to avoid this.",
+        hf_name,
+    )
+    return hf_name
+
 
 def clean_text(text: str) -> str:
     """Strip and collapse whitespace in transcribed text."""
@@ -98,13 +185,31 @@ class WhisperModelManager(Task):
                 f"[STT] Loading Whisper | size={self.model_size} | "
                 f"device={self.device} | compute_type={self.compute_type}"
             )
+            resolved = resolve_whisper_model()
+            local_cache = os.path.isdir(resolved)
+            logger.info(
+                "[STT] Whisper model source: %s (%s)",
+                resolved,
+                "local directory" if local_cache else "HuggingFace Hub id — first load may take minutes",
+            )
+            if settings.HF_TOKEN:
+                os.environ["HF_TOKEN"] = settings.HF_TOKEN
+                logger.info("[STT] HF_TOKEN set for Hub authentication")
+            logger.info(
+                "[STT] Constructing WhisperModel (large Hub downloads log little until complete)…"
+            )
+            t0 = time.perf_counter()
             try:
                 WhisperModelManager._model = WhisperModel(
-                    self.model_size,
+                    resolved,
                     device=self.device,
                     compute_type=self.compute_type,
                 )
-                logger.info("✅ Whisper model loaded successfully")
+                elapsed = time.perf_counter() - t0
+                logger.info(
+                    "[STT] Whisper model loaded successfully in %.1fs",
+                    elapsed,
+                )
             except Exception as e:
                 logger.error(f"❌ Failed to load Whisper model: {e}")
                 raise

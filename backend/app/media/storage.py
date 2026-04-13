@@ -410,6 +410,7 @@ class S3StorageService:
     async def download_prefix(self, prefix: str, local_dir: str, bucket_name: str = "") -> bool:
         bucket = bucket_name or self.bucket_name
         dest_base = Path(local_dir)
+        downloaded = 0
         try:
             async with self.session.client("s3", **self._client_kwargs()) as s3:
                 paginator = s3.get_paginator("list_objects_v2")
@@ -424,6 +425,14 @@ class S3StorageService:
                         dest = dest_base / rel_path
                         dest.parent.mkdir(parents=True, exist_ok=True)
                         await s3.download_file(bucket, key, str(dest))
+                        downloaded += 1
+            if downloaded == 0:
+                logger.warning(
+                    "S3 download_prefix: no objects under bucket=%s prefix=%r (nothing downloaded)",
+                    bucket,
+                    prefix,
+                )
+                return False
             return True
         except Exception as exc:
             logger.error("S3 download_prefix failed prefix=%s: %s", prefix, exc)
