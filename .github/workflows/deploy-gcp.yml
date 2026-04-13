@@ -152,10 +152,21 @@ jobs:
           fi
 
           # Build frontend static assets to host path mounted by Caddy at /srv.
+          if [ -d "$APP_DIR/frontend/dist" ] && [ ! -w "$APP_DIR/frontend/dist" ]; then
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chown -R "$(id -u):$(id -g)" "$APP_DIR/frontend/dist"
+            else
+              echo "frontend/dist is not writable and sudo is unavailable; fix ownership manually."
+              exit 1
+            fi
+          fi
           rm -rf "$APP_DIR/frontend/dist"
           docker run --rm \
+            --user "$(id -u):$(id -g)" \
             -v "$APP_DIR/frontend:/frontend" \
             -w /frontend \
+            -e HOME=/tmp \
+            -e npm_config_cache=/tmp/.npm \
             -e VITE_API_BASE_URL=/api \
             node:24-alpine \
             sh -c "npm ci --legacy-peer-deps && npm run build"
