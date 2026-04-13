@@ -20,23 +20,22 @@ export const useAuth = () => {
   }, [setGlobalUser]);
 
   const login = (userData, accessToken, refreshToken, rememberMe = false) => {
-    const storage = rememberMe ? localStorage : sessionStorage;
+    // Access token: always sessionStorage (tab-scoped, cleared on close)
+    sessionStorage.setItem('access_token', accessToken);
+    sessionStorage.setItem('refresh_token', refreshToken);
+    sessionStorage.setItem('user', JSON.stringify(userData));
 
-    // Store tokens in appropriate storage
-    storage.setItem('access_token', accessToken);
-    storage.setItem('refresh_token', refreshToken);
-    storage.setItem('user', JSON.stringify(userData));
-
-    // Store remember_me flag in localStorage (always)
+    // Store only the preference in localStorage, not the sensitive tokens
     if (rememberMe) {
       localStorage.setItem('remember_me', 'true');
     } else {
       localStorage.removeItem('remember_me');
-      // Clear localStorage tokens if not remembering
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-      localStorage.removeItem('user');
     }
+
+    // Clear any legacy persistent tokens from localStorage
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('user');
 
     setGlobalUser(userData);
   };

@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from '../../hooks/useTranslation';
 import { mediaService } from '../../services/mediaService';
+import LoadingSpinner from '../common/LoadingSpinner';
 import './FileSelectorModal.css';
 
 const FileSelectorModal = ({ isOpen, onClose, onSelect, activeTab }) => {
@@ -84,7 +85,7 @@ const FileSelectorModal = ({ isOpen, onClose, onSelect, activeTab }) => {
 
                 <div className="file-selector-body">
                     {loading ? (
-                        <div className="loading-state">{t('dashboard.loadingLibrary')}</div>
+                        <div className="loading-state"><LoadingSpinner /></div>
                     ) : files.length === 0 ? (
                         <div className="empty-state">{t('dashboard.noFilesFound')}</div>
                     ) : (

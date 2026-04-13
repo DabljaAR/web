@@ -5,6 +5,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { authService } from '../../services/authService';
+import { useAvatarUpload } from '../../hooks/useAvatarUpload';
 import '../../styles/auth.css';
 
 const Register = () => {
@@ -25,9 +26,24 @@ const Register = () => {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  const [avatarFile, setAvatarFile] = useState(null);
-  const [avatarPreview, setAvatarPreview] = useState(null);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
+  const {
+    avatarFile,
+    avatarPreview,
+    uploadingAvatar,
+    fileInputRef,
+    handleAvatarChange,
+    uploadAvatar,
+    triggerFileInput
+  } = useAvatarUpload(null, (errorKey) => {
+    if (errorKey === 'invalid_type') {
+      setErrors(prev => ({ ...prev, avatar: t('register.invalidImage') || 'Invalid image type' }));
+    } else if (errorKey === 'invalid_size') {
+      setErrors(prev => ({ ...prev, avatar: t('register.imageSizeError') || 'Image too large' }));
+    } else {
+      setErrors(prev => ({ ...prev, avatar: errorKey }));
+    }
+  });
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -151,23 +167,17 @@ const Register = () => {
       }
 
       // Debug: Log the data being sent (remove in production)
-      console.log('Registration data:', { ...registrationData, password: '***' });
+      if (import.meta.env.DEV) {
+        console.log('Registration data:', { ...registrationData, password: '***' });
+      }
 
       // 1. Create the user first (Backend now returns tokens on success)
       const response = await authService.register(registrationData);
 
       // 2. If registration successful and we have an avatar file, upload it now
       if (avatarFile) {
-        setUploadingAvatar(true);
         try {
-          // Save tokens to storage so update request is authenticated
-          // if (response.access_token) {
-          //   localStorage.setItem('access_token', response.access_token);
-          //   localStorage.setItem('refresh_token', response.refresh_token);
-          // }
-
-          // Upload the file
-          const avatarUrl = await uploadAvatar(avatarFile);
+          const avatarUrl = await uploadAvatar();
 
           // Update the user with the new avatar URL
           const userId = response.user.user_id || response.user.id;
@@ -176,8 +186,6 @@ const Register = () => {
           console.error('Optional avatar upload failed:', uploadError);
           // We don't fail the whole registration if just the avatar upload fails
           // but we could notify the user
-        } finally {
-          setUploadingAvatar(false);
         }
       }
 
@@ -229,56 +237,7 @@ const Register = () => {
     }
   };
 
-  const handleAvatarChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      // Validate file type
-      const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-      if (!validTypes.includes(file.type)) {
-        setErrors(prev => ({ ...prev, avatar: t('register.invalidImage') }));
-        return;
-      }
 
-      // Validate file size (5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        setErrors(prev => ({ ...prev, avatar: t('register.imageSizeError') }));
-        return;
-      }
-
-      setAvatarFile(file);
-      setErrors(prev => ({ ...prev, avatar: '' }));
-
-      // Create preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAvatarPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const uploadAvatar = async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://136.112.92.233:8000/api';
-      const response = await fetch(`${API_BASE_URL}/upload/avatar`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || t('register.avatarUploadFailed'));
-      }
-
-      const data = await response.json();
-      return data.url;
-    } catch (error) {
-      throw error;
-    }
-  };
 
   const handleGoogleSignUp = () => {
     toast(t('register.googleSignUpDemo') || 'Google sign up (Demo)');

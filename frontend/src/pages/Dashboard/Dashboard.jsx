@@ -1,147 +1,26 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import Swal from 'sweetalert2';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../hooks/useAuth';
+import { useJobPolling } from '../../hooks/useJobPolling';
+import { useYoutubeImport } from '../../hooks/useYoutubeImport';
 import { mediaService } from '../../services/mediaService';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
 import MediaPreviewModal from '../../components/common/MediaPreviewModal';
 import FileSelectorModal from '../../components/dashboard/FileSelectorModal';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
+import JobList from '../../components/dashboard/JobList';
+import YoutubeModal from '../../components/dashboard/YoutubeModal';
+import ProcessingQueue from '../../components/dashboard/ProcessingQueue';
+import '../../styles/home.css';
 import '../../styles/dashboard.css';
-import '../../styles/dashboard-job-item.css'; // New styles
+import '../../styles/dashboard-job-item.css';
 
-// Sub-component for Job Item to handle menu state locally
-const JobItem = ({ job, t, onPreview, onDownload, onDelete, onRetry, onDetails, onPreviewAudio, onDownloadAudio, onPreviewTranscript, onPreviewTranslation }) => {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
 
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, []);
-
-  const toggleMenu = (e) => {
-    e.stopPropagation();
-    setMenuOpen(!menuOpen);
-  };
-
-  const isVideo = job.mediaType === 'VIDEO' || (!job.mediaType && job.name.match(/\.(mp4|mov|avi|mkv)$/i));
-  const isAudio = job.mediaType === 'AUDIO' || (!job.mediaType && job.name.match(/\.(mp3|wav|m4a)$/i));
-  const isText = job.mediaType === 'TEXT' || (!job.mediaType && job.name.match(/\.(txt)$/i));
-
-  // Determine Icon/Thumbnail
-  let thumbnailContent;
-  if (job.thumbnailUrl) {
-    thumbnailContent = <img src={job.thumbnailUrl} alt={job.name} className="job-thumbnail-img" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />;
-  }
-
-  // Fallback icon
-  const fallbackIcon = (
-    <div className="job-type-icon">
-      {isVideo ? '🎬' : isAudio ? '🎵' : '📄'}
-    </div>
-  );
-
-  return (
-    <div className="job-item-container">
-      {/* Thumbnail / Icon */}
-      <div className="job-thumbnail-wrapper" onClick={() => onPreview(job.id)}>
-        {thumbnailContent}
-        {!job.thumbnailUrl && fallbackIcon}
-
-        {/* Play Overlay for previewable content */}
-        {(isVideo || isAudio) && job.status === 'completed' && (
-          <div className="thumbnail-overlay">
-            <span className="play-icon-overlay">▶</span>
-          </div>
-        )}
-      </div>
-
-      {/* Info */}
-      <div className="job-info-content">
-        <div className="job-title" title={job.name}>{job.name}</div>
-        <div className="job-meta">
-          <span className={`status-badge ${job.status}`}>
-            {t(`dashboard.${job.status}`) || job.status}
-          </span>
-          {/* Add date or size here if available later */}
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div className="job-actions-container" ref={menuRef}>
-        <button className="btn-icon-menu" onClick={toggleMenu} title="Options">
-          {/* Kebab Icon (Vertical Dots) */}
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="1"></circle>
-            <circle cx="12" cy="5" r="1"></circle>
-            <circle cx="12" cy="19" r="1"></circle>
-          </svg>
-        </button>
-
-        {menuOpen && (
-          <div className="action-menu-dropdown">
-            {job.status === 'completed' ? (
-              <>
-                <button className="action-menu-item" onClick={() => { onPreview(job.id); setMenuOpen(false); }}>
-                  <span>👁️</span> {t('dashboard.preview')}
-                </button>
-                <button className="action-menu-item" onClick={() => { onDownload(job.id); setMenuOpen(false); }}>
-                  <span>⬇️</span> {t('dashboard.download')}
-                </button>
-                {/* Audio Option */}
-                {job.audioUrl && (
-                  <>
-                    <button className="action-menu-item" onClick={() => { onPreviewAudio(job.id); setMenuOpen(false); }}>
-                      <span>🎵</span> {t('dashboard.previewAudio') || 'Preview Audio'}
-                    </button>
-                    <button className="action-menu-item" onClick={() => { onDownloadAudio(job.id); setMenuOpen(false); }}>
-                      <span>⬇️</span> {t('dashboard.downloadAudio') || 'Download Audio'}
-                    </button>
-                  </>
-                )}
-                {/* Transcript Option */}
-                {job.transcriptUrl && (
-                  <button className="action-menu-item" onClick={() => { onPreviewTranscript(job.id); setMenuOpen(false); }}>
-                    <span>📄</span> {t('dashboard.previewTranscript') || 'Preview Transcript'}
-                  </button>
-                )}
-                {/* Translation Option */}
-                {job.translationUrl && (
-                  <button className="action-menu-item" onClick={() => { onPreviewTranslation(job.id); setMenuOpen(false); }}>
-                    <span>🌍</span> {t('dashboard.previewTranslation') || 'Preview Translation'}
-                  </button>
-                )}
-              </>
-            ) : (
-              <>
-                <button className="action-menu-item" onClick={() => { onRetry(job.id); setMenuOpen(false); }}>
-                  <span>🔄</span> {t('dashboard.retry')}
-                </button>
-                <button className="action-menu-item" onClick={() => { onDetails(job.id); setMenuOpen(false); }}>
-                  <span>ℹ️</span> {t('dashboard.details')}
-                </button>
-              </>
-            )}
-            <div style={{ height: '1px', background: '#eee', margin: '4px 0' }}></div>
-            <button className="action-menu-item danger" onClick={() => { onDelete(job.id); setMenuOpen(false); }}>
-              <span>🗑️</span> {t('dashboard.delete')}
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
 
 const Dashboard = () => {
   const { t } = useTranslation();
@@ -180,10 +59,17 @@ const Dashboard = () => {
     translationStyle: 'neutral',
     textInput: ''
   });
-  const [processingJobs, setProcessingJobs] = useState([]);
-  const [recentJobs, setRecentJobs] = useState([]);
-  const [isPolling, setIsPolling] = useState(true);
-  const [isLoading, setIsLoading] = useState(true);
+  const {
+    processingJobs,
+    setProcessingJobs,
+    recentJobs,
+    setRecentJobs,
+    isPolling,
+    setIsPolling,
+    isLoading,
+    deletingIds,
+    fetchJobs
+  } = useJobPolling();
 
   // Preview Modal State
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
@@ -194,86 +80,26 @@ const Dashboard = () => {
   const [selectedLibraryFile, setSelectedLibraryFile] = useState(null);
 
   // YouTube Selection State
-  const [showYoutubeModal, setShowYoutubeModal] = useState(false);
-  const [youtubeUrl, setYoutubeUrl] = useState('');
-  const [youtubeFormat, setYoutubeFormat] = useState('video');
-  const [youtubeQuality, setYoutubeQuality] = useState('720p');
-  const [isYoutubeDownloading, setIsYoutubeDownloading] = useState(false);
-  const [youtubeError, setYoutubeError] = useState(null);
-  const [selectedYoutubeInfo, setSelectedYoutubeInfo] = useState(null);
-
-  // Track deleting items to prevent flickering during polling
-  const deletingIds = useRef(new Set());
-
-  // Fetch jobs
-  const fetchJobs = async () => {
-    try {
-      const data = await mediaService.getDashboardData();
-
-      const active = data.active || [];
-      const recent = data.recent || [];
-
-      const pending = active.map(v => ({
-        id: v.id,
-        name: v.name,
-        status: v.status.toLowerCase(),
-        type: v.type,
-        progress: v.progress,
-        estTime: v.progress > 0 ? `${v.progress.toFixed(0)}%` : 'Processing...'
-      }));
-
-      const completed = recent.map(v => {
-        // Find transcript and translation URLs from the jobs array
-        const transcriptUrl = v.jobs?.find(j => j.transcript_url)?.transcript_url;
-        const translationUrl = v.jobs?.find(j => j.translation_url)?.translation_url;
-
-        return {
-          id: v.id,
-          name: v.title || v.original_filename,
-          status: v.status.toLowerCase(),
-          url: v.url,
-          thumbnailUrl: v.thumbnail_url,
-          audioUrl: v.audio_url,
-          transcriptUrl: transcriptUrl,
-          translationUrl: translationUrl,
-          mediaType: v.media_type,
-          type: v.status === 'COMPLETED' ? 'success' : 'failed'
-        };
-      });
-
-      // Filter out items that are currently marked for deletion
-      const safePending = pending.filter(job => !deletingIds.current.has(job.id));
-      const safeCompleted = completed.filter(job => !deletingIds.current.has(job.id));
-
-      setProcessingJobs(safePending);
-      setRecentJobs(safeCompleted);
-
-      // Poll only if there are pending jobs
-      setIsPolling(pending.length > 0);
-
-    } catch (error) {
-      console.error("Error fetching jobs:", error);
-      setIsPolling(false);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Initial fetch on mount
-  useEffect(() => {
-    fetchJobs();
-  }, []);
-
-  // Polling effect
-  useEffect(() => {
-    let intervalId;
-    if (isPolling) {
-      intervalId = setInterval(fetchJobs, 5000); // 5 seconds
-    }
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [isPolling]);
+  const {
+    showYoutubeModal,
+    setShowYoutubeModal,
+    youtubeUrl,
+    setYoutubeUrl,
+    youtubeFormat,
+    setYoutubeFormat,
+    youtubeQuality,
+    setYoutubeQuality,
+    isYoutubeDownloading,
+    youtubeError,
+    setYoutubeError,
+    selectedYoutubeInfo,
+    setSelectedYoutubeInfo,
+    handleYoutubeImportOnly,
+    handleYoutubeSelection
+  } = useYoutubeImport(fetchJobs, () => {
+    setSelectedFile(null);
+    setSelectedLibraryFile(null);
+  });
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -314,68 +140,7 @@ const Dashboard = () => {
     }
   };
 
-  const handleYoutubeImportOnly = async (urlOverride = null) => {
-    const targetUrl = urlOverride || (selectedYoutubeInfo ? selectedYoutubeInfo.url : youtubeUrl);
-    const targetFormat = selectedYoutubeInfo?.format || youtubeFormat;
-    const targetQuality = selectedYoutubeInfo?.quality || youtubeQuality;
-    
-    if (!targetUrl.trim()) {
-      setYoutubeError(t('originalVideos.youtubeErrorEmpty'));
-      return;
-    }
-    const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?.*v=[\w-]+|shorts\/[\w-]+)|youtu\.be\/[\w-]+)/;
-    if (!ytRegex.test(targetUrl.trim())) {
-      setYoutubeError(t('originalVideos.youtubeErrorInvalid'));
-      return;
-    }
 
-    setIsYoutubeDownloading(true);
-    setYoutubeError(null);
-
-    try {
-      await mediaService.downloadFromYoutube({
-        youtube_url: targetUrl.trim(),
-        format: targetFormat,
-        quality: targetQuality,
-        output_type: 'uploadOnly'
-      });
-
-      toast.success(t('originalVideos.youtubeSuccessMsg'));
-      setYoutubeUrl('');
-      setSelectedYoutubeInfo(null);
-      setShowYoutubeModal(false);
-      fetchJobs(); 
-    } catch (err) {
-      console.error('YouTube download failed:', err);
-      // If it's a modal error, show it there
-      if (showYoutubeModal) setYoutubeError(err.message || 'Failed to queue YouTube download.');
-      else toast.error(err.message || 'Failed to queue YouTube download.');
-    } finally {
-      setIsYoutubeDownloading(false);
-    }
-  };
-
-  const handleYoutubeSelection = () => {
-    if (!youtubeUrl.trim()) {
-      setYoutubeError(t('originalVideos.youtubeErrorEmpty'));
-      return;
-    }
-    const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?.*v=[\w-]+|shorts\/[\w-]+)|youtu\.be\/[\w-]+)/;
-    if (!ytRegex.test(youtubeUrl.trim())) {
-      setYoutubeError(t('originalVideos.youtubeErrorInvalid'));
-      return;
-    }
-
-    setSelectedYoutubeInfo({
-      url: youtubeUrl,
-      format: youtubeFormat,
-      quality: youtubeQuality
-    });
-    setSelectedFile(null);
-    setSelectedLibraryFile(null);
-    setShowYoutubeModal(false);
-    setYoutubeUrl('');
-  };
 
   // Upload a file to library only (no processing job)
   const handleUploadOnlyWithFile = async (file) => {
@@ -654,7 +419,17 @@ const Dashboard = () => {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm(t('dashboard.deleteConfirm') || "Are you sure you want to delete this job?")) {
+    const confirmResult = await Swal.fire({
+      title: t('common.warning') || 'Are you sure?',
+      text: t('dashboard.deleteConfirm') || "Are you sure you want to delete this job?",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: t('common.delete') || 'Yes, delete it!'
+    });
+
+    if (confirmResult.isConfirmed) {
       try {
         // Mark as deleting
         deletingIds.current.add(id);
@@ -1027,7 +802,16 @@ const Dashboard = () => {
                 disabled={isUploading || isYoutubeDownloading}
                 style={{ flex: 1, height: '56px', display: 'flex', justifyContent: 'center' }}
               >
-                <span>{isUploading || isYoutubeDownloading ? tx('common.uploading', 'Uploading...') : tx('dashboard.importOnly', 'Import Only')}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {isUploading || isYoutubeDownloading ? (
+                    <>
+                      <LoadingSpinner size="small" color="white" />
+                      <span>{tx('common.uploading', 'Uploading...')}</span>
+                    </>
+                  ) : (
+                    <span>{tx('dashboard.importOnly', 'Import Only')}</span>
+                  )}
+                </div>
               </button>
             )}
 
@@ -1042,90 +826,48 @@ const Dashboard = () => {
                 height: '56px'
               }}
             >
-              <span>{isUploading ? tx('dashboard.processing', 'Processing...') : tx('dashboard.startDubbing', 'Start Dubbing')}</span>
-              {!isUploading && (
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <path d="M6 4l8 6-8 6V4z" fill="currentColor" />
-                </svg>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {isUploading ? (
+                  <>
+                    <LoadingSpinner size="small" color="white" />
+                    <span>{tx('dashboard.processing', 'Processing...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{tx('dashboard.startDubbing', 'Start Dubbing')}</span>
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                      <path d="M6 4l8 6-8 6V4z" fill="currentColor" />
+                    </svg>
+                  </>
+                )}
+              </div>
             </button>
           </div>
         </div>
 
         {/* Current Processing Queue */}
-        <div className="card progress-container">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h2 className="card-title" style={{ marginBottom: 0 }}>
-              <span>⏳</span>
-              <span>{t('dashboard.currentQueue')}</span>
-            </h2>
-            <button
-              onClick={fetchJobs}
-              className="btn btn-secondary"
-              style={{ padding: '8px 16px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <span>↻</span>
-              <span>{t('dashboard.refresh')}</span>
-            </button>
-          </div>
-
-          {isLoading ? (
-            <p style={{ textAlign: 'center', padding: '20px', color: 'var(--text-light)' }}>{t('common.loading') || 'Loading...'}</p>
-          ) : processingJobs.length > 0 ? (
-            processingJobs.map((job) => (
-              <div key={job.id} className="job-item">
-                <div className="job-header">
-                  <span className="job-name">{job.name}</span>
-                  <span className="job-status">
-                    {t('dashboard.processing')}
-                  </span>
-                </div>
-                <div className="job-time">
-                  <span>{t('dashboard.estTime')}</span> {job.estTime}
-                </div>
-              </div>
-            ))
-          ) : (
-            <p style={{ color: 'var(--text-light)', textAlign: 'center', padding: '20px' }}>
-              {t('dashboard.noProcessingJobs')}
-            </p>
-          )}
-        </div>
+        <ProcessingQueue 
+          processingJobs={processingJobs}
+          isLoading={isLoading}
+          fetchJobs={fetchJobs}
+          t={t}
+        />
 
         {/* Recent Jobs */}
-        <div className="card">
-          <h2 className="card-title">
-            <span>📋</span>
-            <span>{t('dashboard.recentJobs')}</span>
-          </h2>
-
-          <div className="recent-jobs">
-            {recentJobs.map((job) => (
-              <JobItem
-                key={job.id}
-                job={job}
-                t={t}
-                onPreview={handlePreview}
-                onDownload={handleDownload}
-                onDelete={handleDelete}
-                onRetry={handleRetry}
-                onDetails={handleDetails}
-                onPreviewAudio={handlePreviewAudio}
-                onDownloadAudio={handleDownloadAudio}
-                onPreviewTranscript={handlePreviewTranscript}
-                onPreviewTranslation={handlePreviewTranslation}
-              />
-            ))}
-          </div>
-
-          <button
-            className="btn btn-primary"
-            style={{ marginTop: '24px' }}
-            onClick={handleViewFullHistory}
-          >
-            {t('dashboard.viewFullHistory')}
-          </button>
-        </div>
+        <JobList 
+          recentJobs={recentJobs}
+          t={t}
+          handlePreview={handlePreview}
+          handleDownload={handleDownload}
+          handleDelete={handleDelete}
+          handleRetry={handleRetry}
+          handleDetails={handleDetails}
+          handlePreviewAudio={handlePreviewAudio}
+          handleDownloadAudio={handleDownloadAudio}
+          handlePreviewTranscript={handlePreviewTranscript}
+          handlePreviewTranslation={handlePreviewTranslation}
+          handleViewFullHistory={handleViewFullHistory}
+        />
       </div>
       <Footer />
 
@@ -1156,106 +898,23 @@ const Dashboard = () => {
       />
 
       {/* YouTube Modal */}
-      {showYoutubeModal && (
-        <div
-          style={{
-            position: 'fixed', inset: 0, zIndex: 1000,
-            background: 'rgba(0,0,0,0.7)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowYoutubeModal(false); }}
-        >
-          <div className="card" style={{ width: '100%', maxWidth: '520px', padding: '32px', position: 'relative' }}>
-            <button
-              onClick={() => { setShowYoutubeModal(false); setYoutubeError(null); setYoutubeUrl(''); }}
-              style={{
-                position: 'absolute', top: '16px', right: '16px',
-                background: 'none', border: 'none', fontSize: '1.2rem',
-                cursor: 'pointer', color: 'var(--text-light)'
-              }}
-            >✕</button>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
-              <span style={{ fontSize: '1.5rem' }}>▶️</span>
-              <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>{t('originalVideos.youtubeModalTitle') || 'YouTube Import'}</h2>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-medium)' }}>
-                {t('originalVideos.youtubeUrlLabel') || 'YouTube URL'}
-              </label>
-              <input
-                type="url"
-                className="form-select" // Reusing form-select styles for consistency
-                style={{ width: '100%', height: '42px', padding: '0 12px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', background: 'rgba(255,255,255,0.05)', color: 'white' }}
-                placeholder={t('originalVideos.youtubeUrlPlaceholder') || 'Paste YouTube link here'}
-                value={youtubeUrl}
-                onChange={(e) => { setYoutubeUrl(e.target.value); setYoutubeError(null); }}
-              />
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-medium)' }}>
-                  {t('originalVideos.youtubeFormatLabel') || 'Format'}
-                </label>
-                <select
-                  className="form-select"
-                  value={youtubeFormat}
-                  onChange={(e) => setYoutubeFormat(e.target.value)}
-                  style={{ width: '100%' }}
-                >
-                  <option value="video">🎬 {t('originalVideos.youtubeFormatVideo') || 'Video'}</option>
-                  <option value="audio">🎵 {t('originalVideos.youtubeFormatAudio') || 'Audio'}</option>
-                </select>
-              </div>
-              {youtubeFormat === 'video' && (
-                <div>
-                  <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-medium)' }}>
-                    {t('originalVideos.youtubeQualityLabel') || 'Quality'}
-                  </label>
-                  <select
-                    className="form-select"
-                    value={youtubeQuality}
-                    onChange={(e) => setYoutubeQuality(e.target.value)}
-                    style={{ width: '100%' }}
-                  >
-                    <option value="1080p">1080p</option>
-                    <option value="720p">720p</option>
-                    <option value="480p">480p</option>
-                    <option value="360p">360p</option>
-                  </select>
-                </div>
-              )}
-            </div>
-
-            {youtubeError && (
-              <div style={{ marginBottom: '16px', color: '#ff4d4d', fontSize: '0.875rem' }}>
-                {youtubeError}
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '12px' }}>
-              <button
-                className="btn btn-secondary"
-                onClick={() => handleYoutubeImportOnly(youtubeUrl)}
-                disabled={!youtubeUrl.trim() || isYoutubeDownloading}
-                style={{ height: '48px', justifyContent: 'center' }}
-              >
-                {isYoutubeDownloading ? '...' : tx('dashboard.importOnly', 'Import Only')}
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={handleYoutubeSelection}
-                disabled={!youtubeUrl.trim() || isYoutubeDownloading}
-                style={{ height: '48px', justifyContent: 'center' }}
-              >
-                {t('common.confirm') || 'Select for Dubbing'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <YoutubeModal 
+        showYoutubeModal={showYoutubeModal}
+        setShowYoutubeModal={setShowYoutubeModal}
+        youtubeUrl={youtubeUrl}
+        setYoutubeUrl={setYoutubeUrl}
+        youtubeFormat={youtubeFormat}
+        setYoutubeFormat={setYoutubeFormat}
+        youtubeQuality={youtubeQuality}
+        setYoutubeQuality={setYoutubeQuality}
+        isYoutubeDownloading={isYoutubeDownloading}
+        youtubeError={youtubeError}
+        setYoutubeError={setYoutubeError}
+        handleYoutubeImportOnly={handleYoutubeImportOnly}
+        handleYoutubeSelection={handleYoutubeSelection}
+        t={t}
+        tx={tx}
+      />
     </div >
   );
 };

@@ -13,9 +13,6 @@ export const renderWithProviders = (ui, options = {}) => {
     ...renderOptions
   } = options;
 
-  // Set up router
-  window.history.pushState({}, 'Test page', route);
-
   // Set localStorage for language and theme
   if (language) {
     localStorage.setItem('language', language);
@@ -27,11 +24,11 @@ export const renderWithProviders = (ui, options = {}) => {
   const Wrapper = ({ children }) => {
     return (
       <BrowserRouter>
-        <LanguageProvider>
-          <ThemeProvider>
+        <ThemeProvider>
+          <LanguageProvider>
             {children}
-          </ThemeProvider>
-        </LanguageProvider>
+          </LanguageProvider>
+        </ThemeProvider>
       </BrowserRouter>
     );
   };

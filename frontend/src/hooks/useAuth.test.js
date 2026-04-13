@@ -21,10 +21,10 @@ describe('useAuth Hook', () => {
     expect(result.current.isAuthenticated).toBe(false);
   });
 
-  it('returns user from localStorage when token exists', () => {
+  it('returns user from sessionStorage when token exists', () => {
     const userData = { id: 1, username: 'testuser', email: 'test@example.com' };
-    localStorage.setItem('access_token', 'token123');
-    localStorage.setItem('user', JSON.stringify(userData));
+    sessionStorage.setItem('access_token', 'token123');
+    sessionStorage.setItem('user', JSON.stringify(userData));
     
     const { result } = renderHook(() => useAuth());
     
@@ -43,7 +43,7 @@ describe('useAuth Hook', () => {
     expect(result.current.isAuthenticated).toBe(true);
   });
 
-  it('login stores tokens in localStorage when rememberMe is true', () => {
+  it('login stores only remember_me preference in localStorage when rememberMe is true', () => {
     const { result } = renderHook(() => useAuth());
     const userData = { id: 1, username: 'testuser' };
     
@@ -51,8 +51,9 @@ describe('useAuth Hook', () => {
       result.current.login(userData, 'access123', 'refresh123', true);
     });
     
-    expect(localStorage.getItem('access_token')).toBe('access123');
-    expect(localStorage.getItem('refresh_token')).toBe('refresh123');
+    expect(sessionStorage.getItem('access_token')).toBe('access123');
+    expect(sessionStorage.getItem('refresh_token')).toBe('refresh123');
+    expect(localStorage.getItem('access_token')).toBeNull();
     expect(localStorage.getItem('remember_me')).toBe('true');
     expect(result.current.user).toEqual(userData);
     expect(result.current.isAuthenticated).toBe(true);
@@ -95,13 +96,13 @@ describe('useAuth Hook', () => {
   });
 
   it('handles invalid user data gracefully', () => {
-    localStorage.setItem('user', 'invalid json');
-    localStorage.setItem('access_token', 'token123');
+    sessionStorage.setItem('user', 'invalid json');
+    sessionStorage.setItem('access_token', 'token123');
     
     const { result } = renderHook(() => useAuth());
     
     expect(result.current.user).toBeNull();
-    expect(localStorage.getItem('access_token')).toBeNull();
+    expect(sessionStorage.getItem('access_token')).toBeNull();
   });
 
   it('listens to storage changes across tabs', () => {

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../../../hooks/useTranslation';
 import { jobService } from '../../../services/jobService';
 
+import LoadingSpinner from '../../../components/common/LoadingSpinner';
+
 /**
  * JobProgressPanel — shows real-time job progress for a given video.
  * Intended to be embedded inside the Dashboard or a modal.
@@ -53,7 +55,7 @@ const JobProgressPanel = ({ videoId, onClose }) => {
   };
 
   if (loading) {
-    return <div style={{ padding: '1rem', textAlign: 'center' }}>Loading jobs…</div>;
+    return <div style={{ padding: '1rem', textAlign: 'center' }}><LoadingSpinner size="small" /></div>;
   }
 
   if (jobs.length === 0) {

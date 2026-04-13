@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import Swal from 'sweetalert2';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../services/api';
@@ -8,6 +9,9 @@ import ChangePasswordModal from '../../components/profile/ChangePasswordModal';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
+import { useAvatarUpload } from '../../hooks/useAvatarUpload';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
+import '../../styles/home.css';
 import '../../styles/profile.css';
 
 const Profile = () => {
@@ -18,11 +22,19 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [avatarFile, setAvatarFile] = useState(null);
-  const [avatarPreview, setAvatarPreview] = useState(null);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
-  const fileInputRef = useRef(null);
+
+  const {
+    avatarFile,
+    avatarPreview,
+    uploadingAvatar,
+    fileInputRef,
+    handleAvatarChange,
+    uploadAvatar,
+    resetAvatar,
+    setAvatarPreview
+  } = useAvatarUpload();
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -83,58 +95,24 @@ const Profile = () => {
     }));
   };
 
-  const uploadAvatar = async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
 
-    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://136.112.92.233:8000/api';
-    const response = await fetch(`${API_BASE_URL}/upload/avatar`, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || 'Failed to upload avatar');
-    }
-
-    const data = await response.json();
-    return data.url;
-  };
-
-  const handleAvatarChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      // Validate file type
-      const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-      if (!validTypes.includes(file.type)) {
-        toast.error('Please select a valid image file (jpg, png, gif, webp)');
-        return;
-      }
-
-      // Validate file size (5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error('File size must be less than 5MB');
-        return;
-      }
-
-      setAvatarFile(file);
-
-      // Create preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAvatarPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   const handleChangePhoto = () => {
     fileInputRef.current?.click();
   };
 
   const handleRemovePhoto = async () => {
-    if (!window.confirm('Are you sure you want to remove your profile picture?')) {
+    const confirmResult = await Swal.fire({
+      title: t('common.warning') || 'Are you sure?',
+      text: 'Are you sure you want to remove your profile picture?',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: t('common.yes') || 'Yes, remove it!'
+    });
+
+    if (!confirmResult.isConfirmed) {
       return;
     }
 
@@ -147,8 +125,7 @@ const Profile = () => {
       });
 
       setUser(updatedUser);
-      setAvatarFile(null);
-      setAvatarPreview(null);
+      resetAvatar();
       toast.success('Profile picture removed successfully');
     } catch (err) {
       toast.error(err.message || 'Failed to remove profile picture');
@@ -168,16 +145,13 @@ const Profile = () => {
       // Upload avatar if new file is selected
       let avatarUrl = user.avatar_url;
       if (avatarFile) {
-        setUploadingAvatar(true);
         try {
-          avatarUrl = await uploadAvatar(avatarFile);
+          avatarUrl = await uploadAvatar();
         } catch (uploadError) {
           toast.error(uploadError.message || 'Failed to upload avatar');
-          setUploadingAvatar(false);
           setSaving(false);
           return;
         }
-        setUploadingAvatar(false);
       }
 
       // Prepare update data
@@ -198,8 +172,7 @@ const Profile = () => {
       const updatedUser = await api.put(`/users/${user.user_id}`, updateData);
 
       setUser(updatedUser);
-      setAvatarFile(null);
-      setAvatarPreview(null);
+      resetAvatar();
 
       // Update auth user in localStorage
       localStorage.setItem('user', JSON.stringify(updatedUser));
@@ -229,12 +202,34 @@ const Profile = () => {
     if (!user?.user_id) return;
 
     const confirmMessage = t('profile.deleteConfirm') || 'Are you sure you want to delete your account? This action cannot be undone.';
-    if (!window.confirm(confirmMessage)) {
+    const confirmResult = await Swal.fire({
+      title: t('common.warning') || 'Are you sure?',
+      text: confirmMessage,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: t('common.delete') || 'Yes, delete it!'
+    });
+
+    if (!confirmResult.isConfirmed) {
       return;
     }
 
     // Double confirmation
-    const doubleConfirm = window.prompt('Type "DELETE" to confirm account deletion:');
+    const { value: doubleConfirm } = await Swal.fire({
+      title: 'Confirm Account Deletion',
+      text: 'Type "DELETE" to confirm account deletion:',
+      input: 'text',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      inputValidator: (value) => {
+        if (!value) {
+          return 'You need to write something!';
+        }
+      }
+    });
     if (doubleConfirm !== 'DELETE') {
       return;
     }
@@ -279,7 +274,7 @@ const Profile = () => {
         <Navbar />
         <div className="main-container">
           <div style={{ textAlign: 'center', padding: '50px' }}>
-            <p>{t('profile.loading') || 'Loading profile...'}</p>
+            <LoadingSpinner size="large" />
           </div>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
+import Swal from 'sweetalert2';
 import { useTranslation } from '../../hooks/useTranslation';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
@@ -9,6 +10,10 @@ import VideoTasksModal from '../../components/common/VideoTasksModal';
 import RedubModal from '../../components/common/RedubModal';
 import { mediaService } from '../../services/mediaService';
 import taskService from '../../services/taskService';
+import { formatDate, formatDuration, formatSize } from '../../utils/formatters';
+import HistoryItem from './HistoryItem';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
+import '../../styles/home.css';
 import '../../styles/history.css';
 
 const History = () => {
@@ -56,41 +61,7 @@ const History = () => {
   // Track deleting items
   const deletingIds = React.useRef(new Set());
 
-  const formatDuration = (seconds) => {
-    if (!seconds) return '00:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
-  const formatSize = (bytes) => {
-    if (!bytes) return '0 MB';
-    const mb = bytes / (1024 * 1024);
-    return `${mb.toFixed(1)} MB`;
-  };
-
-  const formatDate = (dateString, isFullFormat = true) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    if (!isFullFormat) {
-      return date.toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: 'numeric',
-        minute: 'numeric',
-        hour12: true
-      });
-    }
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: 'numeric',
-      hour12: true
-    });
-  };
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -345,7 +316,17 @@ const History = () => {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm(t('history.deleteConfirm') || "Are you sure you want to delete this item?")) {
+    const confirmResult = await Swal.fire({
+      title: t('common.warning') || 'Are you sure?',
+      text: t('history.deleteConfirm') || "Are you sure you want to delete this item?",
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#d33',
+      cancelButtonColor: '#3085d6',
+      confirmButtonText: t('common.delete') || 'Yes, delete it!'
+    });
+
+    if (confirmResult.isConfirmed) {
       try {
         // Mark as deleting
         deletingIds.current.add(id);
@@ -472,7 +453,7 @@ const History = () => {
         <BackgroundDecorations />
         <Navbar />
         <div className="main-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-          <div className="loading-spinner" style={{ color: 'white' }}>{t('common.loading') || 'Loading history...'}</div>
+          <div className="loading-spinner"><LoadingSpinner size="large" /></div>
         </div>
         <Footer />
       </div>
@@ -634,137 +615,21 @@ const History = () => {
             </div>
           ) : (
             filteredItems.map((item) => (
-              <div key={item.id} className="history-item">
-                <div className="item-content">
-                  <div className="item-thumbnail">
-                    {item.thumbnail ? (
-                      <img src={item.thumbnail} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px' }} />
-                    ) : (
-                      item.mediaType === 'AUDIO' ? '🎵' :
-                        item.mediaType === 'TEXT' ? '📄' : '🎬'
-                    )}
-                  </div>
-                  <div className="item-details">
-                    <div className="item-header">
-                      <h3 className="item-title">{item.title}</h3>
-                      <span className={`item-status ${getStatusClass(item.status)}`}>
-                        <span>{getStatusIcon(item.status)}</span>
-                        <span>{getStatusText(item.status)}</span>
-                      </span>
-                    </div>
-
-                    {item.error && (
-                      <div className="error-message">
-                        <strong>{t('history.error')}</strong> {item.error}
-                      </div>
-                    )}
-
-
-
-                    {item.status !== 'processing' && item.status !== 'pending' && item.status !== 'failed' && (
-                      <div className="item-meta">
-                        <div className="meta-item">
-                          <span className="meta-label">{t('history.metaDomain')}</span>
-                          <span className="meta-value">{item.domain}</span>
-                        </div>
-                        <div className="meta-item">
-                          <span className="meta-label">{t('history.metaStyle')}</span>
-                          <span className="meta-value">{item.style}</span>
-                        </div>
-                        <div className="meta-item">
-                          <span className="meta-label">{t('history.metaVoice')}</span>
-                          <span className="meta-value">{item.voice}</span>
-                        </div>
-                        <div className="meta-item">
-                          <span className="meta-label">{t('history.metaDuration')}</span>
-                          <span className="meta-value">{item.duration}</span>
-                        </div>
-                        <div className="meta-item">
-                          <span className="meta-label">{t('history.metaSize')}</span>
-                          <span className="meta-value">{item.size}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="item-info">
-                      {(item.status === 'processing' || item.status === 'pending') && (
-                        <>
-                          <span>{t('history.started')}</span> {item.started}
-                        </>
-                      )}
-                      {item.status === 'failed' && (
-                        <>
-                          <span>{t('history.attempted')}</span> {item.attempted} |{' '}
-                          <span>{t('history.creditsNotCharged')}</span>
-                        </>
-                      )}
-                      {item.status === 'completed' && (
-                        <>
-                          <span>{t('history.processed')}</span> {item.processed} |{' '}
-                          <span>{t('history.creditsUsed')}</span> {item.creditsUsed}
-                        </>
-                      )}
-                    </div>
-
-                    <div className="item-actions">
-                      {/* Tasks button — always visible so user can see task history */}
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => {
-                          setTasksModalVideo({ id: item.id, title: item.title });
-                          setTasksModalOpen(true);
-                        }}
-                      >
-                        <span>📋</span>
-                        <span>Tasks</span>
-                      </button>
-
-                      {item.status === 'completed' && (
-                        <>
-                          {item.transcriptUrl && item.translationUrl && (
-                            <button
-                              className="btn btn-secondary"
-                              onClick={() => handlePreviewTextComparison(item.id)}
-                            >
-                              <span>📝</span>
-                              <span>{t('history.preview') || 'Preview'} Text</span>
-                            </button>
-                          )}
-                          <div className="action-group" style={{ display: 'flex', gap: '0.5rem' }}>
-                            <button
-                              className="btn btn-secondary"
-                              onClick={() => handlePreview(item.id)}
-                            >
-                              <span>👁</span>
-                              <span>{t('history.preview')}</span>
-                            </button>
-                            <button
-                              className="btn btn-secondary"
-                              onClick={() => handleDownload(item.id)}
-                            >
-                              <span>⬇</span>
-                              <span>{t('history.download')}</span>
-                            </button>
-                          </div>
-                          <button
-                            className="btn btn-secondary"
-                            onClick={() => handleRedub(item.id)}
-                          >
-                            <span>🔄</span>
-                            <span>{t('history.redub')}</span>
-                          </button>
-                        </>
-                      )}
-                      <button
-                        className="btn btn-danger btn-icon"
-                        onClick={() => handleDelete(item.id)}
-                      >
-                        🗑
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              <HistoryItem
+                key={item.id}
+                item={item}
+                t={t}
+                getStatusClass={getStatusClass}
+                getStatusIcon={getStatusIcon}
+                getStatusText={getStatusText}
+                setTasksModalVideo={setTasksModalVideo}
+                setTasksModalOpen={setTasksModalOpen}
+                handlePreviewTextComparison={handlePreviewTextComparison}
+                handlePreview={handlePreview}
+                handleDownload={handleDownload}
+                handleRedub={handleRedub}
+                handleDelete={handleDelete}
+              />
             ))
           )}
         </div>

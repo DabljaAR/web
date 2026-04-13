@@ -57,9 +57,10 @@ export const jobService = {
    * @param {Function} options.onProgress - Callback(job) on each poll
    * @returns {Promise<Object>} Final job object
    */
-  pollJob: async (jobId, { interval = 2000, timeout = 600000, onProgress } = {}) => {
+  pollJob: async (jobId, { interval = 2000, maxInterval = 30000, timeout = 600000, onProgress } = {}) => {
     const TERMINAL_STATES = ['COMPLETED', 'FAILED', 'CANCELLED'];
     const start = Date.now();
+    let currentInterval = interval;
 
     return new Promise((resolve, reject) => {
       const poll = async () => {
@@ -73,7 +74,9 @@ export const jobService = {
           if (TERMINAL_STATES.includes(job.status)) {
             return resolve(job);
           }
-          setTimeout(poll, interval);
+          
+          currentInterval = Math.min(currentInterval * 1.5, maxInterval);
+          setTimeout(poll, currentInterval);
         } catch (err) {
           reject(err);
         }

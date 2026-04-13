@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { BrowserRouter } from 'react-router-dom';
+import { screen } from '@testing-library/react';
+import { renderWithProviders } from '../../test/test-utils';
 import Home from './Home';
 import { useTranslation } from '../../hooks/useTranslation';
 
@@ -40,11 +40,7 @@ describe('Home Page', () => {
   });
 
   it('renders all sections', () => {
-    render(
-      <BrowserRouter>
-        <Home />
-      </BrowserRouter>
-    );
+    renderWithProviders(<Home />);
 
     expect(screen.getByTestId('hero-section')).toBeInTheDocument();
     expect(screen.getByTestId('problem-section')).toBeInTheDocument();
@@ -55,11 +51,7 @@ describe('Home Page', () => {
   });
 
   it('renders navbar and footer', () => {
-    render(
-      <BrowserRouter>
-        <Home />
-      </BrowserRouter>
-    );
+    renderWithProviders(<Home />);
 
     expect(screen.getByTestId('navbar')).toBeInTheDocument();
     expect(screen.getByTestId('footer')).toBeInTheDocument();

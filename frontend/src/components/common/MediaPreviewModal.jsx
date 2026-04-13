@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import PropTypes from 'prop-types';
 import { useTranslation } from '../../hooks/useTranslation';
 import api from '../../services/api';
 import './MediaPreviewModal.css';
@@ -231,7 +232,7 @@ const MediaPreviewModal = ({ isOpen, onClose, url, type, title, secondaryUrl, pr
                                             <div className="text-preview-error">
                                                 {textError}
                                                 <br />
-                                                <a href={url} target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Open File</a>
+                                                <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>Open File</a>
                                             </div>
                                         ) : (
                                             <pre className="text-preview-content">{textPreview}</pre>
@@ -244,7 +245,7 @@ const MediaPreviewModal = ({ isOpen, onClose, url, type, title, secondaryUrl, pr
                                             <div className="text-preview-error">
                                                 {secondaryTextError}
                                                 <br />
-                                                <a href={secondaryUrl} target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Open File</a>
+                                                <a href={secondaryUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>Open File</a>
                                             </div>
                                         ) : (
                                             <pre className="text-preview-content">{secondaryTextPreview}</pre>
@@ -255,7 +256,7 @@ const MediaPreviewModal = ({ isOpen, onClose, url, type, title, secondaryUrl, pr
                                 <div className="text-preview-error">
                                     {textError}
                                     <br />
-                                    <a href={url} target="_blank" rel="noreferrer" style={{ color: '#3b82f6' }}>Open File</a>
+                                    <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6' }}>Open File</a>
                                 </div>
                             ) : (
                                 <pre className="text-preview-content">{textPreview}</pre>
@@ -270,6 +271,17 @@ const MediaPreviewModal = ({ isOpen, onClose, url, type, title, secondaryUrl, pr
 
     // Use portal explicitly to render at document body level
     return createPortal(content, document.body);
+};
+
+MediaPreviewModal.propTypes = {
+    isOpen: PropTypes.bool.isRequired,
+    onClose: PropTypes.func.isRequired,
+    url: PropTypes.string,
+    type: PropTypes.string,
+    title: PropTypes.string,
+    secondaryUrl: PropTypes.string,
+    primaryTitle: PropTypes.string,
+    secondaryTitle: PropTypes.string,
 };
 
 export default MediaPreviewModal;

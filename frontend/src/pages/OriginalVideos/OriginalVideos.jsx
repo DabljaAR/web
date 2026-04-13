@@ -1,11 +1,16 @@
 import { useState, useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
+import Swal from 'sweetalert2';
 import { useTranslation } from '../../hooks/useTranslation';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
 import MediaPreviewModal from '../../components/common/MediaPreviewModal';
 import { mediaService } from '../../services/mediaService';
+import { formatDate, formatDuration, formatSize } from '../../utils/formatters';
+import OriginalVideoItem from './OriginalVideoItem';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
+import '../../styles/home.css';
 import '../../styles/history.css';
 import '../../styles/dashboard.css';
 
@@ -62,31 +67,7 @@ const OriginalVideos = () => {
     // Track deleting items
     const deletingIds = useRef(new Set());
 
-    const formatDuration = (seconds) => {
-        if (!seconds) return '00:00';
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
 
-    const formatSize = (bytes) => {
-        if (!bytes) return '0 MB';
-        const mb = bytes / (1024 * 1024);
-        return `${mb.toFixed(1)} MB`;
-    };
-
-    const formatDate = (dateString) => {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: 'numeric',
-            hour12: true
-        });
-    };
 
     useEffect(() => {
         const handler = setTimeout(() => {
@@ -381,7 +362,17 @@ const OriginalVideos = () => {
     };
 
     const handleDelete = async (id) => {
-        if (window.confirm(t('originalVideos.deleteConfirm') || "Are you sure you want to delete this item?")) {
+        const confirmResult = await Swal.fire({
+            title: t('common.warning') || 'Are you sure?',
+            text: t('originalVideos.deleteConfirm') || "Are you sure you want to delete this item?",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#d33',
+            cancelButtonColor: '#3085d6',
+            confirmButtonText: t('common.delete') || 'Yes, delete it!'
+        });
+
+        if (confirmResult.isConfirmed) {
             try {
                 // Mark as deleting
                 deletingIds.current.add(id);
@@ -487,7 +478,7 @@ const OriginalVideos = () => {
                 <BackgroundDecorations />
                 <Navbar />
                 <div className="main-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-                    <div className="loading-spinner" style={{ color: 'white' }}>{t('common.loading') || 'Loading original videos...'}</div>
+                    <div className="loading-spinner"><LoadingSpinner size="large" /></div>
                 </div>
                 <Footer />
             </div>
@@ -790,58 +781,17 @@ const OriginalVideos = () => {
                         </div>
                     ) : (
                         historyItems.map((item) => (
-                            <div key={item.id} className="history-item">
-                                <div className="item-content">
-                                    <div className="item-thumbnail">
-                                        {item.thumbnail ? (
-                                            <img src={item.thumbnail} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px' }} />
-                                        ) : (
-                                            item.mediaType === 'AUDIO' ? '🎵' :
-                                                item.mediaType === 'TEXT' ? '📄' : '🎬'
-                                        )}
-                                    </div>
-                                    <div className="item-details">
-                                        <div className="item-header">
-                                            <h3 className="item-title">{item.title}</h3>
-                                            <span className={`item-status ${getStatusClass(item.status)}`}>
-                                                <span>{getStatusIcon(item.status)}</span>
-                                                <span>{getStatusText(item.status)}</span>
-                                            </span>
-                                        </div>
-
-
-
-                                        <div className="item-meta">
-                                            <div className="meta-item">
-                                                <span className="meta-label">{t('originalVideos.metaDuration')}</span>
-                                                <span className="meta-value">{item.duration}</span>
-                                            </div>
-                                            <div className="meta-item">
-                                                <span className="meta-label">{t('originalVideos.metaSize')}</span>
-                                                <span className="meta-value">{item.size}</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="item-info">
-                                            <span>{t('originalVideos.started')}</span> {item.started}
-                                        </div>
-
-                                        <div className="item-actions">
-                                            {item.status === 'completed' && (
-                                                <>
-                                                    <button className="btn btn-secondary" onClick={() => handlePreview(item.id)}>
-                                                        <span>👁</span> {t('originalVideos.preview')}
-                                                    </button>
-                                                    <button className="btn btn-secondary" onClick={() => handleDownload(item.id)}>
-                                                        <span>⬇</span> {t('originalVideos.download')}
-                                                    </button>
-                                                </>
-                                            )}
-                                            <button className="btn btn-danger btn-icon" onClick={() => handleDelete(item.id)}>🗑</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                            <OriginalVideoItem 
+                                key={item.id}
+                                item={item} 
+                                t={t} 
+                                getStatusClass={getStatusClass} 
+                                getStatusIcon={getStatusIcon} 
+                                getStatusText={getStatusText} 
+                                handlePreview={handlePreview} 
+                                handleDownload={handleDownload} 
+                                handleDelete={handleDelete} 
+                            />
                         ))
                     )}
                 </div>
