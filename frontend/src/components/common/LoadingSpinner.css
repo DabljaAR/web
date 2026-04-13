@@ -46,10 +46,17 @@
   border-top-color: var(--accent-blue);
 }
 
+.spinner.secondary {
+  border-top-color: var(--accent-pink);
+}
+
 .spinner.accent {
   border-top-color: var(--accent-pink);
 }
 
+.spinner.white {
+  border-top-color: #ffffff;
+}
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
