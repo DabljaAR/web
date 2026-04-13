@@ -155,6 +155,17 @@ services:
       DEBUG: "false"
       STT_DEVICE: ${STT_DEVICE:-cpu}
       SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
+      # SILMA voice-cloning reference (mount your reference audio into the container
+      # at the path below, or set SILMA_REFERENCE_AUDIO to a different container path)
+      SILMA_REFERENCE_AUDIO: ${SILMA_REFERENCE_AUDIO:-}
+      SILMA_REFERENCE_TEXT: ${SILMA_REFERENCE_TEXT:-ويدقق النظر في القرآن الكريم وسائر الكتب السماوية ويتبع مسالك الرسل العظام عليهم الصلاة والسلام.}
+      # TTS quality tuning — defaults match config.py
+      TTS_DEFAULT_SPEED: ${TTS_DEFAULT_SPEED:-0.9}
+      TTS_DEFAULT_CFG_STRENGTH: ${TTS_DEFAULT_CFG_STRENGTH:-2.0}
+      TTS_DEFAULT_NFE_STEP: ${TTS_DEFAULT_NFE_STEP:-64}
+      TTS_DEFAULT_SWAY_COEF: ${TTS_DEFAULT_SWAY_COEF:--1.0}
+      TTS_DEFAULT_TARGET_RMS: ${TTS_DEFAULT_TARGET_RMS:-0.12}
+      # NMT model location
       NMT_MODEL_LOCAL_PATH: /model-cache/nmt-v4
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
       NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
