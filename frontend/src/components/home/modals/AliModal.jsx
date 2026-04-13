@@ -5,6 +5,7 @@ const DATA = {
   initials: 'AB',
   name: 'Ali Bassam Almasri',
   role: 'DevOps Engineer',
+  avatarImage: '/team/ali.jpeg',
   gradient: 'linear-gradient(135deg, #14b8a6 0%, #0891b2 60%, #38bdf8 100%)',
   accentColor: '#14b8a6',
   accentColor2: '#0891b2',

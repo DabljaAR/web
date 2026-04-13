@@ -5,6 +5,8 @@ const DATA = {
   initials: 'AI',
   name: 'Abdallah Ibrahim Ismail',
   role: 'Backend Developer',
+  avatarImage: '/team/Abdallah.jpeg',
+
   gradient: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 60%, #a78bfa 100%)',
   accentColor: '#6366f1',
   accentColor2: '#8b5cf6',

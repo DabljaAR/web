@@ -13,6 +13,8 @@ const teamMembers = [
     name: 'Abdallah Ibrahim Ismail',
     role: 'Backend Developer',
     avatarGradient: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+    avatarImage: '/team/Abdallah.jpeg',
+
     modal: AbdallahModal,
   },
   {
@@ -20,6 +22,8 @@ const teamMembers = [
     name: 'Moustafa Mohamed Magdy',
     role: 'ML Engineer',
     avatarGradient: 'linear-gradient(135deg, #0ea5e9, #06b6d4)',
+    avatarImage: '/team/Moustafa.jpeg',
+
     modal: MoustafaModal,
   },
   {
@@ -27,6 +31,7 @@ const teamMembers = [
     name: 'Eslam Amr',
     role: 'Full Stack Developer',
     avatarGradient: 'linear-gradient(135deg, #10b981, #059669)',
+    avatarImage: '/team/eslam.jpeg',
     modal: EslamModal,
   },
   {
@@ -34,6 +39,8 @@ const teamMembers = [
     name: 'Abdelrahman Hamdy Omran',
     role: 'Frontend Developer',
     avatarGradient: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+    avatarImage: '/team/Omran.jpeg',
+
     modal: AbdelrahmanModal,
   },
   {
@@ -41,6 +48,7 @@ const teamMembers = [
     name: 'Omar Mohamed Saied',
     role: 'AI Engineer',
     avatarGradient: 'linear-gradient(135deg, #ec4899, #f43f5e)',
+    avatarImage: '/team/omar.jpeg',
     modal: OmarModal,
   },
   {
@@ -48,6 +56,8 @@ const teamMembers = [
     name: 'Ali Bassam Almasri',
     role: 'DevOps Engineer',
     avatarGradient: 'linear-gradient(135deg, #14b8a6, #0891b2)',
+    avatarImage: '/team/ali.jpeg',
+
     modal: AliModal,
   },
 ];

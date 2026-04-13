@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 const MemberCard = ({ member }) => {
   const [open, setOpen] = useState(false);
@@ -14,7 +14,16 @@ const MemberCard = ({ member }) => {
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setOpen(true); }}
       >
         <div className="member-avatar" style={{ background: member.avatarGradient }}>
-          {member.initials}
+          {member.avatarImage ? (
+            <img
+              className="member-avatar-image"
+              src={member.avatarImage}
+              alt={member.name}
+              loading="lazy"
+            />
+          ) : (
+            member.initials
+          )}
         </div>
         <h3>{member.name}</h3>
         <p className="member-card-role">{member.role}</p>
