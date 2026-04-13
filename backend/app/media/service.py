@@ -104,9 +104,12 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                 await db.commit()
                 logger.info(f"Processing completed for {video.media_type} {video_id}")
 
-                # 6. Trigger pipeline if requested
+                # 6. Trigger pipeline if requested (skip for uploadOnly)
                 if options and video.media_type in [MediaType.VIDEO, MediaType.AUDIO]:
                     output_type = options.get("output_type", "fullDubbing")
+                    if output_type == "uploadOnly":
+                        logger.info(f"Skipping pipeline for {video_id} — upload-only mode")
+                        return
                     target_lang = options.get("target_lang", "arb_Arab")
                     logger.info(f"Triggering pipeline with output_type={output_type} for {video_id}")
 
@@ -528,11 +531,27 @@ class VideoService:
         background_tasks: BackgroundTasks,
         options: dict = None,
     ) -> Video:
+        import yt_dlp
+        import asyncio
+
+        # Validate the video exists before creating any DB record
+        ydl_opts = {"quiet": True, "skip_download": True, "noplaylist": True}
+        try:
+            loop = asyncio.get_event_loop()
+            def _check():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(youtube_url, download=False)
+            info = await loop.run_in_executor(None, _check)
+            if not info:
+                raise HTTPException(status_code=400, detail="Video not found or unavailable.")
+        except yt_dlp.utils.DownloadError as e:
+            raise HTTPException(status_code=400, detail=f"Video not found or unavailable: {str(e)}")
+
         media_type = MediaType.AUDIO if fmt == "audio" else MediaType.VIDEO
         new_video = Video(
             id=str(uuid.uuid4()),
             user_id=user_id,
-            title="Downloading from YouTube...",
+            title=info.get("title", "YouTube Video"),
             original_filename="youtube",
             file_path="",
             status=VideoStatus.PENDING,

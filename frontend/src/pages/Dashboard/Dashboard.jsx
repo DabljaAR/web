@@ -157,7 +157,7 @@ const Dashboard = () => {
   const handleTabChange = (tabName) => {
     setActiveTab(tabName);
     localStorage.setItem('dashboardActiveTab', tabName);
-    setSelectedFile(null); // Clear selected file when switching tabs
+    setSelectedFile(null);
     setSelectedLibraryFile(null); // Clear selected library file
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -278,7 +278,6 @@ const Dashboard = () => {
     const file = e.target.files?.[0];
     if (file) {
       setSelectedFile(file);
-      // alert(`File selected: ${file.name}`);
     }
   };
 
@@ -297,29 +296,133 @@ const Dashboard = () => {
     const file = e.dataTransfer.files?.[0];
     if (file) {
       setSelectedFile(file);
-      // alert(`File dropped: ${file.name}`);
     }
   };
 
-  const handleStartProcessing = async () => {
-    if (activeTab === 'text' && !formData.textInput && !selectedFile && !selectedLibraryFile) {
-      // Correct check logic for text tab
-      if (!selectedFile && !selectedLibraryFile && !formData.textInput) {
-        toast.error(t('dashboard.textPlaceholder'));
+  // Upload a file to library only (no processing job)
+  const handleUploadOnlyWithFile = async (file) => {
+    if (!file) return;
+    if (activeTab === 'video' && !file.type.startsWith('video/')) {
+      toast.error("Please upload a valid Video file.");
+      return;
+    }
+    if (activeTab === 'audio') {
+      const validAudioTypes = ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/x-m4a', 'audio/mp3'];
+      const validExtensions = ['.mp3', '.wav', '.m4a'];
+      const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+      if (!validAudioTypes.some(type => file.type.includes(type)) && !validExtensions.includes(fileExtension)) {
+        toast.error("Please upload a valid Audio file (MP3, WAV, M4A).");
         return;
       }
     }
 
-    if ((activeTab === 'video' || activeTab === 'audio') && !selectedFile && !selectedLibraryFile) {
-      toast.error(t('dashboard.selectFileError') || "Please select or upload a file first.");
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const uploadFormData = new FormData();
+      uploadFormData.append('file', file);
+      uploadFormData.append('output_type', 'uploadOnly');
+
+      let response;
+      if (activeTab === 'video') response = await mediaService.uploadVideo(uploadFormData);
+      else if (activeTab === 'audio') response = await mediaService.uploadAudio(uploadFormData);
+      else if (activeTab === 'text') response = await mediaService.uploadText(uploadFormData);
+
+      const newJob = {
+        id: response.id || 'temp-id',
+        name: file.name,
+        status: (response.status || 'completed').toLowerCase(),
+        url: response.url,
+        thumbnailUrl: response.thumbnail_url,
+        audioUrl: response.audio_url,
+        mediaType: activeTab.toUpperCase(),
+        type: 'success'
+      };
+
+      setRecentJobs(prev => [newJob, ...prev]);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      toast.success('File uploaded successfully.');
+    } catch (error) {
+      const errMsg = error.message || 'Unknown error';
+      setUploadError('Upload failed: ' + errMsg);
+      toast.error('Upload failed: ' + errMsg);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Upload a file and immediately start a dubbing job
+  const handleStartProcessingWithFile = async (file) => {
+    if (!file) return;
+    if (activeTab === 'video' && !file.type.startsWith('video/')) {
+      toast.error("Please upload a valid Video file.");
+      return;
+    }
+    if (activeTab === 'audio') {
+      const validAudioTypes = ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/x-m4a', 'audio/mp3'];
+      const validExtensions = ['.mp3', '.wav', '.m4a'];
+      const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+      if (!validAudioTypes.some(type => file.type.includes(type)) && !validExtensions.includes(fileExtension)) {
+        toast.error("Please upload a valid Audio file (MP3, WAV, M4A).");
+        return;
+      }
+    }
+
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const uploadFormData = new FormData();
+      uploadFormData.append('file', file);
+      uploadFormData.append('output_type', formData.outputType);
+      uploadFormData.append('domain', formData.domain);
+      uploadFormData.append('voice', formData.voice);
+      uploadFormData.append('translation_style', formData.translationStyle);
+
+      let response;
+      if (activeTab === 'video') response = await mediaService.uploadVideo(uploadFormData);
+      else if (activeTab === 'audio') response = await mediaService.uploadAudio(uploadFormData);
+      else if (activeTab === 'text') response = await mediaService.uploadText(uploadFormData);
+
+      const newJob = {
+        id: response.id || 'temp-id',
+        name: file.name,
+        status: (response.status || 'queued').toLowerCase(),
+        estTime: 'Processing...'
+      };
+
+      setProcessingJobs(prev => [newJob, ...prev]);
+      setIsPolling(true);
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      toast.success(t('dashboard.uploadSuccess') || 'Upload successful! Processing started.');
+    } catch (error) {
+      const errMsg = error.message || "Unknown error";
+      setUploadError("Upload failed: " + errMsg);
+      toast.error("Upload failed: " + errMsg);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // "Start Dubbing" button handler
+  const handleStartDubbingClick = async () => {
+    // New file selected: upload + start job
+    if (selectedFile) {
+      await handleStartProcessingWithFile(selectedFile);
       return;
     }
 
-    // library selection
+    // Text tab direct input
+    if (activeTab === 'text' && formData.textInput && !selectedLibraryFile) {
+      toast.success(t('dashboard.textDirectSuccess') || 'Direct text processing started! (Demo)');
+      return;
+    }
+
+    // Library file: reprocess
     if (selectedLibraryFile) {
       setIsUploading(true);
       setUploadError(null);
-
       try {
         const payload = {
           output_type: formData.outputType,
@@ -327,18 +430,16 @@ const Dashboard = () => {
           voice: formData.voice,
           translation_style: formData.translationStyle
         };
-
         const response = await mediaService.reprocessMedia(selectedLibraryFile.id, payload);
-
         const newJob = {
           id: response.id || selectedLibraryFile.id,
           name: selectedLibraryFile.title || selectedLibraryFile.original_filename,
           status: (response.status || 'queued').toLowerCase(),
           estTime: 'Processing...'
         };
-
         setProcessingJobs(prev => [newJob, ...prev]);
         setIsPolling(true);
+        setSelectedLibraryFile(null);
         toast.success(t('dashboard.uploadSuccess') || 'Processing started.');
       } catch (error) {
         console.error("Reprocess failed", error);
@@ -350,83 +451,8 @@ const Dashboard = () => {
       return;
     }
 
-    // If it's a file upload
-    if (selectedFile) {
-      // Validate file type
-      if (activeTab === 'video' && !selectedFile.type.startsWith('video/')) {
-        toast.error("Please upload a valid Video file.");
-        return;
-      }
-      if (activeTab === 'audio') {
-        const validAudioTypes = ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/x-m4a', 'audio/mp3'];
-        const validExtensions = ['.mp3', '.wav', '.m4a'];
-        const fileExtension = selectedFile.name.toLowerCase().substring(selectedFile.name.lastIndexOf('.'));
-
-        if (!validAudioTypes.some(type => selectedFile.type.includes(type)) && !validExtensions.includes(fileExtension)) {
-          toast.error("Please upload a valid Audio file (MP3, WAV, M4A).");
-          return;
-        }
-      }
-      if (activeTab === 'text' && !selectedFile.type.startsWith('text/') && !selectedFile.name.endsWith('.txt')) {
-        toast.error("Please upload a valid Text file (.txt).");
-        return;
-      }
-
-      setIsUploading(true);
-      setUploadError(null);
-
-      try {
-        const uploadFormData = new FormData();
-        // Append user ID or handle in backend via token
-        uploadFormData.append('file', selectedFile);
-
-        // Append processing options
-        uploadFormData.append('output_type', formData.outputType);
-        uploadFormData.append('domain', formData.domain);
-        uploadFormData.append('voice', formData.voice);
-        uploadFormData.append('translation_style', formData.translationStyle);
-
-        let response;
-        if (activeTab === 'video') {
-          response = await mediaService.uploadVideo(uploadFormData);
-        } else if (activeTab === 'audio') {
-          response = await mediaService.uploadAudio(uploadFormData);
-        } else if (activeTab === 'text') {
-          response = await mediaService.uploadText(uploadFormData);
-        }
-
-        // Add to processing jobs
-        const newJob = {
-          id: response.id || 'temp-id',
-          name: selectedFile.name,
-          status: (response.status || 'queued').toLowerCase(),
-          estTime: 'Processing...'
-        };
-
-        setProcessingJobs(prev => [newJob, ...prev]);
-        setIsPolling(true);
-
-        toast.success(t('dashboard.uploadSuccess') || 'Upload successful! Processing started.');
-        setSelectedFile(null); // Clear selected file
-        if (fileInputRef.current) fileInputRef.current.value = '';
-
-      } catch (error) {
-        console.error("Upload failed", error);
-        const errMsg = error.message || "Unknown error";
-        setUploadError("Upload failed: " + errMsg);
-        toast.error("Upload failed: " + errMsg);
-      } finally {
-        setIsUploading(false);
-      }
-    } else if (activeTab === 'text' && formData.textInput) {
-      // Handle direct text input (demo for now, or use a text upload endpoint with blob)
-      toast.success(t('dashboard.textDirectSuccess') || 'Direct text processing started! (Demo)');
-    } else {
-      // Fallback
-      if (!selectedFile && activeTab !== 'text') {
-        toast.error(t('dashboard.selectFileError') || "Please select a file.");
-      }
-    }
+    // No file selected
+    toast.error(t('dashboard.selectFileError') || "Please select or upload a file first.");
   };
 
   const handlePreview = (id) => {
@@ -561,6 +587,7 @@ const Dashboard = () => {
     toast(t('dashboard.upgradePremiumDemo') || 'Upgrade to Premium (Demo)');
   };
 
+
   return (
     <div className="dashboard-page">
       <BackgroundDecorations />
@@ -661,16 +688,10 @@ const Dashboard = () => {
                   </div>
                 </div>
               </div>
-
-              <div style={{ display: 'flex', justifyContent: 'center', marginTop: '12px' }}>
-                <button className="btn btn-secondary" onClick={handleFileSelect}>
-                  {activeTab === 'video' ? '⬆️ Upload Video' : activeTab === 'audio' ? '⬆️ Upload Audio' : '⬆️ Upload Text'}
-                </button>
-              </div>
             </>
           )}
 
-          {/* Selected File Display (For both Upload and Library) */}
+          {/* Selected File Display (for both new upload and library) */}
           {(selectedFile || selectedLibraryFile) && (
             <div className="selected-file-info">
               <div className="selected-file-details">
@@ -686,17 +707,29 @@ const Dashboard = () => {
                   </div>
                 </div>
               </div>
-              <button
-                className="selected-file-clear"
-                onClick={() => {
-                  setSelectedFile(null);
-                  setSelectedLibraryFile(null);
-                  if (fileInputRef.current) fileInputRef.current.value = '';
-                }}
-                title="Change selection"
-              >
-                ✕
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {selectedFile && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => handleUploadOnlyWithFile(selectedFile)}
+                    disabled={isUploading}
+                    style={{ fontSize: '0.85rem', padding: '6px 14px', whiteSpace: 'nowrap' }}
+                  >
+                    {isUploading ? 'Uploading...' : 'Upload Only'}
+                  </button>
+                )}
+                <button
+                  className="selected-file-clear"
+                  onClick={() => {
+                    setSelectedFile(null);
+                    setSelectedLibraryFile(null);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
+                  }}
+                  title="Change selection"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
           )}
 
@@ -843,14 +876,14 @@ const Dashboard = () => {
             </span>
           </div>
 
-          {/* Start Button */}
+          {/* Start Dubbing Button */}
           <button
             className="btn btn-primary"
-            onClick={handleStartProcessing}
+            onClick={handleStartDubbingClick}
             disabled={isUploading}
             style={{ opacity: isUploading ? 0.7 : 1, cursor: isUploading ? 'not-allowed' : 'pointer' }}
           >
-            <span>{isUploading ? (t('dashboard.processing') || 'Processing...') : t('dashboard.startProcessing')}</span>
+            <span>{isUploading ? (t('dashboard.processing') || 'Processing...') : (t('dashboard.startDubbing') || 'Start Dubbing')}</span>
             {!isUploading && (
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                 <path d="M6 4l8 6-8 6V4z" fill="currentColor" />
@@ -956,7 +989,6 @@ const Dashboard = () => {
         activeTab={activeTab}
         onSelect={(file) => {
           setSelectedLibraryFile(file);
-          setSelectedFile(null); // Clear manual upload selection
           setIsLibraryModalOpen(false);
         }}
       />
