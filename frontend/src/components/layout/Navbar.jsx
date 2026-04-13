@@ -91,36 +91,41 @@ const Navbar = () => {
             </Link>
             <ul className={`nav-menu ${isMenuOpen ? 'nav-menu-open' : ''}`}>
 
-              {isHomePage ? (
-                <>
-                  <li><a href="#home" onClick={(e) => handleNavClick(e, 'home')}>{t('nav.home')}</a></li>
-                  <li><a href="#features" onClick={(e) => handleNavClick(e, 'features')}>{t('nav.features')}</a></li>
-                  <li><a href="#how-it-works" onClick={(e) => handleNavClick(e, 'how-it-works')}>{t('nav.howItWorks')}</a></li>
-                  <li><a href="#demo" onClick={(e) => handleNavClick(e, 'demo')}>{t('nav.demo')}</a></li>
-                  <li><a href="#team" onClick={(e) => handleNavClick(e, 'team')}>{t('nav.team')}</a></li>
-                </>
-              ) : isAuthenticated ? (
-                <>
-                  <li><Link to="/" onClick={() => setIsMenuOpen(false)}>{t('nav.home')}</Link></li>
-                  <li><Link to="/dashboard" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/dashboard' ? 'active' : ''}>{t('nav.dashboard')}</Link></li>
-                  <li><Link to="/history" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/history' ? 'active' : ''}>{t('nav.history')}</Link></li>
-                  <li><Link to="/original-videos" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/original-videos' ? 'active' : ''}>{t('nav.myLibrary')}</Link></li>
-                  <li><Link to="/profile" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/profile' ? 'active' : ''}>{t('nav.profile')}</Link></li>
-                  <li><Link to="/about" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/about' ? 'active' : ''}>{t('nav.about')}</Link></li>
-                  <li>
-                    <div className="credits-badge">
-                      <span>🪙</span>
-                      <span>{t('nav.credits')}</span>
-                      <span>25</span>
-                    </div>
-                  </li>
-                </>
-              ) : (
-                <>
-                  <li><Link to="/" onClick={() => setIsMenuOpen(false)}>{t('nav.home')}</Link></li>
-                  <li><Link to="/about" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/about' ? 'active' : ''}>{t('nav.about')}</Link></li>
-                </>
-              )}
+              {
+                // isHomePage ? (
+                //   <>
+                //     {/* <li><a href="#home" onClick={(e) => handleNavClick(e, 'home')}>{t('nav.home')}</a></li> */}
+                //     <li><a href="#features" onClick={(e) => handleNavClick(e, 'features')}>{t('nav.features')}</a></li>
+                //     <li><a href="#how-it-works" onClick={(e) => handleNavClick(e, 'how-it-works')}>{t('nav.howItWorks')}</a></li>
+                //     <li><a href="#demo" onClick={(e) => handleNavClick(e, 'demo')}>{t('nav.demo')}</a></li>
+                //     <li><a href="#team" onClick={(e) => handleNavClick(e, 'team')}>{t('nav.team')}</a></li>
+                //   </>
+                // ) :
+                isAuthenticated ? (
+                  <>
+                    {/* <li><Link to="/" onClick={() => setIsMenuOpen(false)}>{t('nav.home')}</Link></li> */}
+                    <li><Link to="/dashboard" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/dashboard' ? 'active' : ''}>{t('nav.dashboard')}</Link></li>
+                    <li><Link to="/history" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/history' ? 'active' : ''}>{t('nav.history')}</Link></li>
+                    <li><Link to="/original-videos" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/original-videos' ? 'active' : ''}>{t('nav.myLibrary')}</Link></li>
+                    <li><Link to="/profile" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/profile' ? 'active' : ''}>{t('nav.profile')}</Link></li>
+                    <li><Link to="/about" onClick={() => setIsMenuOpen(false)} className={location.pathname === '/about' ? 'active' : ''}>{t('nav.about')}</Link></li>
+                    <li>
+                      <div className="credits-badge">
+                        <span>🪙</span>
+                        <span>{t('nav.credits')}</span>
+                        <span>25</span>
+                      </div>
+                    </li>
+                  </>
+                ) : (
+                  <>
+                    {/* <li><a href="#home" onClick={(e) => handleNavClick(e, 'home')}>{t('nav.home')}</a></li> */}
+                    <li><a href="#features" onClick={(e) => handleNavClick(e, 'features')}>{t('nav.features')}</a></li>
+                    <li><a href="#how-it-works" onClick={(e) => handleNavClick(e, 'how-it-works')}>{t('nav.howItWorks')}</a></li>
+                    <li><a href="#demo" onClick={(e) => handleNavClick(e, 'demo')}>{t('nav.demo')}</a></li>
+                    <li><a href="#team" onClick={(e) => handleNavClick(e, 'team')}>{t('nav.team')}</a></li>
+                  </>
+                )}
             </ul>
             <div className="nav-controls">
               <button className="lang-toggle" onClick={toggleLanguage} aria-label="Switch Language">
