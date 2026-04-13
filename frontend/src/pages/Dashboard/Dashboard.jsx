@@ -145,6 +145,10 @@ const JobItem = ({ job, t, onPreview, onDownload, onDelete, onRetry, onDetails, 
 
 const Dashboard = () => {
   const { t } = useTranslation();
+  const tx = (key, fallback) => {
+    const value = t(key);
+    return value && value !== key ? value : fallback;
+  };
   const { user } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -1023,7 +1027,7 @@ const Dashboard = () => {
                 disabled={isUploading || isYoutubeDownloading}
                 style={{ flex: 1, height: '56px', display: 'flex', justifyContent: 'center' }}
               >
-                <span>{isUploading || isYoutubeDownloading ? t('common.uploading') || 'Uploading...' : t('dashboard.importOnly') || 'Import Only'}</span>
+                <span>{isUploading || isYoutubeDownloading ? tx('common.uploading', 'Uploading...') : tx('dashboard.importOnly', 'Import Only')}</span>
               </button>
             )}
 
@@ -1038,7 +1042,7 @@ const Dashboard = () => {
                 height: '56px'
               }}
             >
-              <span>{isUploading ? (t('dashboard.processing') || 'Processing...') : (t('dashboard.startDubbing') || 'Start Dubbing')}</span>
+              <span>{isUploading ? tx('dashboard.processing', 'Processing...') : tx('dashboard.startDubbing', 'Start Dubbing')}</span>
               {!isUploading && (
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                   <path d="M6 4l8 6-8 6V4z" fill="currentColor" />
@@ -1238,7 +1242,7 @@ const Dashboard = () => {
                 disabled={!youtubeUrl.trim() || isYoutubeDownloading}
                 style={{ height: '48px', justifyContent: 'center' }}
               >
-                {isYoutubeDownloading ? '...' : t('dashboard.importOnly') || 'Import Only'}
+                {isYoutubeDownloading ? '...' : tx('dashboard.importOnly', 'Import Only')}
               </button>
               <button
                 className="btn btn-primary"
