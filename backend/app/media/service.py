@@ -536,11 +536,10 @@ class VideoService:
         # Validate the video exists before creating any DB record
         ydl_opts = {"quiet": True, "skip_download": True, "noplaylist": True}
         try:
-            loop = asyncio.get_event_loop()
             def _check():
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     return ydl.extract_info(youtube_url, download=False)
-            info = await loop.run_in_executor(None, _check)
+            info = await asyncio.to_thread(_check)
             if not info:
                 raise HTTPException(status_code=400, detail="Video not found or unavailable.")
         except yt_dlp.utils.DownloadError as e:
