@@ -97,6 +97,7 @@ class SilmaTTSModelManager(Task):
                 logger.info("HF_TOKEN configured for model download authentication")
             else:
                 logger.warning("HF_TOKEN not found - large model downloads may fail")
+            os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
             logger.info("Loading SILMA-TTS model...")
             try:
