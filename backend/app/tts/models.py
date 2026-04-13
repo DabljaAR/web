@@ -82,6 +82,7 @@ class SilmaTTSModelManager(Task):
         if self._model is None:
             self._configure_tts_runtime_paths()
             self._patch_catt_tashkeel_model_dir()
+            self._patch_torchaudio_load()
             try:
                 from silma_tts.api import SilmaTTS
             except ImportError as e:
@@ -207,6 +208,46 @@ class SilmaTTSModelManager(Task):
         setattr(base_cls, "_get_model_paths", _get_model_paths)
         setattr(base_cls, "_dabljaar_patch_applied", True)
         logger.info("Patched catt_tashkeel ONNX model dir to %s", model_root)
+
+    def _patch_torchaudio_load(self) -> None:
+        """Replace torchaudio.load with a soundfile-based implementation."""
+        try:
+            import torchaudio
+        except Exception as exc:
+            logger.warning("Could not import torchaudio for patching: %s", exc)
+            return
+
+        if getattr(torchaudio, "_dabljaar_patched", False):
+            return
+
+        def _sf_load(
+            path,
+            frame_offset: int = 0,
+            num_frames: int = -1,
+            normalize: bool = True,
+            channels_first: bool = True,
+            format=None,
+            buffer_size: int = 65536,
+            backend=None,
+        ):
+            del format, buffer_size, backend
+            data, sample_rate = sf.read(
+                str(path),
+                start=max(frame_offset, 0),
+                frames=num_frames if num_frames and num_frames > 0 else -1,
+                dtype="float32",
+                always_2d=True,
+            )
+            waveform = torch.from_numpy(data.T.copy())
+            if not channels_first:
+                waveform = waveform.T
+            if not normalize and waveform.dtype.is_floating_point:
+                waveform = (waveform * 32768.0).to(torch.int16)
+            return waveform, sample_rate
+
+        torchaudio.load = _sf_load
+        torchaudio._dabljaar_patched = True
+        logger.info("Patched torchaudio.load to soundfile backend to bypass torchcodec")
 
     @staticmethod
     def _is_writable_dir(path: Path) -> bool:
