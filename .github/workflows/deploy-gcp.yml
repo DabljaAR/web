@@ -152,6 +152,7 @@ jobs:
           fi
 
           # Build frontend static assets to host path mounted by Caddy at /srv.
+          rm -rf "$APP_DIR/frontend/dist"
           docker run --rm \
             -v "$APP_DIR/frontend:/frontend" \
             -w /frontend \
