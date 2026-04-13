@@ -328,6 +328,7 @@ const OriginalVideos = () => {
         try {
             const formDataToUpload = new FormData();
             formDataToUpload.append('file', selectedFile);
+            formDataToUpload.append('output_type', 'uploadOnly');
 
             await mediaService.uploadVideo(formDataToUpload);
 
@@ -350,7 +351,7 @@ const OriginalVideos = () => {
             setYoutubeError(t('originalVideos.youtubeErrorEmpty'));
             return;
         }
-        const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/;
+        const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?.*v=[\w-]+|shorts\/[\w-]+)|youtu\.be\/[\w-]+)/;
         if (!ytRegex.test(youtubeUrl.trim())) {
             setYoutubeError(t('originalVideos.youtubeErrorInvalid'));
             return;
