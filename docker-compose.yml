@@ -182,6 +182,12 @@ services:
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
       NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
       HF_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: ${HF_HOME:-/model-cache/hf}
+      HUGGINGFACE_HUB_CACHE: ${HUGGINGFACE_HUB_CACHE:-/model-cache/hf/hub}
+      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/model-cache/hf/transformers}
+      XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
+      TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
+      CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
       STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
       STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
       STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
