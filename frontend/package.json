@@ -13,12 +13,15 @@
     "test:coverage": "vitest --coverage",
     "coverage:percentage": "node scripts/get-coverage.js",
     "coverage:summary": "vitest run --coverage --coverage.reporter=text-summary"
+
   },
   "dependencies": {
+    "prop-types": "^15.8.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.11.0",
+    "sweetalert2": "^11.26.24",
     "zustand": "^5.0.9"
   },
   "devDependencies": {

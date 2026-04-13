@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { renderWithProviders } from '../../test/test-utils';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import TryItNowSection from './TryItNowSection';
 import { useAuth } from '../../hooks/useAuth';
 import { mediaService } from '../../services/mediaService';
-import { BrowserRouter } from 'react-router-dom';
 
 // Mock hooks and services
 vi.mock('../../hooks/useAuth');
@@ -19,11 +19,7 @@ vi.mock('react-router-dom', async () => {
 });
 
 const renderComponent = () => {
-    return render(
-        <BrowserRouter>
-            <TryItNowSection />
-        </BrowserRouter>
-    );
+    return renderWithProviders(<TryItNowSection />);
 };
 
 describe('TryItNowSection', () => {

@@ -1,12 +1,13 @@
 import { Navigate } from 'react-router-dom';
+import PropTypes from 'prop-types';
 import { useAuth } from '../../hooks/useAuth';
+import LoadingSpinner from './LoadingSpinner';
 
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
 
   if (loading) {
-    // You can add a loading spinner here
-    return <div>Loading...</div>;
+    return <LoadingSpinner fullPage size="large" />;
   }
 
   if (isAuthenticated) {
@@ -15,6 +16,10 @@ const PublicRoute = ({ children }) => {
   }
 
   return children;
+};
+
+PublicRoute.propTypes = {
+  children: PropTypes.node.isRequired,
 };
 
 export default PublicRoute;

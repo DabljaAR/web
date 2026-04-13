@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 import { useAuth } from './hooks/useAuth';
 
@@ -57,20 +57,29 @@ describe('App Component', () => {
     });
   });
 
-  it('renders app without errors', () => {
-    render(<App />);
+  it('renders app without errors', async () => {
+    let root;
+    await waitFor(() => {
+      root = render(<App />);
+    });
     // App should render without throwing errors
     expect(document.body).toBeInTheDocument();
   });
 
-  it('wraps app with theme and language providers', () => {
-    render(<App />);
+  it('wraps app with theme and language providers', async () => {
+    let root;
+    await waitFor(() => {
+      root = render(<App />);
+    });
     // App should render without errors, indicating providers are working
     expect(document.body).toBeInTheDocument();
   });
 
-  it('includes router in app', () => {
-    render(<App />);
+  it('includes router in app', async () => {
+    let root;
+    await waitFor(() => {
+      root = render(<App />);
+    });
     // Router should be present (no nested router errors)
     expect(document.body).toBeInTheDocument();
   });

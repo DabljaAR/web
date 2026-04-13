@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import taskService from '../../services/taskService';
+import LoadingSpinner from './LoadingSpinner';
 import './VideoTasksModal.css';
 
 const OUTPUT_TYPE_LABEL = {
@@ -123,7 +124,7 @@ function TaskPreview({ task, onBack }) {
 
 /* ── Task list ───────────────────────────────────────────────────────────── */
 function TaskList({ videoTitle, tasks, onSelect, loading }) {
-  if (loading) return <div className="vtm-state-msg">Loading tasks…</div>;
+  if (loading) return <div className="vtm-state-msg"><LoadingSpinner size="small" /></div>;
   if (!tasks.length) return <div className="vtm-state-msg">No tasks found for this video.</div>;
 
   return (
@@ -233,7 +234,7 @@ export default function VideoTasksModal({ isOpen, onClose, videoId, videoTitle }
 
         <div className="vtm-body">
           {detailLoading ? (
-            <div className="vtm-state-msg">Loading…</div>
+            <div className="vtm-state-msg"><LoadingSpinner size="medium" /></div>
           ) : selected ? (
             <TaskPreview task={selected} onBack={() => setSelected(null)} />
           ) : (

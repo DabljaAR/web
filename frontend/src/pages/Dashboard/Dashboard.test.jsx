@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import { BrowserRouter } from 'react-router-dom';
+import { renderWithProviders } from '../../test/test-utils';
+import { screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Dashboard from './Dashboard';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -60,17 +60,13 @@ describe('Dashboard Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockClear();
-    localStorage.clear();
+    sessionStorage.clear(); // changed this to session storage clear since token storage strategy changed
     useTranslation.mockReturnValue({ t: mockT });
     useAuth.mockReturnValue({ user: { username: 'testuser', first_name: 'Test' } });
     mediaService.getDashboardData.mockResolvedValue(mockJobs);
   });
 
-  const renderComponent = () => render(
-    <BrowserRouter>
-      <Dashboard />
-    </BrowserRouter>
-  );
+  const renderComponent = () => renderWithProviders(<Dashboard />);
 
   it('renders dashboard page and fetches data', async () => {
     renderComponent();

@@ -1,8 +1,9 @@
 import { useState } from 'react';
+import PropTypes from 'prop-types';
+import MemberModalBase from './modals/MemberModalBase';
 
 const MemberCard = ({ member }) => {
   const [open, setOpen] = useState(false);
-  const Modal = member.modal;
 
   return (
     <>
@@ -13,7 +14,7 @@ const MemberCard = ({ member }) => {
         tabIndex={0}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setOpen(true); }}
       >
-        <div className="member-avatar" style={{ background: member.avatarGradient }}>
+        <div className="member-avatar" style={{ background: member.gradient }}>
           {member.avatarImage ? (
             <img
               className="member-avatar-image"
@@ -37,9 +38,19 @@ const MemberCard = ({ member }) => {
         </span>
       </div>
 
-      {open && Modal && <Modal onClose={() => setOpen(false)} />}
+      {open && <MemberModalBase data={member} onClose={() => setOpen(false)} />}
     </>
   );
+};
+
+MemberCard.propTypes = {
+  member: PropTypes.shape({
+    initials: PropTypes.string.isRequired,
+    name: PropTypes.string.isRequired,
+    role: PropTypes.string.isRequired,
+    avatarImage: PropTypes.string,
+    gradient: PropTypes.string,
+  }).isRequired,
 };
 
 export default MemberCard;

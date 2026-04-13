@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import PropTypes from 'prop-types';
 
 const SKILL_STYLES = {
   // Frontend
@@ -152,12 +153,12 @@ const MemberModalBase = ({ data, onClose }) => {
               <span className="fmodal-section-label">Connect</span>
               <div className="fmodal-socials">
                 {data.github && (
-                  <a href={data.github} target="_blank" rel="noreferrer" className="fmodal-social fmodal-social--gh">
+                  <a href={data.github} target="_blank" rel="noopener noreferrer" className="fmodal-social fmodal-social--gh">
                     <GithubIcon /> GitHub
                   </a>
                 )}
                 {data.linkedin && (
-                  <a href={data.linkedin} target="_blank" rel="noreferrer" className="fmodal-social fmodal-social--li">
+                  <a href={data.linkedin} target="_blank" rel="noopener noreferrer" className="fmodal-social fmodal-social--li">
                     <LinkedinIcon /> LinkedIn
                   </a>
                 )}
@@ -190,6 +191,28 @@ const MemberModalBase = ({ data, onClose }) => {
       </div>
     </div>
   );
+};
+
+MemberModalBase.propTypes = {
+  data: PropTypes.shape({
+    initials: PropTypes.string.isRequired,
+    name: PropTypes.string.isRequired,
+    role: PropTypes.string.isRequired,
+    gradient: PropTypes.string,
+    accentColor: PropTypes.string,
+    accentColor2: PropTypes.string,
+    bio: PropTypes.string.isRequired,
+    avatarImage: PropTypes.string,
+    highlights: PropTypes.arrayOf(PropTypes.shape({
+      icon: PropTypes.string,
+      label: PropTypes.string,
+    })),
+    skills: PropTypes.arrayOf(PropTypes.string).isRequired,
+    github: PropTypes.string,
+    linkedin: PropTypes.string,
+    cvUrl: PropTypes.string,
+  }).isRequired,
+  onClose: PropTypes.func.isRequired,
 };
 
 export default MemberModalBase;

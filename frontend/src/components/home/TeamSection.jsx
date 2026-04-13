@@ -1,66 +1,6 @@
 import { useTranslation } from '../../hooks/useTranslation';
 import MemberCard from './MemberCard';
-import AbdallahModal from './modals/AbdallahModal';
-import MoustafaModal from './modals/MoustafaModal';
-import EslamModal from './modals/EslamModal';
-import AbdelrahmanModal from './modals/AbdelrahmanModal';
-import OmarModal from './modals/OmarModal';
-import AliModal from './modals/AliModal';
-
-const teamMembers = [
-  {
-    initials: 'AI',
-    name: 'Abdallah Ibrahim Ismail',
-    role: 'Backend Developer',
-    avatarGradient: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-    avatarImage: '/team/Abdallah.jpeg',
-
-    modal: AbdallahModal,
-  },
-  {
-    initials: 'MM',
-    name: 'Moustafa Mohamed Magdy',
-    role: 'ML Engineer',
-    avatarGradient: 'linear-gradient(135deg, #0ea5e9, #06b6d4)',
-    avatarImage: '/team/Moustafa.jpeg',
-
-    modal: MoustafaModal,
-  },
-  {
-    initials: 'EA',
-    name: 'Eslam Amr',
-    role: 'Full Stack Developer',
-    avatarGradient: 'linear-gradient(135deg, #10b981, #059669)',
-    avatarImage: '/team/eslam.jpeg',
-    modal: EslamModal,
-  },
-  {
-    initials: 'AH',
-    name: 'Abdelrahman Hamdy Omran',
-    role: 'Frontend Developer',
-    avatarGradient: 'linear-gradient(135deg, #f59e0b, #ef4444)',
-    avatarImage: '/team/Omran.jpeg',
-
-    modal: AbdelrahmanModal,
-  },
-  {
-    initials: 'OS',
-    name: 'Omar Mohamed Saied',
-    role: 'AI Engineer',
-    avatarGradient: 'linear-gradient(135deg, #ec4899, #f43f5e)',
-    avatarImage: '/team/omar.jpeg',
-    modal: OmarModal,
-  },
-  {
-    initials: 'AB',
-    name: 'Ali Bassam Almasri',
-    role: 'DevOps Engineer',
-    avatarGradient: 'linear-gradient(135deg, #14b8a6, #0891b2)',
-    avatarImage: '/team/ali.jpeg',
-
-    modal: AliModal,
-  },
-];
+import { teamMembers } from '../../data/teamData';
 
 const TeamSection = () => {
   const { t } = useTranslation();

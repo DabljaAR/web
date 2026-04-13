@@ -13,6 +13,7 @@ RUNTIME_DIR="$ROOT_DIR/.runtime"
 PID_DIR="$RUNTIME_DIR/pids"
 LOG_DIR="$RUNTIME_DIR/logs"
 MINIO_DATA_DIR="$RUNTIME_DIR/minio-data"
+MODEL_CACHE_DIR="$RUNTIME_DIR/model-cache"
 
 BACKEND_ENV_EXAMPLE="$BACKEND_DIR/.env.example"
 BACKEND_ENV_FILE="$BACKEND_DIR/.env"
@@ -115,7 +116,7 @@ EOF
 }
 
 ensure_runtime_dirs() {
-    mkdir -p "$RUNTIME_DIR" "$PID_DIR" "$LOG_DIR" "$MINIO_DATA_DIR"
+    mkdir -p "$RUNTIME_DIR" "$PID_DIR" "$LOG_DIR" "$MINIO_DATA_DIR" "$MODEL_CACHE_DIR"
 }
 
 pid_file_for() {
@@ -708,6 +709,16 @@ cmd_run() {
 
     log_info "Starting managed services..."
 
+    # Keep AI model caches writable in local dev (avoid /model-cache permission issues)
+    local hf_home="$MODEL_CACHE_DIR/hf"
+    local hf_hub_cache="$MODEL_CACHE_DIR/hf/hub"
+    local transformers_cache="$MODEL_CACHE_DIR/hf/transformers"
+    local xdg_cache="$MODEL_CACHE_DIR/xdg-cache"
+    local torch_home="$MODEL_CACHE_DIR/torch"
+    local nmt_local_path="$MODEL_CACHE_DIR/nmt-v4"
+    local stt_local_path="$MODEL_CACHE_DIR/whisper-small"
+    mkdir -p "$hf_home" "$hf_hub_cache" "$transformers_cache" "$xdg_cache" "$torch_home" "$nmt_local_path" "$stt_local_path"
+
     kill_port_orphans "$MINIO_PORT"
     start_managed_process "minio" "$ROOT_DIR" "MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin minio server '$MINIO_DATA_DIR' --address ':$MINIO_PORT' --console-address ':$MINIO_CONSOLE_PORT'"
     if ! wait_for_port "$MINIO_PORT" 30 1; then
@@ -715,18 +726,18 @@ cmd_run() {
     fi
 
     kill_port_orphans "$BACKEND_PORT"
-    start_managed_process "backend" "$BACKEND_DIR" "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True uv run uvicorn app.main:app --host '$BACKEND_HOST' --port '$BACKEND_PORT'"
+    start_managed_process "backend" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' uv run uvicorn app.main:app --host '$BACKEND_HOST' --port '$BACKEND_PORT'"
     if ! wait_for_port "$BACKEND_PORT" 30 1; then
         die "Backend failed to become ready on port $BACKEND_PORT. Check log: $LOG_DIR/backend.log"
     fi
 
-    start_managed_process "worker_media" "$BACKEND_DIR" "uv run celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-media@%h"
-    start_managed_process "worker_stt" "$BACKEND_DIR" "uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
-    start_managed_process "worker_nmt" "$BACKEND_DIR" "uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_nmt,ai_tts,pipeline --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
+    start_managed_process "worker_media" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' uv run celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-media@%h"
+    start_managed_process "worker_stt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' STT_MODEL_LOCAL_PATH='$stt_local_path' uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
+    start_managed_process "worker_nmt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' NMT_MODEL_LOCAL_PATH='$nmt_local_path' uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_nmt,ai_tts,pipeline --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
 
     if [[ "$ENABLE_FLOWER" -eq 1 ]]; then
         if uv run python -c "import flower" >/dev/null 2>&1; then
-            start_managed_process "flower" "$BACKEND_DIR" "FLOWER_UNAUTHENTICATED_API=true uv run celery -A app.jobs.celery_app flower --port='$FLOWER_PORT'"
+            start_managed_process "flower" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} FLOWER_UNAUTHENTICATED_API=true uv run celery -A app.jobs.celery_app flower --port='$FLOWER_PORT'"
         else
             log_warn "Flower is not installed in the backend environment. Skipping Flower startup."
             log_warn "To enable Flower, run: cd backend && uv sync --group dev"
