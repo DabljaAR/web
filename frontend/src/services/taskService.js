@@ -8,8 +8,14 @@ export const taskService = {
   getTask: (taskId) => api.get(`/tasks/${taskId}`),
 
   /** Re-run the pipeline on an existing video with a chosen output_type. */
-  startTask: (videoId, outputType) =>
-    api.post(`/media/${videoId}/reprocess`, { output_type: outputType }),
+  startTask: (videoId, outputTypeOrPayload) => {
+    const payload =
+      typeof outputTypeOrPayload === 'string'
+        ? { output_type: outputTypeOrPayload }
+        : (outputTypeOrPayload || {});
+
+    return api.post(`/videos/${videoId}/reprocess`, payload);
+  },
 };
 
 export default taskService;
