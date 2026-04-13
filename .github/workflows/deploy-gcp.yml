@@ -152,6 +152,16 @@ jobs:
           fi
 
           # Build frontend static assets to host path mounted by Caddy at /srv.
+          if [ -d "$APP_DIR/frontend/node_modules" ] && [ ! -w "$APP_DIR/frontend/node_modules" ]; then
+            if command -v sudo >/dev/null 2>&1; then
+              sudo chown -R "$(id -u):$(id -g)" "$APP_DIR/frontend/node_modules"
+            else
+              echo "frontend/node_modules is not writable and sudo is unavailable; fix ownership manually."
+              exit 1
+            fi
+          fi
+          rm -rf "$APP_DIR/frontend/node_modules"
+
           if [ -d "$APP_DIR/frontend/dist" ] && [ ! -w "$APP_DIR/frontend/dist" ]; then
             if command -v sudo >/dev/null 2>&1; then
               sudo chown -R "$(id -u):$(id -g)" "$APP_DIR/frontend/dist"
