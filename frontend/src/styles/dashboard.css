@@ -585,13 +585,25 @@ select.form-select:focus {
   gap: 24px;
 }
 
+.upload-split-container.triple {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 1024px) {
+  .upload-split-container.triple {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 @media (max-width: 768px) {
-  .upload-split-container {
+  .upload-split-container,
+  .upload-split-container.triple {
     grid-template-columns: 1fr;
   }
 }
 
-.choose-existing-area {
+.choose-existing-area,
+.youtube-import-area {
   border: 3px dashed #e5e7eb;
   border-radius: 20px;
   padding: 60px 40px;
@@ -605,7 +617,8 @@ select.form-select:focus {
   justify-content: center;
 }
 
-[data-theme="dark"] .choose-existing-area {
+[data-theme="dark"] .choose-existing-area,
+[data-theme="dark"] .youtube-import-area {
   border-color: rgba(255, 255, 255, 0.1);
 }
 
@@ -614,6 +627,13 @@ select.form-select:focus {
   background: rgba(34, 211, 238, 0.05);
   transform: translateY(-2px);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+}
+
+.youtube-import-area:hover {
+  border-color: #ff0000;
+  background: rgba(255, 0, 0, 0.05);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(255, 0, 0, 0.1);
 }
 
 /* Selected File Info */

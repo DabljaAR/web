@@ -5,11 +5,15 @@ export const mediaService = {
         return api.post('/videos/upload', formData);
     },
 
-    downloadFromYoutube: async ({ youtube_url, format, quality }) => {
+    downloadFromYoutube: async (params) => {
         const formData = new FormData();
-        formData.append('youtube_url', youtube_url);
-        formData.append('format', format);
-        formData.append('quality', quality);
+        formData.append('youtube_url', params.youtube_url);
+        formData.append('format', params.format);
+        formData.append('quality', params.quality);
+        if (params.output_type) formData.append('output_type', params.output_type);
+        if (params.domain) formData.append('domain', params.domain);
+        if (params.voice) formData.append('voice', params.voice);
+        if (params.translation_style) formData.append('translation_style', params.translation_style);
         return api.post('/videos/upload/youtube', formData);
     },
 
