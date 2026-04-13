@@ -266,7 +266,13 @@ async def process_video_hls_task(video_id: str, file_path_key: str):
 
 async def download_youtube_task(video_id: str, youtube_url: str, fmt: str, quality: str, options: dict = None):
     """Background task: download from YouTube via yt-dlp then run processing pipeline."""
-    import yt_dlp
+    try:
+        import yt_dlp
+    except ModuleNotFoundError as e:
+        raise RuntimeError(
+            "YouTube download support requires the 'yt-dlp' package to be installed "
+            "in backend dependencies."
+        ) from e
     logger.info(f"Starting YouTube download for video {video_id}: {youtube_url}")
     storage = get_storage_service()
     async with AsyncSessionLocal() as db:
