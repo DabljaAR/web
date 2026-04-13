@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
@@ -19,6 +20,7 @@ function App() {
   return (
     <ThemeProvider>
       <LanguageProvider>
+        <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
         <Router>
           <Routes>
             <Route path="/" element={<Home />} />

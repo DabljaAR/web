@@ -181,6 +181,11 @@
   background: rgba(102, 126, 234, 0.05);
 }
 
+.upload-area-youtube:hover {
+  border-color: #ff0000;
+  background: rgba(255, 0, 0, 0.05);
+}
+
 .upload-icon {
   font-size: 4rem;
   margin-bottom: 16px;

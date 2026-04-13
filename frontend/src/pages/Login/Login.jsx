@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -69,7 +70,7 @@ const Login = () => {
   };
 
   const handleGoogleLogin = () => {
-    alert(t('login.googleLoginDemo') || 'Google login (Demo)');
+    toast(t('login.googleLoginDemo') || 'Google login (Demo)');
   };
 
   return (

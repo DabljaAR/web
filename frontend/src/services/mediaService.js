@@ -5,6 +5,14 @@ export const mediaService = {
         return api.post('/videos/upload', formData);
     },
 
+    downloadFromYoutube: async ({ youtube_url, format, quality }) => {
+        const formData = new FormData();
+        formData.append('youtube_url', youtube_url);
+        formData.append('format', format);
+        formData.append('quality', quality);
+        return api.post('/videos/upload/youtube', formData);
+    },
+
     uploadAudio: async (formData) => {
         return api.post('/videos/upload/audio', formData);
     },

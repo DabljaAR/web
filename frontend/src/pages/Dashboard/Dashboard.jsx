@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../hooks/useAuth';
 import { mediaService } from '../../services/mediaService';
@@ -304,13 +305,13 @@ const Dashboard = () => {
     if (activeTab === 'text' && !formData.textInput && !selectedFile && !selectedLibraryFile) {
       // Correct check logic for text tab
       if (!selectedFile && !selectedLibraryFile && !formData.textInput) {
-        alert(t('dashboard.textPlaceholder'));
+        toast.error(t('dashboard.textPlaceholder'));
         return;
       }
     }
 
     if ((activeTab === 'video' || activeTab === 'audio') && !selectedFile && !selectedLibraryFile) {
-      alert(t('dashboard.selectFileError') || "Please select or upload a file first.");
+      toast.error(t('dashboard.selectFileError') || "Please select or upload a file first.");
       return;
     }
 
@@ -338,11 +339,11 @@ const Dashboard = () => {
 
         setProcessingJobs(prev => [newJob, ...prev]);
         setIsPolling(true);
-        alert(t('dashboard.uploadSuccess') || 'Processing started.');
+        toast.success(t('dashboard.uploadSuccess') || 'Processing started.');
       } catch (error) {
         console.error("Reprocess failed", error);
         setUploadError("Failed to start processing: " + (error.message || "Unknown error"));
-        alert(t('dashboard.uploadError') || "Failed to start processing. Please try again.");
+        toast.error(t('dashboard.uploadError') || "Failed to start processing. Please try again.");
       } finally {
         setIsUploading(false);
       }
@@ -353,7 +354,7 @@ const Dashboard = () => {
     if (selectedFile) {
       // Validate file type
       if (activeTab === 'video' && !selectedFile.type.startsWith('video/')) {
-        alert("Please upload a valid Video file.");
+        toast.error("Please upload a valid Video file.");
         return;
       }
       if (activeTab === 'audio') {
@@ -362,12 +363,12 @@ const Dashboard = () => {
         const fileExtension = selectedFile.name.toLowerCase().substring(selectedFile.name.lastIndexOf('.'));
 
         if (!validAudioTypes.some(type => selectedFile.type.includes(type)) && !validExtensions.includes(fileExtension)) {
-          alert("Please upload a valid Audio file (MP3, WAV, M4A).");
+          toast.error("Please upload a valid Audio file (MP3, WAV, M4A).");
           return;
         }
       }
       if (activeTab === 'text' && !selectedFile.type.startsWith('text/') && !selectedFile.name.endsWith('.txt')) {
-        alert("Please upload a valid Text file (.txt).");
+        toast.error("Please upload a valid Text file (.txt).");
         return;
       }
 
@@ -405,7 +406,7 @@ const Dashboard = () => {
         setProcessingJobs(prev => [newJob, ...prev]);
         setIsPolling(true);
 
-        alert(t('dashboard.uploadSuccess') || 'Upload successful! Processing started.');
+        toast.success(t('dashboard.uploadSuccess') || 'Upload successful! Processing started.');
         setSelectedFile(null); // Clear selected file
         if (fileInputRef.current) fileInputRef.current.value = '';
 
@@ -413,17 +414,17 @@ const Dashboard = () => {
         console.error("Upload failed", error);
         const errMsg = error.message || "Unknown error";
         setUploadError("Upload failed: " + errMsg);
-        alert("Upload failed: " + errMsg);
+        toast.error("Upload failed: " + errMsg);
       } finally {
         setIsUploading(false);
       }
     } else if (activeTab === 'text' && formData.textInput) {
       // Handle direct text input (demo for now, or use a text upload endpoint with blob)
-      alert(t('dashboard.textDirectSuccess') || 'Direct text processing started! (Demo)');
+      toast.success(t('dashboard.textDirectSuccess') || 'Direct text processing started! (Demo)');
     } else {
       // Fallback
       if (!selectedFile && activeTab !== 'text') {
-        alert(t('dashboard.selectFileError') || "Please select a file.");
+        toast.error(t('dashboard.selectFileError') || "Please select a file.");
       }
     }
   };
@@ -434,7 +435,7 @@ const Dashboard = () => {
       setPreviewJob(job);
       setPreviewModalOpen(true);
     } else {
-      alert(t('dashboard.noPreviewError') || "No preview URL available.");
+      toast.error(t('dashboard.noPreviewError') || "No preview URL available.");
     }
   };
 
@@ -448,7 +449,7 @@ const Dashboard = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      alert(t('dashboard.noDownloadError') || "No download URL available.");
+      toast.error(t('dashboard.noDownloadError') || "No download URL available.");
     }
   };
 
@@ -464,7 +465,7 @@ const Dashboard = () => {
       });
       setPreviewModalOpen(true);
     } else {
-      alert(t('dashboard.noAudioError') || "No audio URL available for this job.");
+      toast.error(t('dashboard.noAudioError') || "No audio URL available for this job.");
     }
   };
 
@@ -478,7 +479,7 @@ const Dashboard = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      alert(t('dashboard.noAudioError') || "No audio URL available.");
+      toast.error(t('dashboard.noAudioError') || "No audio URL available.");
     }
   };
   const handlePreviewTranscript = (id) => {
@@ -518,12 +519,11 @@ const Dashboard = () => {
         setProcessingJobs(prev => prev.filter(job => job.id !== id));
 
         await mediaService.deleteVideo(id);
-        alert(t('dashboard.deleteSuccess') || "Deleted successfully.");
+        toast.success(t('dashboard.deleteSuccess') || "Deleted successfully.");
       } catch (error) {
         console.error("Delete failed", error);
 
-        // Only show alert if it wasn't a strict "already deleted" case or similar
-        alert(t('dashboard.deleteError') || "Failed to delete job.");
+        toast.error(t('dashboard.deleteError') || "Failed to delete job.");
 
         // If failed, remove from deleting set so it can reappear/be retried
         deletingIds.current.delete(id);
@@ -546,11 +546,11 @@ const Dashboard = () => {
   };
 
   const handleRetry = (id) => {
-    alert(`${t('dashboard.retryDemo')} ${id} (Demo)`);
+    toast(`${t('dashboard.retryDemo')} ${id} (Demo)`);
   };
 
   const handleDetails = (id) => {
-    alert(`${t('dashboard.detailsDemo')} ${id} (Demo)`);
+    toast(`${t('dashboard.detailsDemo')} ${id} (Demo)`);
   };
 
   const handleViewFullHistory = () => {
@@ -558,7 +558,7 @@ const Dashboard = () => {
   };
 
   const handleUpgradePremium = () => {
-    alert(t('dashboard.upgradePremiumDemo') || 'Upgrade to Premium (Demo)');
+    toast(t('dashboard.upgradePremiumDemo') || 'Upgrade to Premium (Demo)');
   };
 
   return (
