@@ -80,6 +80,8 @@ class SilmaTTSModelManager(Task):
     def _load_model(self):
         """Load SILMA-TTS model (lazy initialization)."""
         if self._model is None:
+            self._configure_tts_runtime_paths()
+            self._patch_catt_tashkeel_model_dir()
             try:
                 from silma_tts.api import SilmaTTS
             except ImportError as e:
@@ -97,10 +99,125 @@ class SilmaTTSModelManager(Task):
                 logger.warning("HF_TOKEN not found - large model downloads may fail")
 
             logger.info("Loading SILMA-TTS model...")
-            self._model = SilmaTTS()
+            try:
+                self._model = SilmaTTS()
+            except Exception as e:
+                runtime_paths = {
+                    "HF_HOME": os.environ.get("HF_HOME", ""),
+                    "XDG_CACHE_HOME": os.environ.get("XDG_CACHE_HOME", ""),
+                    "TRANSFORMERS_CACHE": os.environ.get("TRANSFORMERS_CACHE", ""),
+                    "TORCH_HOME": os.environ.get("TORCH_HOME", ""),
+                    "CATT_TASHKEEL_MODEL_DIR": os.environ.get("CATT_TASHKEEL_MODEL_DIR", ""),
+                }
+                raise RuntimeError(
+                    "SILMA-TTS initialization failed. "
+                    f"uid={os.getuid()} paths={runtime_paths}. "
+                    "Ensure these paths are writable in celery-worker-ai."
+                ) from e
             logger.info("SILMA-TTS model loaded successfully.")
 
         return self._model
+
+    def _configure_tts_runtime_paths(self) -> None:
+        """Route runtime model caches to writable paths for non-root containers."""
+        preferred_root = Path("/model-cache")
+        fallback_root = Path(tempfile.gettempdir()) / "dabljaar" / "model-cache"
+        writable_root = preferred_root if self._is_writable_dir(preferred_root) else fallback_root
+        writable_root.mkdir(parents=True, exist_ok=True)
+
+        defaults = {
+            "HF_HOME": str(writable_root / "hf"),
+            "HUGGINGFACE_HUB_CACHE": str(writable_root / "hf" / "hub"),
+            "TRANSFORMERS_CACHE": str(writable_root / "hf" / "transformers"),
+            "XDG_CACHE_HOME": str(writable_root / "xdg-cache"),
+            "TORCH_HOME": str(writable_root / "torch"),
+            # Custom override consumed by a sitecustomize shim for catt_tashkeel.
+            "CATT_TASHKEEL_MODEL_DIR": str(writable_root / "catt_tashkeel" / "onnx_models"),
+        }
+        for env_name, default_path in defaults.items():
+            resolved = os.environ.get(env_name, "").strip() or default_path
+            os.environ[env_name] = resolved
+            Path(resolved).mkdir(parents=True, exist_ok=True)
+
+        logger.info(
+            "TTS runtime cache paths configured | root=%s | HF_HOME=%s | CATT_TASHKEEL_MODEL_DIR=%s",
+            writable_root,
+            os.environ.get("HF_HOME"),
+            os.environ.get("CATT_TASHKEEL_MODEL_DIR"),
+        )
+
+    def _patch_catt_tashkeel_model_dir(self) -> None:
+        """Monkey-patch catt_tashkeel to keep ONNX model downloads out of site-packages."""
+        try:
+            import urllib.request
+            import zipfile
+            import catt_tashkeel.models as catt_models
+        except Exception as exc:
+            logger.warning("Could not patch catt_tashkeel model dir: %s", exc)
+            return
+
+        base_cls = getattr(catt_models, "BaseONNXTashkeel", None)
+        if base_cls is None or getattr(base_cls, "_dabljaar_patch_applied", False):
+            return
+
+        model_root = Path(
+            os.environ.get("CATT_TASHKEEL_MODEL_DIR", "").strip()
+            or (Path(tempfile.gettempdir()) / "dabljaar" / "model-cache" / "catt_tashkeel" / "onnx_models")
+        )
+        model_root.mkdir(parents=True, exist_ok=True)
+
+        def _download_models(self, model_type):
+            downloads = {
+                "ed_model": "https://github.com/abjadai/catt/releases/download/v2/ed_model_onnx.zip",
+                "eo_model": "https://github.com/abjadai/catt/releases/download/v2/eo_model_onnx.zip",
+            }
+            if model_type not in downloads:
+                raise ValueError(f"Unknown model type: {model_type}")
+
+            extract_dir = model_root / model_type
+            encoder_path = extract_dir / "encoder.onnx"
+            decoder_path = extract_dir / "decoder.onnx"
+            if encoder_path.exists() and decoder_path.exists():
+                return
+
+            model_root.mkdir(parents=True, exist_ok=True)
+            extract_dir.mkdir(parents=True, exist_ok=True)
+            zip_path = model_root / f"{model_type}.zip"
+
+            try:
+                urllib.request.urlretrieve(downloads[model_type], zip_path)
+                with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                    zip_ref.extractall(extract_dir)
+            finally:
+                zip_path.unlink(missing_ok=True)
+
+        def _get_model_paths(self, encoder_path, decoder_path, model_type):
+            if encoder_path is None or decoder_path is None:
+                target_dir = model_root / model_type
+                encoder_file = target_dir / "encoder.onnx"
+                decoder_file = target_dir / "decoder.onnx"
+                if not encoder_file.exists() or not decoder_file.exists():
+                    self._download_models(model_type)
+                encoder_path = encoder_path or str(encoder_file)
+                decoder_path = decoder_path or str(decoder_file)
+            return encoder_path, decoder_path
+
+        setattr(base_cls, "_download_models", _download_models)
+        setattr(base_cls, "_get_model_paths", _get_model_paths)
+        setattr(base_cls, "_dabljaar_patch_applied", True)
+        logger.info("Patched catt_tashkeel ONNX model dir to %s", model_root)
+
+    @staticmethod
+    def _is_writable_dir(path: Path) -> bool:
+        """Return True if directory can be created and written to."""
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".write_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return True
+        except Exception:
+            return False
 
     def _ensure_short_reference_audio(self, ref_audio_path: str, *, max_seconds: float = 8.0) -> str:
         """Create (and cache) a short WAV clip of the reference audio.
