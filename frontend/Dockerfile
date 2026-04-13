@@ -13,7 +13,8 @@ RUN npm ci --legacy-peer-deps
 COPY . .
 
 # Vite reads env vars at build time, so pass API base URL into the build stage.
-ARG VITE_API_BASE_URL=http://136.112.92.233:8000/api
+# Must be provided at build time: docker build --build-arg VITE_API_BASE_URL=... .
+ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 # Build the application

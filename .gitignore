@@ -142,6 +142,7 @@ vite.config.ts.timestamp-*
 
 # minio
 data/
+!frontend/**/data/
 
 # Terraform
 infra/terraform/.terraform/
