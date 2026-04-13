@@ -20,7 +20,7 @@ describe('Constants', () => {
 
   describe('APP_NAME', () => {
     it('has correct app name', () => {
-      expect(APP_NAME).toBe('gp-react');
+      expect(APP_NAME).toBe('DabljaAR');
     });
   });
 
