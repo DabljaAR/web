@@ -93,12 +93,22 @@ async def upload_from_youtube(
     youtube_url: str = Form(...),
     format: str = Form("video"),
     quality: str = Form("720p"),
+    output_type: str = Form("uploadOnly"),
+    domain: str = Form("general"),
+    voice: str = Form("male1"),
+    translation_style: str = Form("neutral"),
     service: VideoService = Depends(get_video_service),
     current_user: User = Depends(get_current_user)
 ):
     """Queue a YouTube URL for download and processing."""
+    options = {
+        "output_type": output_type,
+        "domain": domain,
+        "voice": voice,
+        "translation_style": translation_style,
+    }
     video = await service.upload_from_youtube(
-        current_user.user_id, youtube_url, format, quality, background_tasks
+        current_user.user_id, youtube_url, format, quality, background_tasks, options=options
     )
     return VideoUploadResponse(id=video.id, status=video.status)
 

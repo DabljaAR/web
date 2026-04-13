@@ -269,7 +269,6 @@ async def download_youtube_task(video_id: str, youtube_url: str, fmt: str, quali
     import yt_dlp
     logger.info(f"Starting YouTube download for video {video_id}: {youtube_url}")
     storage = get_storage_service()
-
     async with AsyncSessionLocal() as db:
         try:
             video = await db.get(Video, video_id)
@@ -533,7 +532,7 @@ class VideoService:
     ) -> Video:
         import yt_dlp
         import asyncio
-
+        # logger.info(f"Options: test {options}")
         # Validate the video exists before creating any DB record
         ydl_opts = {"quiet": True, "skip_download": True, "noplaylist": True}
         try:
