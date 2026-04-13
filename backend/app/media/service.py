@@ -3,7 +3,7 @@ import uuid
 import logging
 import asyncio
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import UploadFile, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,11 @@ from app.jobs.models import Job, JobStatus, JobType
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 async def process_video_task(video_id: str, file_path_key: str, options: dict = None):
     """
@@ -102,8 +107,24 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                 # 6. Trigger pipeline if requested
                 if options and video.media_type in [MediaType.VIDEO, MediaType.AUDIO]:
                     output_type = options.get("output_type", "fullDubbing")
+                    target_lang = options.get("target_lang", "arb_Arab")
                     logger.info(f"Triggering pipeline with output_type={output_type} for {video_id}")
-                    
+
+                    # Create VideoTask as single source-of-truth for this pipeline run
+                    from app.tasks.models import VideoTask, TaskStatus
+                    video_task = VideoTask(
+                        id=str(uuid.uuid4()),
+                        video_id=video_id,
+                        user_id=video.user_id,
+                        source_lang=options.get("source_lang"),
+                        target_lang=target_lang,
+                        output_type=output_type,
+                        num_beams=int(options.get("num_beams", 5)),
+                        english_ratio_threshold=float(options.get("english_ratio_threshold", 0.5)),
+                        status=TaskStatus.QUEUED,
+                    )
+                    db.add(video_task)
+                    await db.flush()  # get video_task.id before creating the job
 
                     # Create the initial STT job
                     stt_job_id = str(uuid.uuid4())
@@ -115,20 +136,22 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                         status=JobStatus.QUEUED,
                         input_data={
                             **options,
-                            "audio_key": audio_key or file_path_key, # Use extracted audio if video
-                            "target_lang": "ar" # Default for now
+                            "task_id": video_task.id,
+                            "audio_key": audio_key or file_path_key,
+                            "target_lang": target_lang,
                         }
                     )
                     db.add(stt_job)
+                    video_task.root_job_id = stt_job_id
                     await db.commit()
-                    
+
                     # Enqueue the STT task directly
                     from app.jobs.tasks.pipeline import stt_transcribe
                     celery_result = stt_transcribe.apply_async(
                         kwargs={
                             "job_id": stt_job_id,
                             "video_id": video_id,
-                            "target_lang": stt_job.input_data.get("target_lang", "ar")
+                            "target_lang": target_lang,
                         },
                         task_id=stt_job_id,
                     )
@@ -430,13 +453,33 @@ class VideoService:
             raise HTTPException(status_code=400, detail="Only video/audio can be reprocessed")
 
         selected_options = options or {}
+        target_lang = selected_options.get("target_lang", "arb_Arab")
+        output_type = selected_options.get("output_type", "fullDubbing")
+
+        # Create VideoTask as single source-of-truth for this reprocess run
+        from app.tasks.models import VideoTask, TaskStatus
+        video_task = VideoTask(
+            id=str(uuid.uuid4()),
+            video_id=media.id,
+            user_id=media.user_id,
+            source_lang=selected_options.get("source_lang"),
+            target_lang=target_lang,
+            output_type=output_type,
+            num_beams=int(selected_options.get("num_beams", 5)),
+            english_ratio_threshold=float(selected_options.get("english_ratio_threshold", 0.5)),
+            status=TaskStatus.QUEUED,
+        )
+        self.db.add(video_task)
+        await self.db.flush()
+
         input_options = {
-            "output_type": selected_options.get("output_type", "fullDubbing"),
+            "output_type": output_type,
             "domain": selected_options.get("domain", "general"),
             "voice": selected_options.get("voice", "male1"),
             "translation_style": selected_options.get("translation_style", "neutral"),
-            "target_lang": "ar",
+            "target_lang": target_lang,
             "audio_key": media.audio_path or media.file_path,
+            "task_id": video_task.id,
         }
 
         stt_job = Job(
@@ -448,16 +491,17 @@ class VideoService:
             input_data=input_options,
         )
         self.db.add(stt_job)
+        video_task.root_job_id = stt_job.id
         await self.db.commit()
         await self.db.refresh(stt_job)
- 
+
         # Enqueue the STT task directly
         from app.jobs.tasks.pipeline import stt_transcribe
         celery_result = stt_transcribe.apply_async(
             kwargs={
                 "job_id": stt_job.id,
                 "video_id": media.id,
-                "target_lang": input_options["target_lang"]
+                "target_lang": target_lang,
             },
             task_id=stt_job.id,
         )
@@ -523,7 +567,7 @@ class VideoService:
 
         # Date Range Filter
         if date_range and date_range != 'allTime':
-             now = datetime.utcnow()
+             now = _utcnow()
              today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
              
              if date_range == 'today':
@@ -613,7 +657,7 @@ class VideoService:
                  try:
                      video.thumbnail_url = await self.storage.get_url(video.thumbnail_path)
                  except Exception as e:
-                     print(f"Error fetching thumbnail url: {e}")
+                     logger.warning("Error fetching thumbnail url for video %s: %s", video.id, e)
              if video.audio_path:
                  # Derive audio filename from original filename
                  audio_name = video.original_filename
@@ -625,7 +669,7 @@ class VideoService:
                  try:
                     video.audio_url = await self.storage.get_url(video.audio_path, filename=audio_name)
                  except Exception as e:
-                    print(f"Error fetching audio url: {e}")
+                    logger.warning("Error fetching audio url for video %s: %s", video.id, e)
 
              # Enrich with job-based fields (for history processing state + text preview)
              page_jobs = jobs_by_video.get(video.id, [])

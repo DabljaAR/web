@@ -1,15 +1,19 @@
 """Base Celery task class with automatic job lifecycle management."""
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
-from app.jobs.models import Job, JobStatus
-from app.media.models import Video  # noqa: F401 - needed for SQLAlchemy mapper resolution
+
 import celery
 
-from app.jobs.models import JobStatus
+from app.jobs.models import Job, JobStatus
+from app.media.models import Video  # noqa: F401 — needed for SQLAlchemy mapper resolution
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class BaseJobTask(celery.Task):
@@ -24,6 +28,10 @@ class BaseJobTask(celery.Task):
 
     The ``on_failure`` / ``on_retry`` / ``on_success`` hooks handle
     COMPLETED / FAILED / RETRYING transitions automatically.
+
+    If a task delegates final completion to a downstream chord callback,
+    it should return ``{"_skip_completion": True}`` to suppress ``on_success``
+    from marking it COMPLETED prematurely.
     """
 
     abstract = True
@@ -52,6 +60,7 @@ class BaseJobTask(celery.Task):
         from sqlalchemy.orm import sessionmaker
         from sqlalchemy.pool import NullPool
         from app.config import settings
+
         sync_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
         engine = create_engine(sync_url, poolclass=NullPool)
         return engine, sessionmaker(bind=engine)
@@ -70,8 +79,6 @@ class BaseJobTask(celery.Task):
     ) -> None:
         """Update a job row directly — no service layer to avoid circular
         imports between the task module and the service."""
-        from app.jobs.models import Job
-
         engine, SessionLocal = BaseJobTask._make_db()
         try:
             with SessionLocal() as db:
@@ -92,7 +99,101 @@ class BaseJobTask(celery.Task):
                     job.started_at = started_at
                 if completed_at is not None:
                     job.completed_at = completed_at
-                job.updated_at = datetime.utcnow()
+                job.updated_at = _utcnow()
+                db.commit()
+        finally:
+            engine.dispose()
+
+    @staticmethod
+    def _create_next_job(
+        parent_job_id: str,
+        job_type: "JobType",  # type: ignore[name-defined]
+        *,
+        input_data: Optional[dict] = None,
+    ) -> str:
+        """Create one child job row inheriting user_id/video_id from parent.
+
+        Returns the new job's ID (UUID string).
+        Raises ValueError if the parent job is not found.
+        """
+        from uuid import uuid4
+        from app.jobs.models import JobStatus as _JobStatus
+
+        new_id = str(uuid4())
+        engine, SessionLocal = BaseJobTask._make_db()
+        try:
+            with SessionLocal() as db:
+                parent = db.get(Job, parent_job_id)
+                if not parent:
+                    raise ValueError(f"Parent job {parent_job_id} not found")
+                child = Job(
+                    id=new_id,
+                    parent_job_id=parent_job_id,
+                    job_type=job_type,
+                    status=_JobStatus.QUEUED,
+                    user_id=parent.user_id,
+                    video_id=parent.video_id,
+                    input_data=input_data or {},
+                )
+                db.add(child)
+                db.commit()
+        finally:
+            engine.dispose()
+        return new_id
+
+    @staticmethod
+    def _patch_task(
+        task_id: str,
+        status: Any,
+        *,
+        progress: Optional[float] = None,
+        transcript: Optional[str] = None,
+        stt_segments: Optional[list] = None,
+        translated_transcript: Optional[str] = None,
+        segments: Optional[list] = None,
+        stt_metadata: Optional[dict] = None,
+        error_message: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+        combined_audio_key: Optional[str] = None,
+        combined_audio_url: Optional[str] = None,  # ignored — not stored in DB
+    ) -> None:
+        """Update a video_tasks row from a Celery worker.
+
+        Mirrors _patch_job but targets the VideoTask model.
+        ``combined_audio_url`` is accepted for call-site convenience but not persisted.
+        """
+        from app.tasks.models import VideoTask
+
+        engine, SessionLocal = BaseJobTask._make_db()
+        try:
+            with SessionLocal() as db:
+                task = db.get(VideoTask, task_id)
+                if task is None:
+                    logger.warning("BaseJobTask: task %s not found, skipping patch", task_id)
+                    return
+                task.status = status
+                if progress is not None:
+                    task.progress = progress
+                if transcript is not None:
+                    task.transcript = transcript
+                if stt_segments is not None:
+                    task.stt_segments = stt_segments
+                if translated_transcript is not None:
+                    task.translated_transcript = translated_transcript
+                if segments is not None:
+                    task.segments = segments
+                if stt_metadata is not None:
+                    task.stt_metadata = stt_metadata
+                if error_message is not None:
+                    task.error_message = error_message
+                if started_at is not None:
+                    task.started_at = started_at
+                if completed_at is not None:
+                    task.completed_at = completed_at
+                if combined_audio_key is not None:
+                    task.combined_audio_key = combined_audio_key
+                task.updated_at = _utcnow()
                 db.commit()
         finally:
             engine.dispose()
@@ -114,7 +215,7 @@ class BaseJobTask(celery.Task):
         job_id: Optional[str] = args[0] if args else kwargs.get("job_id")
         if isinstance(job_id, dict):
             job_id = job_id.get("job_id")
-            
+
         if not job_id:
             return
         logger.error("Task %s failed for job %s: %s", task_id, job_id, exc)
@@ -122,7 +223,7 @@ class BaseJobTask(celery.Task):
             job_id,
             JobStatus.FAILED,
             error_message=str(exc),
-            completed_at=datetime.utcnow(),
+            completed_at=_utcnow(),
         )
 
     def on_retry(self, exc, task_id, args, kwargs, einfo) -> None:
@@ -130,18 +231,25 @@ class BaseJobTask(celery.Task):
         job_id: Optional[str] = args[0] if args else kwargs.get("job_id")
         if isinstance(job_id, dict):
             job_id = job_id.get("job_id")
-            
+
         if not job_id:
             return
         logger.warning("Task %s retrying for job %s: %s", task_id, job_id, exc)
         self._patch_job(job_id, JobStatus.RETRYING, error_message=str(exc))
 
     def on_success(self, retval, task_id, args, kwargs) -> None:
-        """Called by Celery when the task succeeds."""
+        """Called by Celery when the task succeeds.
+
+        If the task returns ``{"_skip_completion": True}``, the COMPLETED
+        transition is suppressed — the downstream chord callback is responsible.
+        """
+        if isinstance(retval, dict) and retval.get("_skip_completion"):
+            return
+
         job_id: Optional[str] = args[0] if args else kwargs.get("job_id")
         if isinstance(job_id, dict):
             job_id = job_id.get("job_id")
-            
+
         if not job_id:
             return
         logger.info("Task %s succeeded for job %s", task_id, job_id)
@@ -149,5 +257,5 @@ class BaseJobTask(celery.Task):
             job_id,
             JobStatus.COMPLETED,
             progress=100.0,
-            completed_at=datetime.utcnow(),
+            completed_at=_utcnow(),
         )

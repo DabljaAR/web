@@ -126,10 +126,14 @@ class Settings(BaseSettings):
     # ========== TEXT-TO-SPEECH (TTS - SILMA) ==========
     SILMA_DEVICE: str = os.getenv("SILMA_DEVICE", "auto")  # "auto", "cpu", "cuda"
     SILMA_REFERENCE_AUDIO: str = os.getenv("SILMA_REFERENCE_AUDIO", "")  # Path to reference audio for voice cloning
-    SILMA_REFERENCE_TEXT: str = os.getenv("SILMA_REFERENCE_TEXT", "")  # Transcript of reference audio
-    TTS_DEFAULT_SPEED: float = float(os.getenv("TTS_DEFAULT_SPEED", "1.0"))  # Speech rate multiplier (1.0 = normal)
-    TTS_DEFAULT_CFG_STRENGTH: float = float(os.getenv("TTS_DEFAULT_CFG_STRENGTH", "1.0"))  # Guidance strength
-    TTS_DEFAULT_NFE_STEP: int = int(os.getenv("TTS_DEFAULT_NFE_STEP", "32"))  # Number of function evaluations
+    # Default: transcript of the bundled ar.ref.24k.wav shipped with silma_tts
+    SILMA_REFERENCE_TEXT: str = os.getenv(
+        "SILMA_REFERENCE_TEXT",
+        "ويدقق النظر في القرآن الكريم وسائر الكتب السماوية ويتبع مسالك الرسل العظام عليهم الصلاة والسلام.",
+    )
+    TTS_DEFAULT_SPEED: float = float(os.getenv("TTS_DEFAULT_SPEED", "0.9"))  # Slightly slower = more natural Arabic pacing
+    TTS_DEFAULT_CFG_STRENGTH: float = float(os.getenv("TTS_DEFAULT_CFG_STRENGTH", "2.0"))  # F5-TTS paper default; 1.0 too weak
+    TTS_DEFAULT_NFE_STEP: int = int(os.getenv("TTS_DEFAULT_NFE_STEP", "64"))  # More diffusion steps = fewer robotic artifacts
     TTS_DEFAULT_SWAY_COEF: float = float(os.getenv("TTS_DEFAULT_SWAY_COEF", "-1.0"))  # Sway sampling coefficient
     TTS_DEFAULT_TARGET_RMS: float = float(os.getenv("TTS_DEFAULT_TARGET_RMS", "0.12"))  # Target RMS for audio normalization
     
@@ -191,6 +195,60 @@ class Settings(BaseSettings):
             return "int8"
         return self.STT_COMPUTE_TYPE
     
+    def get_silma_reference_audio(self) -> str:
+        """Return the SILMA reference audio path as a WAV file.
+
+        Resolution order:
+          1. SILMA_REFERENCE_AUDIO env var (if it points to an existing file)
+          2. Auto-detect bundled ar.ref.24k.wav shipped with silma_tts package
+          3. Return empty string (caller handles missing case)
+        """
+        candidate = self._resolve_silma_audio_path()
+        if not candidate:
+            return self.SILMA_REFERENCE_AUDIO
+        if os.path.splitext(candidate)[1].lower() == ".wav":
+            return candidate
+        return self._convert_to_wav(candidate)
+
+    def _resolve_silma_audio_path(self) -> str:
+        if self.SILMA_REFERENCE_AUDIO and os.path.exists(self.SILMA_REFERENCE_AUDIO):
+            return self.SILMA_REFERENCE_AUDIO
+        try:
+            import importlib.util
+            spec = importlib.util.find_spec("silma_tts")
+            if spec:
+                pkg_root = (
+                    spec.submodule_search_locations[0]
+                    if spec.submodule_search_locations
+                    else (os.path.dirname(spec.origin) if spec.origin else None)
+                )
+                if pkg_root:
+                    bundled = os.path.join(pkg_root, "infer", "ref_audio_samples", "ar.ref.24k.wav")
+                    if os.path.exists(bundled):
+                        return bundled
+        except Exception:
+            pass
+        return ""
+
+    def _convert_to_wav(self, src: str) -> str:
+        """Convert *src* to a 24 kHz mono WAV and return the new path. Falls back to *src* on error."""
+        import subprocess
+        import tempfile
+        wav_path = os.path.join(
+            tempfile.gettempdir(),
+            os.path.splitext(os.path.basename(src))[0] + "_ref.wav",
+        )
+        if os.path.exists(wav_path):
+            return wav_path
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", src, "-ar", "24000", "-ac", "1", wav_path],
+                check=True, capture_output=True,
+            )
+            return wav_path
+        except Exception:
+            return src
+
     @property
     def is_production(self) -> bool:
         """Check if running in production."""

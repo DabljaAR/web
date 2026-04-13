@@ -73,12 +73,14 @@ celery_app.conf.update(
 
     # Queue routing
     task_routes={
-        "app.jobs.tasks.media.*":    {"queue": "media"},
-        "app.jobs.tasks.pipeline.stt_transcribe": {"queue": "ai_stt"},
-        "app.jobs.tasks.pipeline.tts_synthesize": {"queue": "ai_tts"},
-        "app.jobs.tasks.pipeline.dubbing_merge":  {"queue": "pipeline"},
-        "app.jobs.tasks.nmt.*":      {"queue": "ai_nmt"},
-        "app.jobs.tasks.tts.synthesize": {"queue": "ai_tts"},
+        "app.jobs.tasks.media.*":                              {"queue": "media"},
+        "app.jobs.tasks.pipeline.stt_transcribe":              {"queue": "ai_stt"},
+        "app.jobs.tasks.pipeline.tts_synthesize_segment":      {"queue": "ai_tts"},
+        "app.jobs.tasks.pipeline.tts_combine_results":         {"queue": "ai_tts"},
+        "app.jobs.tasks.nmt.nmt_translate":                    {"queue": "ai_nmt"},
+        "app.jobs.tasks.nmt.translate_segment":                {"queue": "ai_nmt"},
+        "app.jobs.tasks.nmt.nmt_combine_results":              {"queue": "ai_nmt"},
+        "app.jobs.tasks.tts.synthesize":                       {"queue": "ai_tts"},
     },
 
     # Autodiscovery target packages (AI modules only when INSTALL_AI=true)

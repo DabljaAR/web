@@ -11,13 +11,12 @@ Async TTS:
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.jobs.models import Job, JobType, JobStatus
-from app.jobs.schemas import JobCreate
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +84,8 @@ class TTSService:
             },
             retry_count=0,
             max_retries=3,
-            created_at=datetime.utcnow(),
-            started_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            started_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         self.db.add(job)
         await self.db.commit()

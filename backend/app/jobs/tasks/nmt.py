@@ -1,9 +1,19 @@
-import asyncio
+"""NMT Celery tasks.
+
+Parallel-chord approach:
+  nmt_translate         — reads STT segments from VideoTask, fans out one
+                          nmt_translate_segment per segment via a Celery chord.
+  nmt_translate_segment — translates a single segment; immediately dispatches
+                          its TTS segment when output_type requires it.
+  nmt_combine_results   — chord callback: sorts segment results, writes one
+                          combined DB record, updates VideoTask status.
+"""
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from app.core.db import AsyncSessionLocal
+from celery import chord, group
+
 from app.jobs.celery_app import celery_app
 from app.jobs.models import Job, JobStatus, JobType
 from app.jobs.tasks.base import BaseJobTask
@@ -11,6 +21,14 @@ from app.nmt.service import translator
 
 logger = logging.getLogger(__name__)
 
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
 
 @celery_app.task(
     bind=True,
@@ -29,172 +47,147 @@ def nmt_translate(
     source_lang: str = "auto",
     target_lang: str = "arb_Arab",
 ) -> dict:
-    """Translate the STT segments for a given NMT Job.
-
-    Fileless + segmented:
-      - Reads STT segments from the parent STT Job.output_data
-      - Writes translated segments to this Job.output_data
-      - Creates the next TTS job row as QUEUED (does not dispatch)
-
-    Notes:
-      - The dispatcher is the only component allowed to enqueue Celery tasks.
-      - This task is invoked with ``job_id`` as the first argument.
     """
-    # Compatibility: Celery chain passes prior task return (dict) as first arg.
+    Fan out one nmt_translate_segment task per STT segment, then let
+    nmt_combine_results write a single combined DB record when all finish.
+
+    Returns {"_skip_completion": True} so BaseJobTask.on_success does not
+    mark the job COMPLETED prematurely — nmt_combine_results does that.
+    """
     if isinstance(job_id, dict):
         job_id = job_id.get("job_id")
 
-    if not job_id:
-        raise ValueError("nmt_translate: job_id is required")
+    self._patch_job(
+        job_id,
+        JobStatus.PROCESSING,
+        celery_task_id=self.request.id,
+        started_at=_utcnow(),
+    )
 
-    async def _load_context():
-        async with AsyncSessionLocal() as db:
-            job = await db.get(Job, job_id)
-            if not job:
-                raise ValueError(f"Job {job_id} not found")
-
-            parent = None
-            if job.parent_job_id:
-                parent = await db.get(Job, job.parent_job_id)
-            return job, parent
-
-    nmt_job, parent_job = self._run_sync(_load_context())
-
-    # Dedicated NMT row: mark PROCESSING and read STT output from parent.
-    if nmt_job.job_type == JobType.NMT_TRANSLATE:
-        self._patch_job(
-            job_id,
-            JobStatus.PROCESSING,
-            celery_task_id=self.request.id,
-            started_at=datetime.utcnow(),
-        )
-    # Chained after ``stt_transcribe``: same row is STT — already COMPLETED; do not
-    # flip it back to PROCESSING. Use this job's persisted output_data as STT source.
-    elif nmt_job.job_type == JobType.STT_TRANSCRIBE:
-        pass
-    else:
-        self._patch_job(
-            job_id,
-            JobStatus.PROCESSING,
-            celery_task_id=self.request.id,
-            started_at=datetime.utcnow(),
-        )
-
-    if nmt_job.job_type == JobType.STT_TRANSCRIBE and (nmt_job.output_data or {}).get(
-        "segments"
-    ):
-        parent_job = nmt_job
-    elif not parent_job or not parent_job.output_data:
-        raise ValueError(f"NMT job {job_id} has no parent STT output")
-
-    parent_output = parent_job.output_data or {}
-    stt_segments = parent_output.get("segments") or []
-    stt_meta = parent_output.get("metadata") or {}
-
-    # Determine langs/output_type from this job's input_data if present.
-    input_data = nmt_job.input_data or {}
-    output_type = input_data.get("output_type", "fullDubbing")
-    resolved_source_lang = input_data.get("source_lang", source_lang)
-    resolved_target_lang = input_data.get("target_lang", target_lang)
-
-    # Build a minimal STT result for the translator.
-    stt_data = {
-        "segments": [
-            {
-                "start": seg.get("start"),
-                "end": seg.get("end"),
-                "text": seg.get("text", ""),
-                "original_text": seg.get("text", ""),
-            }
-            for seg in stt_segments
-        ],
-        "metadata": {**stt_meta},
-    }
+    # ── 1. Load STT output from VideoTask ────────────────────────────────────
+    engine, SessionLocal = BaseJobTask._make_db()
+    try:
+        with SessionLocal() as db:
+            nmt_job = db.get(Job, job_id)
+            if not nmt_job:
+                raise ValueError(f"NMT job {job_id} not found")
+            task_id = (nmt_job.input_data or {}).get("task_id")
+            if not task_id:
+                raise ValueError(f"NMT job {job_id} has no task_id in input_data")
+            from app.tasks.models import VideoTask
+            task = db.get(VideoTask, task_id)
+            if not task or task.stt_segments is None:
+                raise ValueError(f"VideoTask {task_id} has no STT segments yet")
+            stt_segments = list(task.stt_segments)
+            full_transcript = task.transcript or ""
+            resolved_source_lang = task.source_lang or source_lang
+            resolved_target_lang = task.target_lang or target_lang
+            output_type = task.output_type
+            num_beams = task.num_beams
+            english_ratio_threshold = task.english_ratio_threshold
+            video_id = nmt_job.video_id
+    finally:
+        engine.dispose()
 
     actual_src_lang = None if resolved_source_lang == "auto" else resolved_source_lang
 
-    try:
-        translated = self._run_sync(
-            asyncio.to_thread(
-                translator.translate_stt_result,
-                stt_data,
-                src_lang=actual_src_lang,
-                tgt_lang=resolved_target_lang,
-            )
-        )
-    except Exception as exc:
-        logger.error("[NMT] translation error job=%s: %s", job_id, exc)
-        raise self.retry(exc=exc)
+    logger.info(
+        "[NMT] job=%s | segments=%d | %s → %s",
+        job_id, len(stt_segments), resolved_source_lang, resolved_target_lang,
+    )
 
-    translated_segments = translated.get("segments") or []
-    output_segments = []
-    for seg in translated_segments:
-        output_segments.append(
-            {
-                "start": seg.get("start"),
-                "end": seg.get("end"),
-                "original_text": seg.get("original_text") or "",
-                "translated_text": seg.get("text") or "",
-            }
-        )
-
-    if nmt_job.job_type == JobType.STT_TRANSCRIBE:
-        existing = dict(nmt_job.output_data or {})
-        merged_segments = list(existing.get("segments") or [])
-        for i, out_seg in enumerate(output_segments):
-            if i < len(merged_segments):
-                merged_segments[i]["translated_text"] = out_seg.get(
-                    "translated_text"
-                ) or merged_segments[i].get("translated_text", "")
-            else:
-                merged_segments.append(
-                    {
-                        "start": out_seg.get("start"),
-                        "end": out_seg.get("end"),
-                        "text": out_seg.get("original_text", ""),
-                        "translated_text": out_seg.get("translated_text", ""),
-                    }
-                )
-        new_translated = " ".join(
-            s.get("translated_text", "") for s in merged_segments
-        ).strip()
+    # ── 2. Short-circuit when there are no segments ──────────────────────────
+    if not stt_segments:
+        logger.info("[NMT] No segments to translate | job=%s", job_id)
         output = {
-            **existing,
             "job_id": job_id,
-            "video_id": nmt_job.video_id,
-            "source_job_id": parent_job.id,
-            "source_lang": resolved_source_lang,
-            "target_lang": resolved_target_lang,
-            "segments": merged_segments,
-            "translated_transcript": new_translated
-            or existing.get("translated_transcript", ""),
+            "video_id": video_id,
+            "transcript": full_transcript,
+            "translated_transcript": full_transcript,
+            "segments": [],
             "metadata": {
-                **(existing.get("metadata") or {}),
-                **(translated.get("metadata") or {}),
+                "source_lang": resolved_source_lang,
+                "target_lang": resolved_target_lang,
+                "segment_count": 0,
+            },
+        }
+        self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
+        return output
+
+    self.update_progress(job_id, 5.0)
+
+    # ── 3. Pre-create TTS job if output_type requires it ────────────────────
+    # Each nmt_translate_segment will dispatch its own tts_synthesize_segment
+    # immediately after translation, so TTS runs in parallel with remaining NMT.
+    TTS_REQUIRED = {"translationAndTTS", "fullDubbing"}
+    tts_context: Optional[dict] = None
+
+    if output_type in TTS_REQUIRED and stt_segments:
+        tts_job_id = BaseJobTask._create_next_job(
+            job_id,
+            JobType.TTS_SYNTHESIZE,
+            input_data={
+                "task_id": task_id,
+                "target_lang": resolved_target_lang,
+                "output_type": output_type,
+            },
+        )
+        tts_context = {
+            "tts_job_id": tts_job_id,
+            "total_segments": len(stt_segments),
+            "ref_clip_minio_key": None,
+            "task_id": task_id,
+            "output_type": output_type,
+            "video_id": str(video_id),
+            "metadata": {
                 "source_lang": resolved_source_lang,
                 "target_lang": resolved_target_lang,
             },
         }
-    else:
-        output = {
-            "job_id": job_id,
-            "video_id": nmt_job.video_id,
-            "source_job_id": parent_job.id,
-            "source_lang": resolved_source_lang,
-            "target_lang": resolved_target_lang,
-            "segments": output_segments,
-            "metadata": {
-                **(translated.get("metadata") or {}),
-                "source_lang": resolved_source_lang,
-                "target_lang": resolved_target_lang,
-            },
-        }
+        logger.info(
+            "[NMT] TTS job %s pre-created | job=%s | segments=%d",
+            tts_job_id, job_id, len(stt_segments),
+        )
 
-    self._patch_job(job_id, JobStatus.PROCESSING, output_data=output)
-    self.update_progress(job_id, 95.0)
+    # ── 4. Fan out segment tasks via chord ───────────────────────────────────
+    segment_tasks = [
+        nmt_translate_segment.s(
+            idx,
+            str(job_id),
+            seg.get("text", "").strip(),
+            seg.get("start"),
+            seg.get("end"),
+            actual_src_lang,
+            resolved_target_lang,
+            num_beams,
+            english_ratio_threshold,
+            tts_context,
+        )
+        for idx, seg in enumerate(stt_segments)
+    ]
 
-    return output
+    chord(group(segment_tasks))(
+        nmt_combine_results.s(
+            job_id=job_id,
+            task_id=task_id,
+            video_id=video_id,
+            full_transcript=full_transcript,
+            resolved_source_lang=resolved_source_lang,
+            resolved_target_lang=resolved_target_lang,
+            output_type=output_type,
+        )
+    )
 
+    logger.info(
+        "[NMT] chord dispatched | job=%s | segment_tasks=%d | tts_pre_created=%s",
+        job_id, len(segment_tasks), bool(tts_context),
+    )
+    return {"_skip_completion": True, "job_id": job_id, "segment_count": len(segment_tasks)}
+
+
+# ---------------------------------------------------------------------------
+# Per-segment worker
+# ---------------------------------------------------------------------------
 
 @celery_app.task(
     bind=True,
@@ -212,42 +205,149 @@ def nmt_translate_segment(
     end: float,
     source_lang: Optional[str] = None,
     target_lang: str = "arb_Arab",
+    num_beams: int = 5,
+    english_ratio_threshold: float = 0.5,
+    tts_context: Optional[dict] = None,
 ) -> dict:
-    """Helper task to translate a single segment.
-
-    This task is NOT a BaseJobTask, so it DOES NOT mark the entire
-    job as COMPLETED. This prevents status flipping.
-    """
+    """Translate a single segment, then immediately dispatch its TTS segment."""
     actual_src_lang = None if (source_lang in {None, "auto"}) else source_lang
     try:
         translated_text = translator._translate_item(
-            text,
-            actual_src_lang,
-            target_lang,
-            512,
+            text, actual_src_lang, target_lang, 512,
+            num_beams=num_beams,
+            english_ratio_threshold=english_ratio_threshold,
         )
-        return {
-            "segment_id": segment_id,
-            "job_id": job_id,
-            "original_text": text,
-            "translated_text": translated_text,
-            "start": start,
-            "end": end,
-            "source_lang": source_lang or "auto",
-            "target_lang": target_lang,
-            "status": "completed",
-        }
+        status = "completed"
     except Exception as exc:
-        logger.error("[NMT] segment translate failed seg=%s job=%s: %s", segment_id, job_id, exc)
-        return {
-            "segment_id": segment_id,
-            "job_id": job_id,
-            "original_text": text,
-            "translated_text": text,
-            "start": start,
-            "end": end,
-            "source_lang": source_lang or "auto",
-            "target_lang": target_lang,
-            "status": "failed",
-            "error": str(exc),
+        logger.error("[NMT] segment %d failed job=%s: %s", segment_id, job_id, exc)
+        translated_text = text  # fall back to original
+        status = "failed"
+
+    # ── Dispatch TTS for this segment immediately ────────────────────────────
+    if tts_context:
+        try:
+            from app.jobs.tasks.pipeline import tts_synthesize_segment
+            tts_synthesize_segment.apply_async(
+                kwargs={
+                    "segment_id": segment_id,
+                    "job_id": tts_context["tts_job_id"],
+                    "text": translated_text,
+                    "start": start,
+                    "end": end,
+                    "minio_segment_key": f"tts/{tts_context['tts_job_id']}/segment_{segment_id}.wav",
+                    "ref_clip_minio_key": tts_context.get("ref_clip_minio_key"),
+                    "tts_job_id": tts_context["tts_job_id"],
+                    "total_segments": tts_context["total_segments"],
+                    "task_id": tts_context.get("task_id"),
+                    "tts_metadata": tts_context.get("metadata"),
+                    "output_type": tts_context.get("output_type", "fullDubbing"),
+                    "video_id": tts_context.get("video_id"),
+                },
+                queue="ai_tts",
+            )
+            logger.debug(
+                "[NMT] TTS dispatched for segment %d | tts_job=%s",
+                segment_id, tts_context["tts_job_id"],
+            )
+        except Exception as exc:
+            logger.error(
+                "[NMT] failed to dispatch TTS for segment %d: %s", segment_id, exc
+            )
+
+    return {
+        "segment_id": segment_id,
+        "job_id": job_id,
+        "original_text": text,
+        "translated_text": translated_text,
+        "start": start,
+        "end": end,
+        "source_lang": source_lang or "auto",
+        "target_lang": target_lang,
+        "status": status,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Chord callback — combines all segment results into one DB record
+# ---------------------------------------------------------------------------
+
+@celery_app.task(
+    name="app.jobs.tasks.nmt.nmt_combine_results",
+    max_retries=3,
+    default_retry_delay=60,
+    queue="ai_nmt",
+    soft_time_limit=300,
+    time_limit=360,
+)
+def nmt_combine_results(
+    segment_results: list,
+    *,
+    job_id: Any,
+    task_id: Optional[str] = None,
+    video_id: Any,
+    full_transcript: str,
+    resolved_source_lang: str,
+    resolved_target_lang: str,
+    output_type: str,
+) -> dict:
+    """
+    Chord callback: receives all nmt_translate_segment results, sorts them by
+    segment_id, and writes a single combined record to the DB.
+    """
+    sorted_results = sorted(segment_results, key=lambda r: r["segment_id"])
+
+    translated_segments = [
+        {
+            "start": r["start"],
+            "end": r["end"],
+            "original_text": r["original_text"],
+            "translated_text": r["translated_text"],
         }
+        for r in sorted_results
+    ]
+
+    translated_transcript = " ".join(
+        s["translated_text"] for s in translated_segments
+    ).strip()
+
+    output = {
+        "job_id": job_id,
+        "video_id": video_id,
+        "transcript": full_transcript,
+        "translated_transcript": translated_transcript,
+        "segments": translated_segments,
+        "metadata": {
+            "source_lang": resolved_source_lang,
+            "target_lang": resolved_target_lang,
+            "segment_count": len(translated_segments),
+        },
+    }
+
+    # ── Write to Job row ─────────────────────────────────────────────────────
+    BaseJobTask._patch_job(
+        job_id,
+        JobStatus.COMPLETED,
+        output_data=output,
+        progress=100.0,
+        completed_at=_utcnow(),
+    )
+
+    # ── Write translated result to VideoTask ─────────────────────────────────
+    if task_id:
+        from app.tasks.models import TaskStatus
+        captions_and_translation = output_type == "captionsAndTranslation"
+        BaseJobTask._patch_task(
+            task_id,
+            TaskStatus.COMPLETED if captions_and_translation else TaskStatus.PROCESSING,
+            translated_transcript=translated_transcript,
+            segments=translated_segments,
+            progress=100.0 if captions_and_translation else 50.0,
+            completed_at=_utcnow() if captions_and_translation else None,
+        )
+
+    failed_count = sum(1 for r in sorted_results if r.get("status") == "failed")
+    logger.info(
+        "[NMT] combined | job=%s | segments=%d | failed=%d | output_type=%s",
+        job_id, len(translated_segments), failed_count, output_type,
+    )
+    return output

@@ -16,6 +16,7 @@ from app.core.rate_limiter import limiter
 from app.core.router import router as core_router
 from app.dependencies import connect_to_db, disconnect_from_db
 from app.shared.logging import setup_logging
+from app.tasks.router import router as tasks_router
 
 _INSTALL_AI = os.getenv("INSTALL_AI", "false").lower() == "true"
 if _INSTALL_AI:
@@ -106,6 +107,11 @@ app.add_middleware(ExceptionLoggingMiddleware)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    from fastapi import HTTPException as _HTTPException
+    # HTTPException is already handled by FastAPI's default handler; re-raise it.
+    if isinstance(exc, _HTTPException):
+        raise exc
+    logger.error("Unhandled exception: %s %s — %s", request.method, request.url.path, exc)
     return JSONResponse(
         status_code=500,
         content={
@@ -130,6 +136,7 @@ app.add_middleware(
 app.include_router(core_router, prefix="/api")
 app.include_router(media_router, prefix="/api")
 app.include_router(job_router, prefix="/api")
+app.include_router(tasks_router, prefix="/api")
 if _INSTALL_AI:
     app.include_router(stt_router)  # has prefix="/api/transcription"
     app.include_router(nmt_router, prefix="/api")
