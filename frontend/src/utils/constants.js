@@ -13,7 +13,7 @@ export const API_ENDPOINTS = {
 };
 
 // App constants
-export const APP_NAME = 'gp-react';
+export const APP_NAME = 'DabljaAR';
 export const APP_VERSION = '1.0.0';
 
 // Local storage keys
