@@ -696,6 +696,8 @@ cmd_run() {
     ensure_runtime_dirs
     ensure_system_services
 
+    install_uv_if_needed
+
     if ! venv_healthy; then
         log_warn "Backend virtualenv missing or invalid. Running uv sync now."
         ensure_python_env
@@ -735,7 +737,14 @@ cmd_run() {
     if [[ "$ENABLE_FRONTEND" -eq 1 ]]; then
         kill_port_orphans "$FRONTEND_PORT"
         rm -rf "$FRONTEND_DIR/node_modules/.vite"
-        start_managed_process "frontend" "$FRONTEND_DIR" "export NVM_DIR='$NVM_DIR'; [ -s '$NVM_DIR/nvm.sh' ] && . '$NVM_DIR/nvm.sh'; nvm use '$FRONTEND_NODE_MAJOR' >/dev/null && npm run dev -- --host 0.0.0.0 --port '$FRONTEND_PORT'"
+        local frontend_cmd=""
+        if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+            frontend_cmd="export NVM_DIR='$NVM_DIR'; . '$NVM_DIR/nvm.sh'; nvm use '$FRONTEND_NODE_MAJOR' >/dev/null; npm run dev -- --host 0.0.0.0 --port '$FRONTEND_PORT'"
+        else
+            log_warn "nvm not found at $NVM_DIR/nvm.sh; using system node/npm for frontend."
+            frontend_cmd="npm run dev -- --host 0.0.0.0 --port '$FRONTEND_PORT'"
+        fi
+        start_managed_process "frontend" "$FRONTEND_DIR" "$frontend_cmd"
     fi
 
     print_runtime_summary

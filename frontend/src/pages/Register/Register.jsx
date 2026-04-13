@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -181,7 +182,7 @@ const Register = () => {
       }
 
       // Success - show message and redirect to login
-      alert(t('register.accountCreated') || 'Account created successfully! Please login with your credentials.');
+      toast.success(t('register.accountCreated') || 'Account created successfully! Please login with your credentials.');
       navigate('/login');
     } catch (error) {
       // Handle error response
@@ -280,7 +281,7 @@ const Register = () => {
   };
 
   const handleGoogleSignUp = () => {
-    alert(t('register.googleSignUpDemo') || 'Google sign up (Demo)');
+    toast(t('register.googleSignUpDemo') || 'Google sign up (Demo)');
   };
 
   return (

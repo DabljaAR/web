@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import toast from 'react-hot-toast';
 import { useTranslation } from '../../hooks/useTranslation';
 
 const DemoSection = () => {
@@ -8,7 +9,7 @@ const DemoSection = () => {
 
   const handleFile = (file) => {
     console.log('File selected:', file.name);
-    alert(`File "${file.name}" selected! (Demo - no actual upload)`);
+    toast(`File "${file.name}" selected! (Demo - no actual upload)`);
   };
 
   const handleDragOver = (e) => {

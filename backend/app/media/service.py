@@ -261,6 +261,86 @@ async def process_video_hls_task(video_id: str, file_path_key: str):
                 await db.commit()
 
 
+async def download_youtube_task(video_id: str, youtube_url: str, fmt: str, quality: str, options: dict = None):
+    """Background task: download from YouTube via yt-dlp then run processing pipeline."""
+    import yt_dlp
+    logger.info(f"Starting YouTube download for video {video_id}: {youtube_url}")
+    storage = get_storage_service()
+
+    async with AsyncSessionLocal() as db:
+        try:
+            video = await db.get(Video, video_id)
+            if not video:
+                logger.error(f"Video {video_id} not found")
+                return
+
+            video.status = VideoStatus.PROCESSING
+            await db.commit()
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                out_path = str(Path(temp_dir) / "yt_download")
+
+                if fmt == "audio":
+                    ydl_opts = {
+                        "format": "bestaudio/best",
+                        "outtmpl": out_path + ".%(ext)s",
+                        "postprocessors": [{
+                            "key": "FFmpegExtractAudio",
+                            "preferredcodec": "mp3",
+                        }],
+                        "quiet": True,
+                    }
+                else:
+                    height = quality.replace("p", "")
+                    ydl_opts = {
+                        "format": f"bestvideo[height<={height}]+bestaudio/best[height<={height}]",
+                        "outtmpl": out_path + ".%(ext)s",
+                        "merge_output_format": "mp4",
+                        "quiet": True,
+                    }
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(youtube_url, download=True)
+                    title = info.get("title", "YouTube Video")
+
+                # Find the downloaded file
+                downloaded_file = None
+                for f in Path(temp_dir).iterdir():
+                    if f.name.startswith("yt_download"):
+                        downloaded_file = f
+                        break
+
+                if not downloaded_file:
+                    raise RuntimeError("yt-dlp did not produce an output file")
+
+                # Update title from YouTube
+                video.title = title
+                video.original_filename = downloaded_file.name
+                video.size_bytes = downloaded_file.stat().st_size
+
+                # Upload to storage
+                directory = f"audio/{video.user_id}" if fmt == "audio" else f"videos/{video.user_id}"
+                file_path_key = await storage.save_file(str(downloaded_file), directory=directory)
+                video.file_path = file_path_key
+
+                if video.file_path:
+                    video.url = await storage.get_url(video.file_path)
+
+                video.status = VideoStatus.PENDING
+                await db.commit()
+
+            # Hand off to normal processing pipeline
+            await process_video_task(video_id, file_path_key, options=options)
+
+        except Exception as e:
+            logger.error(f"YouTube download failed for {video_id}: {e}")
+            video = await db.get(Video, video_id)
+            if video:
+                video.status = VideoStatus.FAILED
+                video.error_message = str(e)
+                await db.commit()
+
+
 class VideoService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -437,6 +517,33 @@ class VideoService:
         # 5. Task - Use the HLS task
         background_tasks.add_task(process_video_hls_task, new_video.id, file_path_key)
         
+        return new_video
+
+    async def upload_from_youtube(
+        self,
+        user_id: int,
+        youtube_url: str,
+        fmt: str,
+        quality: str,
+        background_tasks: BackgroundTasks,
+        options: dict = None,
+    ) -> Video:
+        media_type = MediaType.AUDIO if fmt == "audio" else MediaType.VIDEO
+        new_video = Video(
+            id=str(uuid.uuid4()),
+            user_id=user_id,
+            title="Downloading from YouTube...",
+            original_filename="youtube",
+            file_path="",
+            status=VideoStatus.PENDING,
+            media_type=media_type,
+        )
+        self.db.add(new_video)
+        await self.db.commit()
+        await self.db.refresh(new_video)
+        background_tasks.add_task(
+            download_youtube_task, new_video.id, youtube_url, fmt, quality, options
+        )
         return new_video
 
     async def reprocess_existing_media(self, user_id: int, video_id: str, options: dict | None = None):

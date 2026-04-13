@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../services/api';
@@ -107,13 +108,13 @@ const Profile = () => {
       // Validate file type
       const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
       if (!validTypes.includes(file.type)) {
-        alert('Please select a valid image file (jpg, png, gif, webp)');
+        toast.error('Please select a valid image file (jpg, png, gif, webp)');
         return;
       }
 
       // Validate file size (5MB)
       if (file.size > 5 * 1024 * 1024) {
-        alert('File size must be less than 5MB');
+        toast.error('File size must be less than 5MB');
         return;
       }
 
@@ -148,9 +149,9 @@ const Profile = () => {
       setUser(updatedUser);
       setAvatarFile(null);
       setAvatarPreview(null);
-      alert('Profile picture removed successfully');
+      toast.success('Profile picture removed successfully');
     } catch (err) {
-      alert(err.message || 'Failed to remove profile picture');
+      toast.error(err.message || 'Failed to remove profile picture');
     } finally {
       setSaving(false);
     }
@@ -171,7 +172,7 @@ const Profile = () => {
         try {
           avatarUrl = await uploadAvatar(avatarFile);
         } catch (uploadError) {
-          alert(uploadError.message || 'Failed to upload avatar');
+          toast.error(uploadError.message || 'Failed to upload avatar');
           setUploadingAvatar(false);
           setSaving(false);
           return;
@@ -203,10 +204,10 @@ const Profile = () => {
       // Update auth user in localStorage
       localStorage.setItem('user', JSON.stringify(updatedUser));
 
-      alert('Profile updated successfully!');
+      toast.success('Profile updated successfully!');
     } catch (err) {
       setError(err.message || 'Failed to update profile');
-      alert(err.message || 'Failed to update profile');
+      toast.error(err.message || 'Failed to update profile');
     } finally {
       setSaving(false);
     }
@@ -217,11 +218,11 @@ const Profile = () => {
   };
 
   const handleUpgradePremium = () => {
-    alert('Upgrade to Premium (Demo)');
+    toast('Upgrade to Premium (Demo)');
   };
 
   const handleBuyCredits = () => {
-    alert('Buy Credits (Demo)');
+    toast('Buy Credits (Demo)');
   };
 
   const handleDeleteAccount = async () => {
@@ -244,10 +245,10 @@ const Profile = () => {
 
       // Logout and redirect
       logout();
-      alert('Your account has been deleted successfully');
+      toast.success('Your account has been deleted successfully');
       window.location.href = '/';
     } catch (err) {
-      alert(err.message || 'Failed to delete account');
+      toast.error(err.message || 'Failed to delete account');
       setSaving(false);
     }
   };

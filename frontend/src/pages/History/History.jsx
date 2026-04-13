@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import toast from 'react-hot-toast';
 import { useTranslation } from '../../hooks/useTranslation';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
@@ -247,7 +248,7 @@ const History = () => {
   const handlePreviewTextComparison = (id) => {
     const item = historyItems.find(i => i.id === id);
     if (!item || !item.transcriptUrl || !item.translationUrl) {
-      alert(t('dashboard.noPreviewError') || 'No text preview available.');
+      toast.error(t('dashboard.noPreviewError') || 'No text preview available.');
       return;
     }
 
@@ -314,7 +315,7 @@ const History = () => {
       });
       setPreviewModalOpen(true);
     } else {
-      alert(t('dashboard.noPreviewError') || "No preview URL available.");
+      toast.error(t('dashboard.noPreviewError') || "No preview URL available.");
     }
   };
 
@@ -328,7 +329,7 @@ const History = () => {
       link.click();
       document.body.removeChild(link);
     } else {
-      alert(t('dashboard.noPreviewError') || "No download URL available.");
+      toast.error(t('dashboard.noPreviewError') || "No download URL available.");
     }
   };
 
@@ -400,10 +401,10 @@ const History = () => {
         setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
         setPagination(prev => ({ ...prev, total, pages, totalCompleted, totalFailed }));
 
-        alert(t('dashboard.deleteSuccess') || "Deleted successfully.");
+        toast.success(t('dashboard.deleteSuccess') || "Deleted successfully.");
       } catch (err) {
         console.error("Failed to delete video:", err);
-        alert(t('dashboard.deleteError') || "Failed to delete video");
+        toast.error(t('dashboard.deleteError') || "Failed to delete video");
 
         deletingIds.current.delete(id);
         // Revert UI if needed by reloading
@@ -597,15 +598,15 @@ const History = () => {
               </select>
             </div>
 
-            <div className="filter-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
-              <button
-                className="btn btn-secondary"
-                onClick={handleResetFilters}
-                style={{ height: '42px' }}
-              >
-                {t('history.resetFilters', 'Reset Filters')}
-              </button>
-            </div>
+          </div>
+          <div style={{ display: 'flex', marginTop: '12px' }}>
+            <button
+              className="btn btn-secondary"
+              onClick={handleResetFilters}
+              style={{ height: '42px', marginInlineEnd: 'auto' }}
+            >
+              {t('history.resetFilters', 'Reset Filters')}
+            </button>
           </div>
         </div>
 

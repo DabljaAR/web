@@ -87,6 +87,21 @@ async def upload_text(
     text = await service.upload_text(current_user.user_id, file, background_tasks, options=options)
     return VideoUploadResponse(id=text.id, status=text.status)
 
+@router.post("/upload/youtube", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_from_youtube(
+    background_tasks: BackgroundTasks,
+    youtube_url: str = Form(...),
+    format: str = Form("video"),
+    quality: str = Form("720p"),
+    service: VideoService = Depends(get_video_service),
+    current_user: User = Depends(get_current_user)
+):
+    """Queue a YouTube URL for download and processing."""
+    video = await service.upload_from_youtube(
+        current_user.user_id, youtube_url, format, quality, background_tasks
+    )
+    return VideoUploadResponse(id=video.id, status=video.status)
+
 @router.post("/upload/hls", response_model=VideoUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_video_hls(
     background_tasks: BackgroundTasks,

@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { useTranslation } from '../../hooks/useTranslation';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
 import MediaPreviewModal from '../../components/common/MediaPreviewModal';
-import FileSelectorModal from '../../components/dashboard/FileSelectorModal';
 import { mediaService } from '../../services/mediaService';
 import '../../styles/history.css';
 import '../../styles/dashboard.css';
@@ -37,6 +37,7 @@ const OriginalVideos = () => {
     const [isPolling, setIsPolling] = useState(false);
     const [error, setError] = useState(null);
     const [debouncedSearch, setDebouncedSearch] = useState(filters.search);
+    const [refreshKey, setRefreshKey] = useState(0);
 
     // Preview Modal State
     const [previewModalOpen, setPreviewModalOpen] = useState(false);
@@ -50,15 +51,16 @@ const OriginalVideos = () => {
     const [isDragOver, setIsDragOver] = useState(false);
     const fileInputRef = useRef(null);
 
+    // YouTube Modal State
+    const [showYoutubeModal, setShowYoutubeModal] = useState(false);
+    const [youtubeUrl, setYoutubeUrl] = useState('');
+    const [youtubeFormat, setYoutubeFormat] = useState('video');
+    const [youtubeQuality, setYoutubeQuality] = useState('720p');
+    const [isYoutubeDownloading, setIsYoutubeDownloading] = useState(false);
+    const [youtubeError, setYoutubeError] = useState(null);
+
     // Track deleting items
     const deletingIds = useRef(new Set());
-
-    const [formData, setFormData] = useState({
-        outputType: 'both',
-        domain: 'general',
-        voice: 'male1',
-        translation_style: 'neutral'
-    });
 
     const formatDuration = (seconds) => {
         if (!seconds) return '00:00';
@@ -167,7 +169,7 @@ const OriginalVideos = () => {
 
         fetchHistory();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab]);
+    }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab, refreshKey]);
 
     // Polling Effect (Dashboard Style)
     useEffect(() => {
@@ -267,7 +269,7 @@ const OriginalVideos = () => {
             });
             setPreviewModalOpen(true);
         } else {
-            alert(t('dashboard.noPreviewError') || "No preview URL available.");
+            toast.error(t('dashboard.noPreviewError') || "No preview URL available.");
         }
     };
 
@@ -281,12 +283,8 @@ const OriginalVideos = () => {
             link.click();
             document.body.removeChild(link);
         } else {
-            alert(t('dashboard.noPreviewError') || "No download URL available.");
+            toast.error(t('dashboard.noPreviewError') || "No download URL available.");
         }
-    };
-
-    const handleRedub = (id) => {
-        alert(`${t('originalVideos.redub')} ${id} (Demo)`);
     };
 
     const handleFileSelect = () => {
@@ -318,17 +316,9 @@ const OriginalVideos = () => {
         }
     };
 
-    const handleInputChange = (e) => {
-        const { name, value } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: value
-        }));
-    };
-
     const handleStartProcessing = async () => {
         if (!selectedFile) {
-            alert(t('dashboard.selectFileError') || "Please select or upload a video first.");
+            toast.error(t('dashboard.selectFileError') || "Please select or upload a video first.");
             return;
         }
 
@@ -338,24 +328,54 @@ const OriginalVideos = () => {
         try {
             const formDataToUpload = new FormData();
             formDataToUpload.append('file', selectedFile);
-            formDataToUpload.append('output_type', formData.outputType);
-            formDataToUpload.append('domain', formData.domain);
-            formDataToUpload.append('voice', formData.voice);
-            formDataToUpload.append('translation_style', formData.translationStyle);
 
             await mediaService.uploadVideo(formDataToUpload);
 
-            alert(t('dashboard.uploadSuccess') || "Upload successful! Processing started.");
+            toast.success(t('dashboard.uploadSuccess') || "Upload successful! Processing started.");
             setSelectedFile(null);
             setShowUploadSection(false);
 
             // Refresh history
-            window.location.reload();
+            setRefreshKey(k => k + 1);
         } catch (err) {
             console.error("Upload failed:", err);
             setUploadError(err.message || "Failed to start processing.");
         } finally {
             setIsUploading(false);
+        }
+    };
+
+    const handleYoutubeDownload = async () => {
+        if (!youtubeUrl.trim()) {
+            setYoutubeError(t('originalVideos.youtubeErrorEmpty'));
+            return;
+        }
+        const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/;
+        if (!ytRegex.test(youtubeUrl.trim())) {
+            setYoutubeError(t('originalVideos.youtubeErrorInvalid'));
+            return;
+        }
+
+        setIsYoutubeDownloading(true);
+        setYoutubeError(null);
+
+        try {
+            await mediaService.downloadFromYoutube({
+                youtube_url: youtubeUrl.trim(),
+                format: youtubeFormat,
+                quality: youtubeQuality,
+            });
+
+            toast.success(t('originalVideos.youtubeSuccessMsg'));
+            setYoutubeUrl('');
+            setShowYoutubeModal(false);
+            setShowUploadSection(false);
+            setRefreshKey(k => k + 1);
+        } catch (err) {
+            console.error('YouTube download failed:', err);
+            setYoutubeError(err.message || 'Failed to queue YouTube download.');
+        } finally {
+            setIsYoutubeDownloading(false);
         }
     };
 
@@ -414,14 +434,14 @@ const OriginalVideos = () => {
                     totalCompleted: data.total_completed || 0,
                     totalFailed: data.total_failed || 0
                 }));
-                alert(t('dashboard.deleteSuccess') || "Deleted successfully.");
+                toast.success(t('dashboard.deleteSuccess') || "Deleted successfully.");
             } catch (err) {
                 console.error("Failed to delete video:", err);
-                alert(t('dashboard.deleteError') || "Failed to delete video");
+                toast.error(t('dashboard.deleteError') || "Failed to delete video");
 
                 deletingIds.current.delete(id);
                 // Refresh to restore state
-                window.location.reload();
+                setRefreshKey(k => k + 1);
             } finally {
                 setTimeout(() => {
                     if (deletingIds.current) deletingIds.current.delete(id);
@@ -519,84 +539,161 @@ const OriginalVideos = () => {
 
                 {showUploadSection && (
                     <div className="card upload-section" style={{ marginBottom: '32px', animation: 'slideDown 0.3s ease-out' }}>
-                        <div className="upload-container">
-                            <div
-                                className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
-                                onDragOver={handleDragOver}
-                                onDragLeave={handleDragLeave}
-                                onDrop={handleDrop}
-                                onClick={handleFileSelect}
-                            >
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={handleFileChange}
-                                    accept={activeMediaTab === 'video' ? 'video/*' :
-                                        activeMediaTab === 'audio' ? 'audio/*' :
-                                            activeMediaTab === 'text' ? '.txt,text/plain' :
-                                                'video/*,audio/*,.txt,text/plain'}
-                                    style={{ display: 'none' }}
-                                />
-                                <div className="upload-icon">📤</div>
-                                <div className="upload-text">
-                                    <h3>{t('dashboard.uploadTitle')}</h3>
-                                    <p>{t('dashboard.uploadSubtitle')}</p>
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            onChange={handleFileChange}
+                            accept={activeMediaTab === 'video' ? 'video/*' :
+                                activeMediaTab === 'audio' ? 'audio/*' :
+                                    activeMediaTab === 'text' ? '.txt,text/plain' :
+                                        'video/*,audio/*,.txt,text/plain'}
+                            style={{ display: 'none' }}
+                        />
+
+                        {!selectedFile && (
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                                {/* Upload option */}
+                                <div
+                                    className={`upload-area ${isDragOver ? 'drag-over' : ''}`}
+                                    onDragOver={handleDragOver}
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={handleDrop}
+                                    onClick={handleFileSelect}
+                                >
+                                    <div className="upload-icon">📤</div>
+                                    <div className="upload-text">
+                                        <h3>{t('dashboard.uploadTitle')}</h3>
+                                        <p>{t('dashboard.uploadSubtitle')}</p>
+                                    </div>
+                                </div>
+
+                                {/* YouTube option */}
+                                <div
+                                    className="upload-area upload-area-youtube"
+                                    onClick={() => setShowYoutubeModal(true)}
+                                >
+                                    <div className="upload-icon">▶️</div>
+                                    <div className="upload-text">
+                                        <h3>{t('originalVideos.youtubeCardTitle')}</h3>
+                                        <p>{t('originalVideos.youtubeCardSubtitle')}</p>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
 
                         {selectedFile && (
-                            <div className="selected-file-info">
-                                <div className="selected-file-details">
-                                    <span className="selected-file-icon">🎬</span>
-                                    <span className="selected-file-name">
-                                        {selectedFile.name}
-                                    </span>
+                            <>
+                                <div className="selected-file-info">
+                                    <div className="selected-file-details">
+                                        <span className="selected-file-icon">🎬</span>
+                                        <span className="selected-file-name">{selectedFile.name}</span>
+                                    </div>
+                                    <button className="selected-file-clear" onClick={() => setSelectedFile(null)}>✕</button>
                                 </div>
                                 <button
-                                    className="selected-file-clear"
-                                    onClick={() => setSelectedFile(null)}
+                                    className="btn btn-primary"
+                                    style={{ marginTop: '12px' }}
+                                    onClick={handleStartProcessing}
+                                    disabled={isUploading}
                                 >
-                                    ✕
+                                    {isUploading ? t('common.uploading') : t('originalVideos.startUploadingButton')}
                                 </button>
-                            </div>
+                                {uploadError && (
+                                    <div style={{ marginTop: '16px', color: 'var(--accent-red)' }}>{uploadError}</div>
+                                )}
+                            </>
                         )}
+                    </div>
+                )}
 
-                        <div className="options-grid" style={{ marginTop: '24px' }}>
-                            <div className="option-group">
-                                <label className="option-label">{t('dashboard.domain')}</label>
-                                <select className="form-select" name="domain" value={formData.domain} onChange={handleInputChange}>
-                                    <option value="general">{t('dashboard.domainGeneral')}</option>
-                                    <option value="technical">{t('dashboard.domainTechnical')}</option>
-                                    <option value="medical">{t('dashboard.domainMedical')}</option>
-                                    <option value="legal">{t('dashboard.domainLegal')}</option>
-                                    <option value="education">{t('dashboard.domainEducation')}</option>
-                                </select>
+                {/* YouTube Modal */}
+                {showYoutubeModal && (
+                    <div
+                        style={{
+                            position: 'fixed', inset: 0, zIndex: 1000,
+                            background: 'rgba(0,0,0,0.7)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                        }}
+                        onClick={(e) => { if (e.target === e.currentTarget) setShowYoutubeModal(false); }}
+                    >
+                        <div className="card" style={{ width: '100%', maxWidth: '520px', padding: '32px', position: 'relative' }}>
+                            <button
+                                onClick={() => { setShowYoutubeModal(false); setYoutubeError(null); setYoutubeUrl(''); }}
+                                style={{
+                                    position: 'absolute', top: '16px', right: '16px',
+                                    background: 'none', border: 'none', fontSize: '1.2rem',
+                                    cursor: 'pointer', color: 'var(--text-light)'
+                                }}
+                            >✕</button>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '24px' }}>
+                                <span style={{ fontSize: '1.5rem' }}>▶️</span>
+                                <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>{t('originalVideos.youtubeModalTitle')}</h2>
                             </div>
-                            <div className="option-group">
-                                <label className="option-label">{t('dashboard.voiceSelection')}</label>
-                                <select className="form-select" name="voice" value={formData.voice} onChange={handleInputChange}>
-                                    <option value="male1">{t('dashboard.voiceMale1')}</option>
-                                    <option value="male2">{t('dashboard.voiceMale2')}</option>
-                                    <option value="female1">{t('dashboard.voiceFemale1')}</option>
-                                    <option value="female2">{t('dashboard.voiceFemale2')}</option>
-                                </select>
+
+                            <div style={{ marginBottom: '16px' }}>
+                                <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-medium)' }}>
+                                    {t('originalVideos.youtubeUrlLabel')}
+                                </label>
+                                <input
+                                    type="url"
+                                    className="search-input"
+                                    placeholder={t('originalVideos.youtubeUrlPlaceholder')}
+                                    value={youtubeUrl}
+                                    onChange={(e) => { setYoutubeUrl(e.target.value); setYoutubeError(null); }}
+                                    style={{ width: '100%', boxSizing: 'border-box' }}
+                                />
                             </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
+                                <div>
+                                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-medium)' }}>
+                                        {t('originalVideos.youtubeFormatLabel')}
+                                    </label>
+                                    <select
+                                        className="filter-select"
+                                        value={youtubeFormat}
+                                        onChange={(e) => setYoutubeFormat(e.target.value)}
+                                        style={{ width: '100%' }}
+                                    >
+                                        <option value="video">🎬 {t('originalVideos.youtubeFormatVideo')}</option>
+                                        <option value="audio">🎵 {t('originalVideos.youtubeFormatAudio')}</option>
+                                    </select>
+                                </div>
+                                {youtubeFormat === 'video' && (
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '6px', fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-medium)' }}>
+                                            {t('originalVideos.youtubeQualityLabel')}
+                                        </label>
+                                        <select
+                                            className="filter-select"
+                                            value={youtubeQuality}
+                                            onChange={(e) => setYoutubeQuality(e.target.value)}
+                                            style={{ width: '100%' }}
+                                        >
+                                            <option value="1080p">1080p</option>
+                                            <option value="720p">720p</option>
+                                            <option value="480p">480p</option>
+                                            <option value="360p">360p</option>
+                                        </select>
+                                    </div>
+                                )}
+                            </div>
+
+                            {youtubeError && (
+                                <div style={{ marginBottom: '16px', color: 'var(--accent-red)', fontSize: '0.875rem' }}>
+                                    {youtubeError}
+                                </div>
+                            )}
+
+                            <button
+                                className="btn btn-primary"
+                                onClick={handleYoutubeDownload}
+                                disabled={isYoutubeDownloading || !youtubeUrl.trim()}
+                            >
+                                {isYoutubeDownloading ? t('originalVideos.youtubeQueuingBtn') : t('originalVideos.youtubeDownloadBtn')}
+                            </button>
                         </div>
-
-                        <button
-                            className="btn btn-primary"
-                            onClick={handleStartProcessing}
-                            disabled={isUploading || !selectedFile}
-                        >
-                            {isUploading ? t('common.uploading') : t('originalVideos.startUploadingButton')}
-                        </button>
-
-                        {uploadError && (
-                            <div className="error-message" style={{ marginTop: '16px', color: 'var(--accent-red)' }}>
-                                {uploadError}
-                            </div>
-                        )}
                     </div>
                 )}
 
@@ -662,11 +759,11 @@ const OriginalVideos = () => {
                             </select>
                         </div>
 
-                        <div className="filter-group" style={{ display: 'flex', alignItems: 'flex-end' }}>
-                            <button className="btn btn-secondary" onClick={handleResetFilters} style={{ height: '42px' }}>
-                                {t('originalVideos.resetFilters')}
-                            </button>
-                        </div>
+                    </div>
+                    <div style={{ display: 'flex', marginTop: '12px' }}>
+                        <button className="btn btn-secondary" onClick={handleResetFilters} style={{ height: '42px', marginInlineEnd: 'auto' }}>
+                            {t('originalVideos.resetFilters')}
+                        </button>
                     </div>
                 </div>
 
