@@ -5,6 +5,7 @@ const DATA = {
   initials: 'OS',
   name: 'Omar Mohamed Saied',
   role: 'AI Engineer',
+  avatarImage: '/team/omar.jpeg',
   gradient: 'linear-gradient(135deg, #ec4899 0%, #f43f5e 60%, #fb7185 100%)',
   accentColor: '#ec4899',
   accentColor2: '#f43f5e',

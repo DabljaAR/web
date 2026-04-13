@@ -92,7 +92,18 @@ const MemberModalBase = ({ data, onClose }) => {
             </svg>
           </button>
 
-          <div className="fmodal-avatar">{data.initials}</div>
+          <div className="fmodal-avatar">
+            {data.avatarImage ? (
+              <img
+                className="fmodal-avatar-image"
+                src={data.avatarImage}
+                alt={data.name}
+                loading="lazy"
+              />
+            ) : (
+              data.initials
+            )}
+          </div>
           <h2 className="fmodal-name">{data.name}</h2>
           <span className="fmodal-role-pill">{data.role}</span>
         </div>

@@ -5,6 +5,7 @@ const DATA = {
   initials: 'EA',
   name: 'Eslam Amr',
   role: 'Full Stack Developer',
+  avatarImage: '/team/eslam.jpeg',
   gradient: 'linear-gradient(135deg, #10b981 0%, #059669 60%, #34d399 100%)',
   accentColor: '#10b981',
   accentColor2: '#059669',

@@ -5,6 +5,7 @@ const DATA = {
   initials: 'AH',
   name: 'Abdelrahman Hamdy Omran',
   role: 'Frontend Developer',
+  avatarImage: '/team/Omran.jpeg',
   gradient: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 60%, #f97316 100%)',
   accentColor: '#f59e0b',
   accentColor2: '#ef4444',
