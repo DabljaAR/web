@@ -189,6 +189,8 @@ jobs:
           $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d --build
           $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml ps
 
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml restart caddy
+
           for _ in 1 2 3 4 5; do
             if curl -fsS http://localhost:8000/api/health >/dev/null; then
               break
