@@ -327,6 +327,21 @@ def tts_synthesize_segment(
         "tts_key": None, "audio_url": None,
     }
 
+    logger.info(
+        "[TTS] segment start | tts_job=%s segment_id=%s total=%s text_chars=%d task_id=%s",
+        tts_job_id or job_id,
+        segment_id,
+        total_segments,
+        len(text or ""),
+        task_id,
+    )
+
+    if tts_job_id:
+        BaseJobTask._patch_job(tts_job_id, JobStatus.PROCESSING, progress=60.0)
+    if task_id:
+        from app.tasks.models import TaskStatus
+        BaseJobTask._patch_task(task_id, TaskStatus.PROCESSING, progress=60.0)
+
     if text.strip():
         ref_local = None
         _tmp_dir = tempfile.mkdtemp()
@@ -358,6 +373,12 @@ def tts_synthesize_segment(
             result["tts_key"] = tts_result.get("minio_key")
             result["audio_url"] = tts_result.get("audio_url")
             logger.debug("[TTS] segment %d done | job=%s", segment_id, job_id)
+
+            if tts_job_id:
+                BaseJobTask._patch_job(tts_job_id, JobStatus.PROCESSING, progress=85.0)
+            if task_id:
+                from app.tasks.models import TaskStatus
+                BaseJobTask._patch_task(task_id, TaskStatus.PROCESSING, progress=85.0)
 
         except Exception as exc:
             logger.exception("[TTS] segment %d failed | job=%s: %s", segment_id, job_id, exc)
@@ -680,6 +701,7 @@ def tts_combine_results(
     # ── Update VideoTask ─────────────────────────────────────────────────────
     if task_id:
         from app.tasks.models import TaskStatus
+        logger.info("[TTS] patching VideoTask to COMPLETED | task_id=%s tts_job=%s", task_id, job_id)
         BaseJobTask._patch_task(
             task_id,
             TaskStatus.COMPLETED,
