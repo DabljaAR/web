@@ -128,3 +128,38 @@ class TestTtsCombineResults:
         assert patched_job_calls
         last_call_status = patched_job_calls[-1][0][1]
         assert last_call_status == JobStatus.FAILED
+
+
+class TestProcessingModeHelpers:
+    def test_apply_processing_mode_returns_single_chunk(self):
+        """single_chunk mode should collapse segments to one transcript chunk."""
+        from app.jobs.tasks.pipeline import _apply_processing_mode
+
+        result = _apply_processing_mode(
+            segments=[
+                {"start": 0.0, "end": 1.0, "text": "Hello"},
+                {"start": 1.0, "end": 2.0, "text": "world"},
+            ],
+            transcript="Hello world",
+            duration=2.5,
+            processing_mode="single_chunk",
+        )
+
+        assert len(result) == 1
+        assert result[0]["start"] == 0.0
+        assert result[0]["end"] == 2.5
+        assert result[0]["text"] == "Hello world"
+
+    def test_apply_processing_mode_keeps_segmented_shape(self):
+        """segmented mode should preserve original segment list."""
+        from app.jobs.tasks.pipeline import _apply_processing_mode
+
+        segments = [{"start": 0.0, "end": 1.0, "text": "Hello"}]
+        result = _apply_processing_mode(
+            segments=segments,
+            transcript="Hello",
+            duration=1.0,
+            processing_mode="segmented",
+        )
+
+        assert result == segments

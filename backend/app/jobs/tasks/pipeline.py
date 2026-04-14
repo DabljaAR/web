@@ -26,6 +26,32 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _apply_processing_mode(
+    *,
+    segments: list[dict],
+    transcript: str,
+    duration: Optional[float],
+    processing_mode: str,
+) -> list[dict]:
+    """Normalize STT segments according to the selected processing mode."""
+    if processing_mode != "single_chunk":
+        return segments
+
+    if not segments or not transcript.strip():
+        return segments
+
+    end = duration
+    if end is None:
+        end = segments[-1].get("end")
+
+    try:
+        end_value = round(float(end), 2)
+    except (TypeError, ValueError):
+        end_value = 0.0
+
+    return [{"start": 0.0, "end": max(0.0, end_value), "text": transcript.strip()}]
+
+
 # ===========================================================================
 # Speech-to-Text
 # ===========================================================================
@@ -85,6 +111,7 @@ def stt_transcribe(
     finally:
         engine.dispose()
     output_type = _input_data.get("output_type", "fullDubbing")
+    processing_mode = _input_data.get("processing_mode", "segmented")
     task_id = _input_data.get("task_id")
 
     # ── 2. Resolve the storage key ───────────────────────────────────────────
@@ -153,6 +180,13 @@ def stt_transcribe(
             processing_time = time.time() - start_time
             full_transcript = " ".join(transcript_parts)
 
+            structured_segments = _apply_processing_mode(
+                segments=structured_segments,
+                transcript=full_transcript,
+                duration=info.duration,
+                processing_mode=processing_mode,
+            )
+
             metadata = {
                 "language": info.language,
                 "duration": round(info.duration, 2),
@@ -161,6 +195,7 @@ def stt_transcribe(
                 "compute_type": whisper.compute_type,
                 "processing_time": round(processing_time, 2),
                 "segment_count": len(structured_segments),
+                "processing_mode": processing_mode,
             }
 
         except Exception as exc:
@@ -221,8 +256,11 @@ def stt_transcribe(
                 logger.info("[STT] No segments to translate; pipeline ends here | job=%s", job_id)
 
         logger.info(
-            "[STT] done | job=%s | duration=%.1fs | segments=%d",
-            job_id, metadata.get("duration", 0), metadata.get("segment_count", 0),
+            "[STT] done | job=%s | duration=%.1fs | segments=%d | processing_mode=%s",
+            job_id,
+            metadata.get("duration", 0),
+            metadata.get("segment_count", 0),
+            processing_mode,
         )
 
         return output

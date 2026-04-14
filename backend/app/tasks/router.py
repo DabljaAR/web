@@ -37,6 +37,7 @@ class VideoTaskSummary(BaseModel):
     status: TaskStatus
     progress: float
     output_type: str
+    processing_mode: str
     source_lang: Optional[str]
     target_lang: str
     created_at: datetime
@@ -132,6 +133,7 @@ async def get_task(
         status=task.status,
         progress=task.progress,
         output_type=task.output_type,
+        processing_mode=task.processing_mode,
         source_lang=task.source_lang,
         target_lang=task.target_lang,
         created_at=task.created_at,
