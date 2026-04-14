@@ -64,7 +64,7 @@ const TryItNowSection = () => {
             // Redirect to dashboard
             navigate('/dashboard');
         } catch (err) {
-            console.error(err);
+            if (import.meta.env.DEV) console.error(err);
             setError('Upload failed. Please try again.');
             setIsUploading(false);
         }

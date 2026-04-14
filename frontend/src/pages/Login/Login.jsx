@@ -6,11 +6,13 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../hooks/useAuth';
 import { authService } from '../../services/authService';
+import { usePageTitle } from '../../hooks/usePageTitle';
 import '../../styles/auth.css';
 
 const Login = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  usePageTitle('login.title');
   const { toggleTheme } = useTheme();
   const { language, toggleLanguage } = useLanguage();
   const { login } = useAuth();

@@ -678,3 +678,19 @@
     display: block;
     margin-top: 5px;
 }
+/* Utility Classes for Inline styles migration */
+.error-msg-pink {
+    color: var(--accent-pink);
+}
+
+.text-center {
+    text-align: center;
+}
+
+.display-block {
+    display: block;
+}
+
+.mt-5 {
+    margin-top: 5px;
+}

@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useAuth } from './useAuth';
+import useStore from '../store/store';
 
 describe('useAuth Hook', () => {
   beforeEach(() => {
     // Clear all storage before each test
     localStorage.clear();
     sessionStorage.clear();
+    // Reset the store to blank
+    useStore.setState({ user: null });
   });
 
   afterEach(() => {
@@ -25,6 +28,9 @@ describe('useAuth Hook', () => {
     const userData = { id: 1, username: 'testuser', email: 'test@example.com' };
     sessionStorage.setItem('access_token', 'token123');
     sessionStorage.setItem('user', JSON.stringify(userData));
+    act(() => {
+      useStore.getState().reset();
+    });
     
     const { result } = renderHook(() => useAuth());
     
@@ -36,6 +42,9 @@ describe('useAuth Hook', () => {
     const userData = { id: 1, username: 'testuser', email: 'test@example.com' };
     sessionStorage.setItem('access_token', 'token123');
     sessionStorage.setItem('user', JSON.stringify(userData));
+    act(() => {
+      useStore.getState().reset();
+    });
     
     const { result } = renderHook(() => useAuth());
     
@@ -98,6 +107,7 @@ describe('useAuth Hook', () => {
   it('handles invalid user data gracefully', () => {
     sessionStorage.setItem('user', 'invalid json');
     sessionStorage.setItem('access_token', 'token123');
+    useStore.getState().reset();
     
     const { result } = renderHook(() => useAuth());
     

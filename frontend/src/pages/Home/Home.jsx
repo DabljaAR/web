@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
 import HeroSection from '../../components/home/HeroSection';
@@ -12,16 +13,30 @@ import Footer from '../../components/layout/Footer';
 import '../../styles/home.css';
 
 const Home = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    const hash = location.hash;
+    if (!hash || hash.length < 2) return;
+
+    const sectionId = hash.slice(1);
+    const element = document.getElementById(sectionId);
+    if (!element) return;
+
+    // Let the page render/layout settle before scrolling.
+    setTimeout(() => {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+  }, [location.hash]);
+
   return (
     <div>
       <BackgroundDecorations />
       <Navbar />
       <HeroSection />
       <ProblemSection />
-      {/* <FeaturesSection /> */}
       <HowItWorksSection />
       <TryItNowSection />
-      {/* <DemoSection /> */}
       <TeamSection />
       <Footer />
     </div>

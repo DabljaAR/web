@@ -208,7 +208,7 @@ export default function VideoTasksModal({ isOpen, onClose, videoId, videoTitle }
     try {
       setSelected(await taskService.getTask(taskId));
     } catch (e) {
-      console.error(e);
+      if (import.meta.env.DEV) console.error(e);
     } finally {
       setDetailLoading(false);
     }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -6,11 +6,13 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { authService } from '../../services/authService';
 import { useAvatarUpload } from '../../hooks/useAvatarUpload';
+import { usePageTitle } from '../../hooks/usePageTitle';
 import '../../styles/auth.css';
 
 const Register = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  usePageTitle('register.title');
   const { toggleTheme } = useTheme();
   const { language, toggleLanguage } = useLanguage();
   const [formData, setFormData] = useState({
@@ -31,10 +33,8 @@ const Register = () => {
     avatarFile,
     avatarPreview,
     uploadingAvatar,
-    fileInputRef,
     handleAvatarChange,
     uploadAvatar,
-    triggerFileInput
   } = useAvatarUpload(null, (errorKey) => {
     if (errorKey === 'invalid_type') {
       setErrors(prev => ({ ...prev, avatar: t('register.invalidImage') || 'Invalid image type' }));
@@ -183,7 +183,7 @@ const Register = () => {
           const userId = response.user.user_id || response.user.id;
           await authService.updateUser(userId, { avatar_url: avatarUrl });
         } catch (uploadError) {
-          console.error('Optional avatar upload failed:', uploadError);
+          if (import.meta.env.DEV) console.error('Optional avatar upload failed:', uploadError);
           // We don't fail the whole registration if just the avatar upload fails
           // but we could notify the user
         }
