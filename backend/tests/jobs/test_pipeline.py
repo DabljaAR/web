@@ -163,3 +163,58 @@ class TestProcessingModeHelpers:
         )
 
         assert result == segments
+
+
+class TestTtsProgressPatches:
+    def test_tts_synthesize_segment_patches_progress(self):
+        """TTS segment should emit progress updates during long synthesis."""
+        from app.jobs.tasks.pipeline import tts_synthesize_segment
+
+        mock_result = {
+            "minio_key": "tts/job/segment_0.wav",
+            "audio_url": "https://example.com/segment.wav",
+        }
+
+        with patch("app.jobs.tasks.pipeline.BaseJobTask._patch_job") as patch_job, \
+             patch("app.jobs.tasks.pipeline.BaseJobTask._patch_task") as patch_task, \
+             patch("app.jobs.celery_app.synthesize_tts") as mock_tts, \
+             patch("app.media.storage.get_storage_service") as mock_storage_service, \
+             patch("asyncio.new_event_loop") as mock_loop_factory:
+            mock_tts.run.return_value = mock_result
+            mock_storage = MagicMock()
+            mock_storage.download = AsyncMock(return_value=True)
+            mock_storage_service.return_value = mock_storage
+
+            mock_loop = MagicMock()
+            mock_loop.run_until_complete = MagicMock(return_value=True)
+            mock_loop.close = MagicMock()
+            mock_loop_factory.return_value = mock_loop
+
+            tts_synthesize_segment.run(
+                segment_id=0,
+                job_id="tts-job",
+                text="hello world",
+                start=0.0,
+                end=1.0,
+                minio_segment_key="tts/job/segment_0.wav",
+                ref_clip_minio_key="ref/key.wav",
+                tts_job_id="tts-job",
+                total_segments=None,
+                task_id="task-1",
+            )
+
+        job_progress_values = [
+            kwargs.get("progress")
+            for _, kwargs in patch_job.call_args_list
+            if kwargs.get("progress") is not None
+        ]
+        task_progress_values = [
+            kwargs.get("progress")
+            for _, kwargs in patch_task.call_args_list
+            if kwargs.get("progress") is not None
+        ]
+
+        assert 60.0 in job_progress_values
+        assert 85.0 in job_progress_values
+        assert 60.0 in task_progress_values
+        assert 85.0 in task_progress_values

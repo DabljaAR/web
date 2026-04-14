@@ -13,6 +13,7 @@ from app.media.storage import get_storage_service
 from app.media.ffmpeg_service import FFmpegService, MediaProcessingError
 from app.core.db import AsyncSessionLocal
 from app.jobs.models import Job, JobStatus, JobType
+from app.tasks.models import VideoTask
 from app.config import settings
 from pathlib import Path
 
@@ -804,6 +805,18 @@ class VideoService:
             all_jobs = jobs_result.scalars().all()
             for job in all_jobs:
                 jobs_by_video.setdefault(job.video_id, []).append(job)
+
+        # Fetch latest VideoTask per video to scope "active" state to the newest run.
+        latest_task_by_video: dict[str, VideoTask] = {}
+        if video_ids:
+            tasks_result = await self.db.execute(
+                select(VideoTask)
+                .where(VideoTask.video_id.in_(video_ids))
+                .order_by(VideoTask.video_id.asc(), VideoTask.created_at.desc())
+            )
+            for task in tasks_result.scalars().all():
+                if task.video_id not in latest_task_by_video:
+                    latest_task_by_video[task.video_id] = task
         
         # Process URLs (same as before)
         for video in videos:
@@ -829,7 +842,24 @@ class VideoService:
 
              # Enrich with job-based fields (for history processing state + text preview)
              page_jobs = jobs_by_video.get(video.id, [])
-             active_jobs = [j for j in page_jobs if j.status in [JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.RETRYING]]
+             latest_task = latest_task_by_video.get(video.id)
+
+             scoped_active_jobs = [
+                 j for j in page_jobs
+                 if j.status in [JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.RETRYING]
+                 and (
+                     not latest_task
+                     or (
+                         not latest_task.root_job_id
+                         or (
+                             j.id == latest_task.root_job_id
+                             or j.parent_job_id == latest_task.root_job_id
+                         )
+                     )
+                 )
+             ]
+
+             active_jobs = scoped_active_jobs
              completed_jobs = [j for j in page_jobs if j.status == JobStatus.COMPLETED]
 
              video.has_active_job = len(active_jobs) > 0
