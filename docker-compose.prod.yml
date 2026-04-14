@@ -78,6 +78,7 @@ services:
       S3_REGION: ${S3_REGION:-}
       S3_SECURE: ${S3_SECURE:-false}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      PIPELINE_USE_SINGLE_CHUNK: ${PIPELINE_USE_SINGLE_CHUNK:-false}
       ENVIRONMENT: production
       DEBUG: "false"
     healthcheck:
@@ -119,6 +120,7 @@ services:
       S3_REGION: ${S3_REGION:-}
       S3_SECURE: ${S3_SECURE:-false}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      PIPELINE_USE_SINGLE_CHUNK: ${PIPELINE_USE_SINGLE_CHUNK:-false}
       ENVIRONMENT: production
       DEBUG: "false"
     tmpfs:
@@ -155,6 +157,7 @@ services:
       S3_REGION: ${S3_REGION:-}
       S3_SECURE: ${S3_SECURE:-false}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      PIPELINE_USE_SINGLE_CHUNK: ${PIPELINE_USE_SINGLE_CHUNK:-false}
       ENVIRONMENT: production
       DEBUG: "false"
       STT_DEVICE: ${STT_DEVICE:-cpu}

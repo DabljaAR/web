@@ -112,6 +112,7 @@ def stt_transcribe(
         engine.dispose()
     output_type = _input_data.get("output_type", "fullDubbing")
     processing_mode = _input_data.get("processing_mode", "segmented")
+    processing_mode_source = "job_input" if "processing_mode" in _input_data else "default"
     task_id = _input_data.get("task_id")
 
     # ── 2. Resolve the storage key ───────────────────────────────────────────
@@ -128,7 +129,15 @@ def stt_transcribe(
             _engine.dispose()
 
     file_key: str = _get_file_key()
-    logger.info("[STT] job=%s video=%s file_key=%s", job_id, video_id, file_key)
+    logger.info(
+        "[STT] job=%s video=%s file_key=%s output_type=%s processing_mode=%s source=%s",
+        job_id,
+        video_id,
+        file_key,
+        output_type,
+        processing_mode,
+        processing_mode_source,
+    )
 
     self.update_progress(job_id, 10.0)
 
@@ -162,7 +171,12 @@ def stt_transcribe(
             if info.duration > 3600:
                 raise ValueError(f"Audio too long: {info.duration:.0f}s (max 3600s)")
 
-            logger.info("[STT] Starting transcription | duration=%.1fs | job=%s", info.duration, job_id)
+            logger.info(
+                "[STT] Starting transcription | duration=%.1fs | job=%s | mode=%s",
+                info.duration,
+                job_id,
+                processing_mode,
+            )
 
             for seg in segments_generator:
                 segment_dict = {

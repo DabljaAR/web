@@ -23,6 +23,7 @@ from sqlalchemy import select
 
 from app.jobs.models import Job, JobType, JobStatus
 from app.jobs.schemas import JobCreate
+from app.config import settings
 from app.media.models import Video
 from app.media.storage import get_storage_service
 from app.stt.models import WhisperModelManager
@@ -32,6 +33,13 @@ logger = logging.getLogger(__name__)
 
 # Temp dir for sync uploads
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "stt_uploads"
+
+CHUNK_ELIGIBLE_OUTPUT_TYPES = {
+    "captionsOnly",
+    "captionsAndTranslation",
+    "translationAndTTS",
+    "fullDubbing",
+}
 
 
 class TranscriptionService:
@@ -158,6 +166,12 @@ class TranscriptionService:
 
         # 2. Create Job record
         # video_id is nullable on the Job model — fine to pass None
+        output_type = "fullDubbing"
+        processing_mode = (
+            "single_chunk"
+            if settings.PIPELINE_USE_SINGLE_CHUNK and output_type in CHUNK_ELIGIBLE_OUTPUT_TYPES
+            else "segmented"
+        )
         job = Job(
             id=str(uuid.uuid4()),
             video_id=video_id,  # Use None if not provided (nullable in model)
@@ -169,6 +183,8 @@ class TranscriptionService:
                 "video_id": video_id,
                 "language": language,
                 "target_lang": target_lang,
+                "output_type": output_type,
+                "processing_mode": processing_mode,
             },
             retry_count=0,
             max_retries=3,
@@ -198,7 +214,12 @@ class TranscriptionService:
         await self.db.refresh(job)
 
         logger.info(
-            f"[STT] Queued job {job.id} | file_key={file_key} | language={language}"
+            "[STT] Queued job %s | file_key=%s | language=%s | output_type=%s | processing_mode=%s",
+            job.id,
+            file_key,
+            language,
+            output_type,
+            processing_mode,
         )
         return job
 
