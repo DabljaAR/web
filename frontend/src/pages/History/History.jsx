@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -10,40 +10,29 @@ import VideoTasksModal from '../../components/common/VideoTasksModal';
 import RedubModal from '../../components/common/RedubModal';
 import { mediaService } from '../../services/mediaService';
 import taskService from '../../services/taskService';
-import { formatDate, formatDuration, formatSize } from '../../utils/formatters';
 import HistoryItem from './HistoryItem';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { useHistory } from '../../hooks/useHistory';
+import { usePageTitle } from '../../hooks/usePageTitle';
 import '../../styles/home.css';
 import '../../styles/history.css';
 
 const History = () => {
   const { t } = useTranslation();
-  const [filters, setFilters] = useState({
-    search: '',
-    status: 'all',
-    domain: 'all',
-    dateRange: 'last30Days',
-    sortBy: 'dateNewest',
-    mediaType: 'all'
-  });
-
-  const [activeMediaTab, setActiveMediaTab] = useState('all');
-
-  const [pagination, setPagination] = useState({
-    page: 1,
-    limit: 5,
-    total: 0,
-    pages: 1,
-    totalCompleted: 0,
-    totalFailed: 0
-  });
-
-  // List & Loading State
-  const [historyItems, setHistoryItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [isPolling, setIsPolling] = useState(false);
-  const [error, setError] = useState(null);
-  const [debouncedSearch, setDebouncedSearch] = useState(filters.search);
+  usePageTitle('nav.history');
+  const {
+    filters,
+    setFilters,
+    activeMediaTab,
+    setActiveMediaTab,
+    pagination,
+    setPagination,
+    historyItems,
+    loading,
+    error,
+    deletingIds,
+    fetchHistory
+  } = useHistory(5);
 
   // Preview Modal State
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
@@ -52,198 +41,12 @@ const History = () => {
 
   // Tasks Modal State
   const [tasksModalOpen, setTasksModalOpen] = useState(false);
-  const [tasksModalVideo, setTasksModalVideo] = useState(null); // { id, title }
+  const [tasksModalVideo, setTasksModalVideo] = useState(null);
 
   // Redub Modal State
   const [redubModalOpen, setRedubModalOpen] = useState(false);
-  const [redubModalVideo, setRedubModalVideo] = useState(null); // { id, title }
+  const [redubModalVideo, setRedubModalVideo] = useState(null);
 
-  // Track deleting items
-  const deletingIds = React.useRef(new Set());
-
-
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedSearch(filters.search);
-      // Reset to page 1 on new search
-      if (filters.search !== debouncedSearch) {
-        setPagination(prev => ({ ...prev, page: 1 }));
-      }
-    }, 500);
-    return () => clearTimeout(handler);
-  }, [filters.search]);
-
-  useEffect(() => {
-    const fetchHistory = async (internal = false) => {
-      try {
-        if (!internal) setLoading(true);
-        const data = await mediaService.getVideos({
-          page: pagination.page,
-          limit: pagination.limit,
-          search: debouncedSearch,
-          sortBy: filters.sortBy,
-          dateRange: filters.dateRange,
-          status: filters.status,
-          mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
-        });
-
-        const videos = Array.isArray(data) ? data : data.items || [];
-        const total = data.total || videos.length;
-        const pages = data.pages || 1;
-        const totalCompleted = data.total_completed || 0;
-        const totalFailed = data.total_failed || 0;
-
-        const mappedItems = videos.map(video => {
-          const hasActiveJob = Boolean(video.has_active_job);
-          const computedStatus = hasActiveJob ? 'processing' : video.status.toLowerCase();
-          return {
-          id: video.id,
-          title: video.title || video.original_filename,
-          thumbnail: video.thumbnail_url,
-          status: computedStatus,
-          domain: video.domain || t('history.domainGeneral') || 'General',
-          style: video.style || 'Neutral',
-          voice: video.voice || 'Male Voice 1',
-          duration: formatDuration(video.duration),
-          size: formatSize(video.size_bytes),
-          processed: formatDate(video.updated_at),
-          started: formatDate(video.created_at),
-          attempted: formatDate(video.created_at),
-          rawDate: video.created_at,
-          creditsUsed: 0,
-          error: video.error_message,
-
-          createdAt: video.created_at,
-          estCompletion: hasActiveJob || video.status === 'PROCESSING' ? (t('history.processing') || 'Calculating...') : '',
-          url: video.url,
-          audioUrl: video.audio_url,
-          mediaType: video.media_type,
-          transcriptUrl: video.transcript_url,
-          translationUrl: video.translation_url,
-          activeJobStatus: video.active_job_status,
-          activeJobProgress: video.active_job_progress
-        };
-      });
-
-        setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
-        setPagination(prev => ({
-          ...prev,
-          total: total,
-          pages: pages,
-          totalCompleted: totalCompleted,
-          totalFailed: totalFailed
-        }));
-
-        // Track if we need to continue polling
-        const hasActive = mappedItems.some(item =>
-          item.status === 'processing' || item.status === 'pending'
-        );
-        setIsPolling(hasActive);
-
-        setError(null);
-      } catch (err) {
-        console.error("Failed to fetch history:", err);
-        if (!internal) setError(t('history.loadError') || 'Failed to load history items.');
-        setIsPolling(false);
-      } finally {
-        if (!internal) setLoading(false);
-      }
-    };
-
-    fetchHistory();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab]);
-
-  // Polling Effect (Dashboard Style)
-  useEffect(() => {
-    let intervalId;
-    if (isPolling) {
-      intervalId = setInterval(() => {
-        const fetchHistoryInternal = async () => {
-          try {
-            const data = await mediaService.getVideos({
-              page: pagination.page,
-              limit: pagination.limit,
-              search: debouncedSearch,
-              sortBy: filters.sortBy,
-              dateRange: filters.dateRange,
-              status: filters.status,
-              mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
-            });
-
-            const videos = Array.isArray(data) ? data : data.items || [];
-            const mappedItems = videos.map(video => {
-              const hasActiveJob = Boolean(video.has_active_job);
-              const computedStatus = hasActiveJob ? 'processing' : video.status.toLowerCase();
-              return {
-              id: video.id,
-              title: video.title || video.original_filename,
-              thumbnail: video.thumbnail_url,
-              status: computedStatus,
-              duration: formatDuration(video.duration),
-              size: formatSize(video.size_bytes),
-              processed: formatDate(video.updated_at),
-              started: formatDate(video.created_at),
-
-              createdAt: video.created_at,
-              url: video.url,
-              audioUrl: video.audio_url,
-              mediaType: video.media_type,
-              transcriptUrl: video.transcript_url,
-              translationUrl: video.translation_url,
-              activeJobStatus: video.active_job_status,
-              activeJobProgress: video.active_job_progress
-            };
-          });
-
-            setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
-
-            const hasActive = mappedItems.some(item =>
-              item.status === 'processing' || item.status === 'pending'
-            );
-            if (!hasActive) setIsPolling(false);
-          } catch (e) {
-            console.error("Polling fetch failed", e);
-            setIsPolling(false);
-          }
-        };
-        fetchHistoryInternal();
-      }, 5000);
-    }
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [isPolling, pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab]);
-
-  const handlePreviewTextComparison = (id) => {
-    const item = historyItems.find(i => i.id === id);
-    if (!item || !item.transcriptUrl || !item.translationUrl) {
-      toast.error(t('dashboard.noPreviewError') || 'No text preview available.');
-      return;
-    }
-
-    setComparisonPreview({
-      id,
-      originalUrl: item.transcriptUrl,
-      translatedUrl: item.translationUrl,
-      title: item.title
-    });
-    setPreviewJob({
-      mediaType: 'TEXT',
-      name: `${item.title} (Original + Translation)`
-    });
-    setPreviewModalOpen(true);
-  };
-
-
-
-  const filteredItems = historyItems; // Backend handles filtering now
-
-
-
-
-  // Handle Page Change
   const handlePageChange = (newPage) => {
     if (newPage >= 1 && newPage <= pagination.pages) {
       setPagination(prev => ({ ...prev, page: newPage }));
@@ -252,10 +55,7 @@ const History = () => {
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
-    setFilters(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setFilters(prev => ({ ...prev, [name]: value }));
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
@@ -277,25 +77,21 @@ const History = () => {
     setPagination(prev => ({ ...prev, page: 1 }));
   };
 
-  const handlePreview = (id) => {
-    const item = historyItems.find(i => i.id === id);
+  const handlePreview = (item) => {
     if (item && item.url) {
-      setPreviewJob({
-        ...item,
-        name: item.title
-      });
+      setComparisonPreview(null);
+      setPreviewJob({ ...item, name: item.name });
       setPreviewModalOpen(true);
     } else {
       toast.error(t('dashboard.noPreviewError') || "No preview URL available.");
     }
   };
 
-  const handleDownload = (id) => {
-    const item = historyItems.find(i => i.id === id);
+  const handleDownload = (item) => {
     if (item && item.url) {
       const link = document.createElement('a');
       link.href = item.url;
-      link.download = item.title || 'download';
+      link.download = item.name || 'download';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -304,10 +100,13 @@ const History = () => {
     }
   };
 
-  const handleRedub = (id) => {
-    const item = historyItems.find(i => i.id === id);
-    if (!item) return;
-    setRedubModalVideo({ id: item.id, title: item.title });
+  const handleViewTasks = (id, name) => {
+    setTasksModalVideo({ id, title: name });
+    setTasksModalOpen(true);
+  };
+
+  const handleRedub = (id, name) => {
+    setRedubModalVideo({ id, title: name });
     setRedubModalOpen(true);
   };
 
@@ -317,6 +116,18 @@ const History = () => {
       return;
     }
     await taskService.startTask(videoId, outputType);
+  };
+
+  const handlePreviewTranscript = (item) => {
+    setComparisonPreview(null);
+    setPreviewJob({ url: item.transcriptUrl, mediaType: 'TEXT', name: `${item.name} (Transcript)` });
+    setPreviewModalOpen(true);
+  };
+
+  const handlePreviewTranslation = (item) => {
+    setComparisonPreview(null);
+    setPreviewJob({ url: item.translationUrl, mediaType: 'TEXT', name: `${item.name} (Translation)` });
+    setPreviewModalOpen(true);
   };
 
   const handleDelete = async (id) => {
@@ -332,116 +143,16 @@ const History = () => {
 
     if (confirmResult.isConfirmed) {
       try {
-        // Mark as deleting
         deletingIds.current.add(id);
-
-        // Optimistically remove from UI
-        setHistoryItems(prev => prev.filter(item => item.id !== id));
-        setPagination(prev => ({
-          ...prev,
-          total: Math.max(0, prev.total - 1)
-        }));
-
         await mediaService.deleteVideo(id);
-
-        // Refresh the list in the background
-        const data = await mediaService.getVideos({
-          page: pagination.page,
-          limit: pagination.limit,
-          search: debouncedSearch,
-          sortBy: filters.sortBy,
-          dateRange: filters.dateRange,
-          status: filters.status,
-          mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
-        });
-        const videos = Array.isArray(data) ? data : data.items || [];
-        const total = data.total || videos.length;
-        const pages = data.pages || 1;
-        const totalCompleted = data.total_completed || 0;
-        const totalFailed = data.total_failed || 0;
-
-        const mappedItems = videos.map(video => ({
-          id: video.id,
-          title: video.title || video.original_filename,
-          thumbnail: video.thumbnail_url,
-          status: video.status.toLowerCase(),
-          domain: video.domain || t('history.domainGeneral') || 'General',
-          style: video.style || 'Neutral',
-          voice: video.voice || 'Male Voice 1',
-          duration: formatDuration(video.duration),
-          size: formatSize(video.size_bytes),
-          processed: formatDate(video.updated_at),
-          started: formatDate(video.created_at),
-          attempted: formatDate(video.created_at),
-          rawDate: video.created_at,
-          creditsUsed: 0,
-          error: video.error_message,
-
-          estCompletion: video.status === 'PROCESSING' ? 'Calculating...' : '',
-          url: video.url,
-          audioUrl: video.audio_url,
-          mediaType: video.media_type
-        }));
-
-        setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
-        setPagination(prev => ({ ...prev, total, pages, totalCompleted, totalFailed }));
-
         toast.success(t('dashboard.deleteSuccess') || "Deleted successfully.");
+        await fetchHistory();
       } catch (err) {
-        console.error("Failed to delete video:", err);
+        if (import.meta.env.DEV) console.error("Failed to delete video:", err);
         toast.error(t('dashboard.deleteError') || "Failed to delete video");
-
-        deletingIds.current.delete(id);
-        // Revert UI if needed by reloading
-        window.location.reload();
       } finally {
-        setTimeout(() => {
-          if (deletingIds.current) deletingIds.current.delete(id);
-        }, 10000);
+        deletingIds.current.delete(id);
       }
-    }
-  };
-
-
-  const getStatusClass = (status) => {
-    switch (status) {
-      case 'completed':
-        return 'status-completed';
-      case 'failed':
-        return 'status-failed';
-      case 'processing':
-      case 'pending':
-        return 'status-processing';
-      default:
-        return '';
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'completed':
-        return '✓';
-      case 'failed':
-        return '✗';
-      case 'processing':
-      case 'pending':
-        return '⏳';
-      default:
-        return '';
-    }
-  };
-
-  const getStatusText = (status) => {
-    switch (status) {
-      case 'completed':
-        return t('history.statusCompleted');
-      case 'failed':
-        return t('history.statusFailed');
-      case 'processing':
-      case 'pending':
-        return t('history.statusProcessing');
-      default:
-        return status;
     }
   };
 
@@ -582,8 +293,8 @@ const History = () => {
                 <option value="nameZA">{t('history.nameZA')}</option>
               </select>
             </div>
-
           </div>
+
           <div style={{ display: 'flex', marginTop: '12px' }}>
             <button
               className="btn btn-secondary"
@@ -613,26 +324,25 @@ const History = () => {
 
         {/* History List */}
         <div className="history-list">
-          {filteredItems.length === 0 ? (
+          {historyItems.length === 0 ? (
             <div className="no-items" style={{ textAlign: 'center', padding: '2rem', color: 'rgba(255,255,255,0.6)' }}>
               {error ? error : t('history.noItems', 'No history items found.')}
             </div>
           ) : (
-            filteredItems.map((item) => (
+            historyItems.map((item) => (
               <HistoryItem
                 key={item.id}
                 item={item}
                 t={t}
-                getStatusClass={getStatusClass}
-                getStatusIcon={getStatusIcon}
-                getStatusText={getStatusText}
-                setTasksModalVideo={setTasksModalVideo}
-                setTasksModalOpen={setTasksModalOpen}
-                handlePreviewTextComparison={handlePreviewTextComparison}
-                handlePreview={handlePreview}
-                handleDownload={handleDownload}
-                handleRedub={handleRedub}
-                handleDelete={handleDelete}
+                onPreview={handlePreview}
+                onDownload={handleDownload}
+                onDelete={handleDelete}
+                onViewTasks={handleViewTasks}
+                onRedub={handleRedub}
+                onPreviewAudio={handlePreview}
+                onDownloadAudio={handleDownload}
+                onPreviewTranscript={handlePreviewTranscript}
+                onPreviewTranslation={handlePreviewTranslation}
               />
             ))
           )}
@@ -651,7 +361,6 @@ const History = () => {
 
             {[...Array(pagination.pages)].map((_, i) => {
               const pageNum = i + 1;
-              // Show first, last, current, and surrounding pages
               if (
                 pageNum === 1 ||
                 pageNum === pagination.pages ||
@@ -724,7 +433,7 @@ const History = () => {
         videoTitle={redubModalVideo?.title}
         onSubmit={handleRedubSubmit}
       />
-    </div >
+    </div>
   );
 };
 

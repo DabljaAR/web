@@ -1,5 +1,6 @@
-import React, { Component } from 'react';
+import { Component } from 'react';
 import './ErrorBoundary.css';
+import logger from '../../utils/logger';
 
 export class ErrorBoundary extends Component {
   constructor(props) {
@@ -12,8 +13,9 @@ export class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, info) {
-    // In a real app, you would log to a service like Sentry
-    console.error('ErrorBoundary caught:', error, info);
+    // logger.error always fires in both dev and production.
+    // Swap reportError inside logger.js for Sentry when ready.
+    logger.error('ErrorBoundary caught', error, info);
   }
 
   handleReload = () => {

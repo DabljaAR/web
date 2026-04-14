@@ -132,7 +132,7 @@ const MediaPreviewModal = ({ isOpen, onClose, url, type, title, secondaryUrl, pr
         setIsLoading(false);
         // Auto play if desired
         if (videoRef.current) {
-            videoRef.current.play().catch(err => console.log('Autoplay blocked', err));
+            videoRef.current.play().catch(err => { if (import.meta.env.DEV) console.log('Autoplay blocked', err); });
         }
     };
 

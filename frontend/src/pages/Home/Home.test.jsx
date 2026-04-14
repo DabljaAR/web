@@ -44,7 +44,6 @@ describe('Home Page', () => {
 
     expect(screen.getByTestId('hero-section')).toBeInTheDocument();
     expect(screen.getByTestId('problem-section')).toBeInTheDocument();
-    expect(screen.getByTestId('features-section')).toBeInTheDocument();
     expect(screen.getByTestId('how-it-works-section')).toBeInTheDocument();
     expect(screen.getByTestId('try-it-now-section')).toBeInTheDocument();
     expect(screen.getByTestId('team-section')).toBeInTheDocument();

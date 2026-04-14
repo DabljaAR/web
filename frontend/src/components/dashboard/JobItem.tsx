@@ -1,7 +1,22 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
+import type { RecentJob } from '../../types/job';
+
+interface JobItemProps {
+  job: RecentJob;
+  t: (key: string) => string;
+  onPreview: (id: string) => void;
+  onDownload: (id: string) => void;
+  onDelete: (id: string) => void;
+  onRetry: (id: string) => void;
+  onDetails: (id: string) => void;
+  onPreviewAudio: (id: string) => void;
+  onDownloadAudio: (id: string) => void;
+  onPreviewTranscript: (id: string) => void;
+  onPreviewTranslation: (id: string) => void;
+}
 
 // Sub-component for Job Item to handle menu state locally
-const JobItem = ({ 
+const JobItem: React.FC<JobItemProps> = memo(({ 
   job, 
   t, 
   onPreview, 
@@ -15,11 +30,11 @@ const JobItem = ({
   onPreviewTranslation 
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setMenuOpen(false);
       }
     };
@@ -29,19 +44,32 @@ const JobItem = ({
     };
   }, []);
 
-  const toggleMenu = (e) => {
+  const toggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
     setMenuOpen(!menuOpen);
   };
 
   const isVideo = job.mediaType === 'VIDEO' || (!job.mediaType && job.name.match(/\.(mp4|mov|avi|mkv)$/i));
   const isAudio = job.mediaType === 'AUDIO' || (!job.mediaType && job.name.match(/\.(mp3|wav|m4a)$/i));
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const isText = job.mediaType === 'TEXT' || (!job.mediaType && job.name.match(/\.(txt)$/i));
 
   // Determine Icon/Thumbnail
-  let thumbnailContent;
+  let thumbnailContent: React.ReactNode;
   if (job.thumbnailUrl) {
-    thumbnailContent = <img src={job.thumbnailUrl} alt={job.name} className="job-thumbnail-img" onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }} />;
+    thumbnailContent = (
+      <img 
+        src={job.thumbnailUrl} 
+        alt={job.name} 
+        className="job-thumbnail-img" 
+        onError={(e) => { 
+          (e.target as HTMLImageElement).style.display = 'none'; 
+          if ((e.target as HTMLImageElement).nextSibling) {
+            ((e.target as HTMLImageElement).nextSibling as HTMLElement).style.display = 'flex';
+          }
+        }} 
+      />
+    );
   }
 
   // Fallback icon
@@ -79,7 +107,12 @@ const JobItem = ({
 
       {/* Actions */}
       <div className="job-actions-container" ref={menuRef}>
-        <button className="btn-icon-menu" onClick={toggleMenu} title="Options">
+        <button 
+          className="btn-icon-menu" 
+          onClick={toggleMenu} 
+          title="Options"
+          aria-label={t('common.options') || 'Options'}
+        >
           {/* Kebab Icon (Vertical Dots) */}
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="1"></circle>
@@ -133,7 +166,11 @@ const JobItem = ({
               </>
             )}
             <div style={{ height: '1px', background: '#eee', margin: '4px 0' }}></div>
-            <button className="action-menu-item danger" onClick={() => { onDelete(job.id); setMenuOpen(false); }}>
+            <button 
+              className="action-menu-item danger" 
+              onClick={() => { onDelete(job.id); setMenuOpen(false); }}
+              aria-label={t('dashboard.delete') || 'Delete'}
+            >
               <span>🗑️</span> {t('dashboard.delete')}
             </button>
           </div>
@@ -141,6 +178,6 @@ const JobItem = ({
       </div>
     </div>
   );
-};
+});
 
 export default JobItem;

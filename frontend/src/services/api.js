@@ -87,569 +87,97 @@ const refreshAccessToken = async () => {
   return refreshPromise;
 };
 
-const api = {
-  get: async (endpoint, options = {}) => {
-    try {
-      const token = getAuthToken();
-      const headers = {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      };
+const request = async (endpoint, options = {}, isRetry = false) => {
+  const token = getAuthToken();
+  const headers = {
+    'Content-Type': options.body instanceof FormData ? undefined : 'application/json',
+    ...options.headers,
+  };
 
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+  if (headers['Content-Type'] === undefined) {
+    delete headers['Content-Type'];
+  }
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 401 && !isRetry && getRefreshToken()) {
+      try {
+        await refreshAccessToken();
+        return request(endpoint, options, true);
+      } catch (refreshError) {
+        clearTokens();
+        throw refreshError;
       }
+    }
 
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: 'GET',
-        headers,
-        ...options,
-      });
-
-      if (!response.ok) {
-        // If 401 Unauthorized, try to refresh token
-        if (response.status === 401 && getRefreshToken()) {
-          try {
-            const newAccessToken = await refreshAccessToken();
-            // Retry the original request with new token
-            headers['Authorization'] = `Bearer ${newAccessToken}`;
-            const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
-              method: 'GET',
-              headers,
-              ...options,
-            });
-
-            if (!retryResponse.ok) {
-              // If retry still fails, throw error
-              let errorMessage = `API Error: ${retryResponse.statusText}`;
-              try {
-                const errorData = await retryResponse.json();
-                if (errorData.detail) {
-                  if (Array.isArray(errorData.detail)) {
-                    const validationErrors = errorData.detail.map(err => {
-                      const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                      return `${field}: ${err.msg}`;
-                    });
-                    errorMessage = validationErrors.join(', ');
-                  } else {
-                    errorMessage = errorData.detail;
-                  }
-                } else if (errorData.message) {
-                  errorMessage = errorData.message;
-                }
-              } catch (e) {
-                // If response is not JSON, use status text
-              }
-              const error = new Error(errorMessage);
-              error.status = retryResponse.status;
-              error.response = retryResponse;
-              throw error;
-            }
-
-            return retryResponse.json();
-          } catch (refreshError) {
-            // Token refresh failed, clear tokens and redirect to login
-            clearTokens();
-            if (window.location.pathname !== '/login') {
-              window.location.href = '/login';
-            }
-            throw refreshError;
+    if (!response.ok) {
+      let errorMessage = `API Error: ${response.statusText}`;
+      try {
+        const errorData = await response.json();
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            errorMessage = errorData.detail.map(err => {
+              const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
+              return `${field}: ${err.msg}`;
+            }).join(', ');
+          } else {
+            errorMessage = errorData.detail;
           }
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
         }
+      } catch (e) {}
 
-        // Try to extract error detail from response
-        let errorMessage = `API Error: ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.detail) {
-            // Handle FastAPI validation errors (array format)
-            if (Array.isArray(errorData.detail)) {
-              const validationErrors = errorData.detail.map(err => {
-                const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                return `${field}: ${err.msg}`;
-              });
-              errorMessage = validationErrors.join(', ');
-            } else {
-              errorMessage = errorData.detail;
-            }
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          }
-        } catch (e) {
-          // If response is not JSON, use status text
-        }
-        const error = new Error(errorMessage);
-        error.status = response.status;
-        error.response = response;
-        throw error;
-      }
-
-      return response.json();
-    } catch (error) {
-      // Handle network errors
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Something went wrong');
-      }
+      const error = new Error(errorMessage);
+      error.status = response.status;
+      error.response = response;
       throw error;
     }
-  },
 
-  getText: async (endpoint, options = {}) => {
-    try {
-      const token = getAuthToken();
-      const headers = {
-        ...options.headers,
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: 'GET',
-        headers,
-        ...options,
-      });
-
-      if (!response.ok) {
-        // If 401 Unauthorized, try to refresh token
-        if (response.status === 401 && getRefreshToken()) {
-          try {
-            const newAccessToken = await refreshAccessToken();
-            headers['Authorization'] = `Bearer ${newAccessToken}`;
-            const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
-              method: 'GET',
-              headers,
-              ...options,
-            });
-
-            if (!retryResponse.ok) {
-              let errorMessage = `API Error: ${retryResponse.statusText}`;
-              try {
-                const errorData = await retryResponse.json();
-                if (errorData.detail) {
-                  if (Array.isArray(errorData.detail)) {
-                    const validationErrors = errorData.detail.map(err => {
-                      const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                      return `${field}: ${err.msg}`;
-                    });
-                    errorMessage = validationErrors.join(', ');
-                  } else {
-                    errorMessage = errorData.detail;
-                  }
-                } else if (errorData.message) {
-                  errorMessage = errorData.message;
-                }
-              } catch (e) {
-                // If response is not JSON, use status text
-              }
-              const error = new Error(errorMessage);
-              error.status = retryResponse.status;
-              error.response = retryResponse;
-              throw error;
-            }
-
-            return retryResponse.text();
-          } catch (refreshError) {
-            clearTokens();
-            if (window.location.pathname !== '/login') {
-              window.location.href = '/login';
-            }
-            throw refreshError;
-          }
-        }
-
-        let errorMessage = `API Error: ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.detail) {
-            if (Array.isArray(errorData.detail)) {
-              const validationErrors = errorData.detail.map(err => {
-                const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                return `${field}: ${err.msg}`;
-              });
-              errorMessage = validationErrors.join(', ');
-            } else {
-              errorMessage = errorData.detail;
-            }
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          }
-        } catch (e) {
-          // If response is not JSON, use status text
-        }
-        const error = new Error(errorMessage);
-        error.status = response.status;
-        error.response = response;
-        throw error;
-      }
-
-      return response.text();
-    } catch (error) {
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Something went wrong');
-      }
-      throw error;
-    }
-  },
-
-  post: async (endpoint, data, options = {}) => {
-    try {
-      const token = getAuthToken();
-      const headers = {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      };
-
-      let body;
-      if (data instanceof FormData) {
-        delete headers['Content-Type'];
-        body = data;
-      } else {
-        body = JSON.stringify(data);
-      }
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: 'POST',
-        headers,
-        body,
-        ...options,
-      });
-
-      if (!response.ok) {
-        // If 401 Unauthorized, try to refresh token
-        if (response.status === 401 && getRefreshToken()) {
-          try {
-            const newAccessToken = await refreshAccessToken();
-            // Retry the original request with new token
-            headers['Authorization'] = `Bearer ${newAccessToken}`;
-            const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
-              method: 'POST',
-              headers,
-              body,
-              ...options,
-            });
-
-            if (!retryResponse.ok) {
-              // If retry still fails, throw error
-              let errorMessage = `API Error: ${retryResponse.statusText}`;
-              let errorDetails = null;
-              try {
-                const errorData = await retryResponse.json();
-                if (errorData.detail) {
-                  if (Array.isArray(errorData.detail)) {
-                    const validationErrors = errorData.detail.map(err => {
-                      const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                      return `${field}: ${err.msg}`;
-                    });
-                    errorMessage = validationErrors.join(', ');
-                    errorDetails = errorData.detail;
-                  } else {
-                    errorMessage = errorData.detail;
-                  }
-                } else if (errorData.message) {
-                  errorMessage = errorData.message;
-                }
-              } catch (e) {
-                // If response is not JSON, use status text
-              }
-              const error = new Error(errorMessage);
-              error.status = retryResponse.status;
-              error.response = retryResponse;
-              error.details = errorDetails;
-              throw error;
-            }
-
-            return retryResponse.json();
-          } catch (refreshError) {
-            // Token refresh failed, clear tokens and redirect to login
-            clearTokens();
-            if (window.location.pathname !== '/login') {
-              window.location.href = '/login';
-            }
-            throw refreshError;
-          }
-        }
-
-        // Try to extract error detail from response
-        let errorMessage = `API Error: ${response.statusText}`;
-        let errorDetails = null;
-        try {
-          const errorData = await response.json();
-          if (errorData.detail) {
-            // Handle FastAPI validation errors (array format)
-            if (Array.isArray(errorData.detail)) {
-              // Format validation errors into readable messages
-              const validationErrors = errorData.detail.map(err => {
-                const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                return `${field}: ${err.msg}`;
-              });
-              errorMessage = validationErrors.join(', ');
-              errorDetails = errorData.detail;
-            } else {
-              // Single error message
-              errorMessage = errorData.detail;
-            }
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          }
-        } catch (e) {
-          // If response is not JSON, use status text
-        }
-        const error = new Error(errorMessage);
-        error.status = response.status;
-        error.response = response;
-        error.details = errorDetails;
-        throw error;
-      }
-
-      return response.json();
-    } catch (error) {
-      // Handle network errors (CORS, connection refused, etc.)
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Something went wrong');
-      }
-      throw error;
-    }
-  },
-
-  put: async (endpoint, data, options = {}) => {
-    try {
-      const token = getAuthToken();
-      const headers = {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify(data),
-        ...options,
-      });
-
-      if (!response.ok) {
-        // If 401 Unauthorized, try to refresh token
-        if (response.status === 401 && getRefreshToken()) {
-          try {
-            const newAccessToken = await refreshAccessToken();
-            // Retry the original request with new token
-            headers['Authorization'] = `Bearer ${newAccessToken}`;
-            const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
-              method: 'PUT',
-              headers,
-              body: JSON.stringify(data),
-              ...options,
-            });
-
-            if (!retryResponse.ok) {
-              // If retry still fails, throw error
-              let errorMessage = `API Error: ${retryResponse.statusText}`;
-              try {
-                const errorData = await retryResponse.json();
-                if (errorData.detail) {
-                  if (Array.isArray(errorData.detail)) {
-                    const validationErrors = errorData.detail.map(err => {
-                      const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                      return `${field}: ${err.msg}`;
-                    });
-                    errorMessage = validationErrors.join(', ');
-                  } else {
-                    errorMessage = errorData.detail;
-                  }
-                } else if (errorData.message) {
-                  errorMessage = errorData.message;
-                }
-              } catch (e) {
-                // If response is not JSON, use status text
-              }
-              const error = new Error(errorMessage);
-              error.status = retryResponse.status;
-              error.response = retryResponse;
-              throw error;
-            }
-
-            return retryResponse.json();
-          } catch (refreshError) {
-            // Token refresh failed, clear tokens and redirect to login
-            clearTokens();
-            if (window.location.pathname !== '/login') {
-              window.location.href = '/login';
-            }
-            throw refreshError;
-          }
-        }
-
-        // Try to extract error detail from response
-        let errorMessage = `API Error: ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.detail) {
-            // Handle FastAPI validation errors (array format)
-            if (Array.isArray(errorData.detail)) {
-              const validationErrors = errorData.detail.map(err => {
-                const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                return `${field}: ${err.msg}`;
-              });
-              errorMessage = validationErrors.join(', ');
-            } else {
-              errorMessage = errorData.detail;
-            }
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          }
-        } catch (e) {
-          // If response is not JSON, use status text
-        }
-        const error = new Error(errorMessage);
-        error.status = response.status;
-        error.response = response;
-        throw error;
-      }
-
-      return response.json();
-    } catch (error) {
-      // Handle network errors
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Something went wrong');
-      }
-      throw error;
-    }
-  },
-
-  delete: async (endpoint, options = {}) => {
-    try {
-      const token = getAuthToken();
-      const headers = {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      };
-
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: 'DELETE',
-        headers,
-        ...options,
-      });
-
-      if (!response.ok) {
-        // If 401 Unauthorized, try to refresh token
-        if (response.status === 401 && getRefreshToken()) {
-          try {
-            const newAccessToken = await refreshAccessToken();
-            // Retry the original request with new token
-            headers['Authorization'] = `Bearer ${newAccessToken}`;
-            const retryResponse = await fetch(`${API_BASE_URL}${endpoint}`, {
-              method: 'DELETE',
-              headers,
-              ...options,
-            });
-
-            if (!retryResponse.ok) {
-              // If retry still fails, throw error
-              let errorMessage = `API Error: ${retryResponse.statusText}`;
-              try {
-                const errorData = await retryResponse.json();
-                if (errorData.detail) {
-                  if (Array.isArray(errorData.detail)) {
-                    const validationErrors = errorData.detail.map(err => {
-                      const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                      return `${field}: ${err.msg}`;
-                    });
-                    errorMessage = validationErrors.join(', ');
-                  } else {
-                    errorMessage = errorData.detail;
-                  }
-                } else if (errorData.message) {
-                  errorMessage = errorData.message;
-                }
-              } catch (e) {
-                // If response is not JSON, use status text
-              }
-              const error = new Error(errorMessage);
-              error.status = retryResponse.status;
-              error.response = retryResponse;
-              throw error;
-            }
-
-            // DELETE returns 204 No Content
-            if (retryResponse.status === 204) {
-              return null;
-            }
-
-            const contentType = retryResponse.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-              return retryResponse.json();
-            }
-
-            return null;
-          } catch (refreshError) {
-            // Token refresh failed, clear tokens and redirect to login
-            clearTokens();
-            if (window.location.pathname !== '/login') {
-              window.location.href = '/login';
-            }
-            throw refreshError;
-          }
-        }
-
-        // Try to extract error detail from response
-        let errorMessage = `API Error: ${response.statusText}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.detail) {
-            if (Array.isArray(errorData.detail)) {
-              const validationErrors = errorData.detail.map(err => {
-                const field = err.loc ? err.loc[err.loc.length - 1] : 'field';
-                return `${field}: ${err.msg}`;
-              });
-              errorMessage = validationErrors.join(', ');
-            } else {
-              errorMessage = errorData.detail;
-            }
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          }
-        } catch (e) {
-          // If response is not JSON, use status text
-        }
-        const error = new Error(errorMessage);
-        error.status = response.status;
-        error.response = response;
-        throw error;
-      }
-
-      // DELETE returns 204 No Content, so no JSON to parse
-      if (response.status === 204) {
-        return null;
-      }
-
-      // If there's content, try to parse it
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        return response.json();
-      }
-
+    if (response.status === 204) {
       return null;
-    } catch (error) {
-      // Handle network errors
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        throw new Error('Something went wrong');
-      }
-      throw error;
     }
-  },
+
+    if (options.responseType === 'text') {
+      return response.text();
+    }
+
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return response.json();
+    }
+    
+    return null;
+  } catch (error) {
+    if (error instanceof TypeError && error.message === 'Failed to fetch') {
+      throw new Error('Upload failed: the server did not respond. The server may be overloaded, out of storage, or unreachable.');
+    }
+    throw error;
+  }
+};
+
+const api = {
+  get: (endpoint, options = {}) => request(endpoint, { ...options, method: 'GET' }),
+  getText: (endpoint, options = {}) => request(endpoint, { ...options, method: 'GET', responseType: 'text' }),
+  post: (endpoint, data, options = {}) => request(endpoint, {
+    ...options,
+    method: 'POST',
+    body: data instanceof FormData ? data : JSON.stringify(data)
+  }),
+  put: (endpoint, data, options = {}) => request(endpoint, {
+    ...options,
+    method: 'PUT',
+    body: data instanceof FormData ? data : JSON.stringify(data)
+  }),
+  delete: (endpoint, options = {}) => request(endpoint, { ...options, method: 'DELETE' }),
 };
 
 export default api;

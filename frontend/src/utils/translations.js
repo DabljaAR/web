@@ -378,7 +378,8 @@ export const translations = {
       deleteConfirm: "Are you sure you want to delete this item?",
       resetFilters: "Reset Filters",
       loadMore: "Load More...",
-      noItems: "No history items found."
+      noItems: "No history items found.",
+      loadError: "Failed to load history items."
     },
     originalVideos: {
       title: "My Library",
@@ -458,6 +459,7 @@ export const translations = {
     },
     dashboard: {
       welcome: "Welcome Back",
+      startDubbing: "Start Dubbing",
       creditsRemaining: "You have 25 credits remaining",
       upgradePremium: "Upgrade to Premium",
       uploadContent: "Upload Content",
@@ -527,6 +529,8 @@ export const translations = {
       downloadAudio: "Download Audio",
       previewVideo: "Preview Video",
       downloadVideo: "Download Video",
+      previewTranslation: "Preview Translation",
+      previewTranscript: "Preview Transcript",
       selectFileError: "Please select or upload a file first.",
       uploadSuccess: "Upload successful! Processing started.",
       uploadError: "Upload failed. Please try again.",
@@ -549,7 +553,8 @@ export const translations = {
       uploading: "Uploading...",
       loading: "Loading...",
       error: "Error",
-      processing: "Processing..."
+      processing: "Processing...",
+      options: "Options"
     }
   },
   ar: {
@@ -938,7 +943,8 @@ export const translations = {
       deleteConfirm: "هل أنت متأكد من حذف هذا العنصر؟",
       resetFilters: "إعادة تعيين الفلاتر",
       loadMore: "تحميل المزيد...",
-      noItems: "لم يتم العثور على أي عناصر في السجل."
+      noItems: "لم يتم العثور على أي عناصر في السجل.",
+      loadError: "فشل تحميل عناصر السجل."
     },
     originalVideos: {
       title: "مكتبتي",
@@ -1018,6 +1024,7 @@ export const translations = {
     },
     dashboard: {
       welcome: "مرحباً بعودتك",
+      startDubbing: "بدء الدبلجة",
       creditsRemaining: "لديك 25 رصيد متبقي",
       upgradePremium: "الترقية للمميز",
       uploadContent: "رفع المحتوى",
@@ -1087,6 +1094,8 @@ export const translations = {
       downloadAudio: "تحميل الصوت",
       previewVideo: "معاينة الفيديو",
       downloadVideo: "تحميل الفيديو",
+      previewTranslation: "معاينة الترجمة",
+      previewTranscript: "معاينة النص",
       selectFileError: "يرجى اختيار أو رفع ملف أولاً.",
       uploadSuccess: "تم الرفع بنجاح! بدأت المعالجة.",
       uploadError: "فشل الرفع. يرجى المحاولة مرة أخرى.",
@@ -1109,7 +1118,8 @@ export const translations = {
       uploading: "جاري الرفع...",
       loading: "جاري التحميل...",
       error: "خطأ",
-      processing: "جاري المعالجة..."
+      processing: "جاري المعالجة...",
+      options: "الخيارات"
     }
   }
 };
