@@ -13,13 +13,28 @@ from app.media.storage import get_storage_service
 from app.media.ffmpeg_service import FFmpegService, MediaProcessingError
 from app.core.db import AsyncSessionLocal
 from app.jobs.models import Job, JobStatus, JobType
+from app.config import settings
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
+CHUNK_ELIGIBLE_OUTPUT_TYPES = {
+    "captionsOnly",
+    "captionsAndTranslation",
+    "translationAndTTS",
+    "fullDubbing",
+}
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _resolve_processing_mode(output_type: str) -> str:
+    if settings.PIPELINE_USE_SINGLE_CHUNK and output_type in CHUNK_ELIGIBLE_OUTPUT_TYPES:
+        return "single_chunk"
+    return "segmented"
 
 
 async def process_video_task(video_id: str, file_path_key: str, options: dict = None):
@@ -110,8 +125,14 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                     if output_type == "uploadOnly":
                         logger.info(f"Skipping pipeline for {video_id} — upload-only mode")
                         return
+                    processing_mode = _resolve_processing_mode(output_type)
                     target_lang = options.get("target_lang", "arb_Arab")
-                    logger.info(f"Triggering pipeline with output_type={output_type} for {video_id}")
+                    logger.info(
+                        "Triggering pipeline with output_type=%s processing_mode=%s for %s",
+                        output_type,
+                        processing_mode,
+                        video_id,
+                    )
 
                     # Create VideoTask as single source-of-truth for this pipeline run
                     from app.tasks.models import VideoTask, TaskStatus
@@ -122,6 +143,7 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                         source_lang=options.get("source_lang"),
                         target_lang=target_lang,
                         output_type=output_type,
+                        processing_mode=processing_mode,
                         num_beams=int(options.get("num_beams", 5)),
                         english_ratio_threshold=float(options.get("english_ratio_threshold", 0.5)),
                         status=TaskStatus.QUEUED,
@@ -142,6 +164,7 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                             "task_id": video_task.id,
                             "audio_key": audio_key or file_path_key,
                             "target_lang": target_lang,
+                            "processing_mode": processing_mode,
                         }
                     )
                     db.add(stt_job)
@@ -585,6 +608,7 @@ class VideoService:
         selected_options = options or {}
         target_lang = selected_options.get("target_lang", "arb_Arab")
         output_type = selected_options.get("output_type", "fullDubbing")
+        processing_mode = _resolve_processing_mode(output_type)
 
         # Create VideoTask as single source-of-truth for this reprocess run
         from app.tasks.models import VideoTask, TaskStatus
@@ -595,6 +619,7 @@ class VideoService:
             source_lang=selected_options.get("source_lang"),
             target_lang=target_lang,
             output_type=output_type,
+            processing_mode=processing_mode,
             num_beams=int(selected_options.get("num_beams", 5)),
             english_ratio_threshold=float(selected_options.get("english_ratio_threshold", 0.5)),
             status=TaskStatus.QUEUED,
@@ -610,6 +635,7 @@ class VideoService:
             "target_lang": target_lang,
             "audio_key": media.audio_path or media.file_path,
             "task_id": video_task.id,
+            "processing_mode": processing_mode,
         }
 
         stt_job = Job(

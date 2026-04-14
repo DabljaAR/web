@@ -191,3 +191,18 @@ class TestSettings:
         
         # CPU should get int8
         assert compute_type == "int8"
+
+    def test_pipeline_single_chunk_default_false(self):
+        """PIPELINE_USE_SINGLE_CHUNK defaults to false when unset."""
+        if "PIPELINE_USE_SINGLE_CHUNK" in os.environ:
+            del os.environ["PIPELINE_USE_SINGLE_CHUNK"]
+
+        settings = Settings()
+        assert settings.PIPELINE_USE_SINGLE_CHUNK is False
+
+    def test_pipeline_single_chunk_true(self):
+        """PIPELINE_USE_SINGLE_CHUNK parses true values correctly."""
+        os.environ["PIPELINE_USE_SINGLE_CHUNK"] = "true"
+
+        settings = Settings()
+        assert settings.PIPELINE_USE_SINGLE_CHUNK is True

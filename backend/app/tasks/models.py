@@ -48,6 +48,7 @@ class VideoTask(Base):
     source_lang: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     target_lang: Mapped[str] = mapped_column(String(20), nullable=False, default="arb_Arab")
     output_type: Mapped[str] = mapped_column(String(50), nullable=False, default="fullDubbing")
+    processing_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="segmented")
     num_beams: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     english_ratio_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
 
