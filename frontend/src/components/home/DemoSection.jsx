@@ -8,7 +8,7 @@ const DemoSection = () => {
   const [isDragging, setIsDragging] = useState(false);
 
   const handleFile = (file) => {
-    console.log('File selected:', file.name);
+    if (import.meta.env.DEV) console.log('File selected:', file.name);
     toast(`File "${file.name}" selected! (Demo - no actual upload)`);
   };
 

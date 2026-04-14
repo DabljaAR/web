@@ -490,3 +490,41 @@ select.form-input {
     justify-content: center;
   }
 }
+/* Utility Classes for Inline styles migration */
+.loading-state, .error-state {
+    text-align: center;
+    padding: 50px;
+}
+
+.error-state {
+    color: var(--accent-red);
+}
+
+.hidden-file-input {
+    display: none;
+}
+
+.profile-hint-text {
+    color: var(--text-light);
+    font-size: 12px;
+    margin-top: 8px;
+    display: block;
+}
+
+.plan-badge-orange {
+    background: var(--accent-orange) !important;
+}
+
+.stat-value-small {
+    font-size: 1.25rem !important;
+}
+
+.flex-center {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.text-center {
+    text-align: center;
+}

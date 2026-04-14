@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -7,42 +7,30 @@ import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
 import MediaPreviewModal from '../../components/common/MediaPreviewModal';
 import { mediaService } from '../../services/mediaService';
-import { formatDate, formatDuration, formatSize } from '../../utils/formatters';
 import OriginalVideoItem from './OriginalVideoItem';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { useHistory } from '../../hooks/useHistory';
+import { usePageTitle } from '../../hooks/usePageTitle';
 import '../../styles/home.css';
 import '../../styles/history.css';
 import '../../styles/dashboard.css';
 
 const OriginalVideos = () => {
     const { t } = useTranslation();
-    const [filters, setFilters] = useState({
-        search: '',
-        status: 'all',
-        domain: 'all',
-        dateRange: 'last30Days',
-        sortBy: 'dateNewest',
-        mediaType: 'all'
-    });
-
-    const [activeMediaTab, setActiveMediaTab] = useState('all');
-
-    const [pagination, setPagination] = useState({
-        page: 1,
-        limit: 5,
-        total: 0,
-        pages: 1,
-        totalCompleted: 0,
-        totalFailed: 0
-    });
-
-    // List & Loading State
-    const [historyItems, setHistoryItems] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [isPolling, setIsPolling] = useState(false);
-    const [error, setError] = useState(null);
-    const [debouncedSearch, setDebouncedSearch] = useState(filters.search);
-    const [refreshKey, setRefreshKey] = useState(0);
+    usePageTitle('nav.myLibrary');
+    const {
+        filters,
+        setFilters,
+        activeMediaTab,
+        setActiveMediaTab,
+        pagination,
+        setPagination,
+        historyItems,
+        loading,
+        error,
+        deletingIds,
+        fetchHistory
+    } = useHistory(5);
 
     // Preview Modal State
     const [previewModalOpen, setPreviewModalOpen] = useState(false);
@@ -64,150 +52,6 @@ const OriginalVideos = () => {
     const [isYoutubeDownloading, setIsYoutubeDownloading] = useState(false);
     const [youtubeError, setYoutubeError] = useState(null);
 
-    // Track deleting items
-    const deletingIds = useRef(new Set());
-
-
-
-    useEffect(() => {
-        const handler = setTimeout(() => {
-            setDebouncedSearch(filters.search);
-            if (filters.search !== debouncedSearch) {
-                setPagination(prev => ({ ...prev, page: 1 }));
-            }
-        }, 500);
-        return () => clearTimeout(handler);
-    }, [filters.search, debouncedSearch]);
-
-    useEffect(() => {
-        const fetchHistory = async (internal = false) => {
-            try {
-                if (!internal) setLoading(true);
-                // Specifically filter for VIDEO media type
-                const data = await mediaService.getVideos({
-                    page: pagination.page,
-                    limit: pagination.limit,
-                    search: debouncedSearch,
-                    sortBy: filters.sortBy,
-                    dateRange: filters.dateRange,
-                    status: filters.status,
-                    mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
-                });
-
-                const videos = Array.isArray(data) ? data : data.items || [];
-                const total = data.total || videos.length;
-                const pages = data.pages || 1;
-                const totalCompleted = data.total_completed || 0;
-                const totalFailed = data.total_failed || 0;
-
-                const mappedItems = videos.map(video => ({
-                    id: video.id,
-                    title: video.title || video.original_filename,
-                    thumbnail: video.thumbnail_url,
-                    status: video.status.toLowerCase(),
-                    domain: video.domain || t('originalVideos.domainGeneral') || 'General',
-                    style: video.style || 'Neutral',
-                    voice: video.voice || 'Male Voice 1',
-                    duration: formatDuration(video.duration),
-                    size: formatSize(video.size_bytes),
-                    processed: formatDate(video.updated_at),
-                    started: formatDate(video.created_at),
-                    attempted: formatDate(video.created_at),
-                    rawDate: video.created_at,
-                    creditsUsed: 0,
-                    error: video.error_message,
-
-                    createdAt: video.created_at,
-                    url: video.url,
-                    audioUrl: video.audio_url,
-                    mediaType: video.media_type || (activeMediaTab !== 'all' ? activeMediaTab.toUpperCase() : 'VIDEO')
-                }));
-
-                setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
-                setPagination(prev => ({
-                    ...prev,
-                    total: total,
-                    pages: pages,
-                    totalCompleted: totalCompleted,
-                    totalFailed: totalFailed
-                }));
-
-                // Track if we need to continue polling
-                const hasActive = mappedItems.some(item =>
-                    item.status === 'processing' || item.status === 'pending'
-                );
-                setIsPolling(hasActive);
-
-                setError(null);
-            } catch (err) {
-                console.error("Failed to fetch original videos:", err);
-                if (!internal) setError(t('originalVideos.loadError') || 'Failed to load original videos.');
-                setIsPolling(false);
-            } finally {
-                if (!internal) setLoading(false);
-            }
-        };
-
-        fetchHistory();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab, refreshKey]);
-
-    // Polling Effect (Dashboard Style)
-    useEffect(() => {
-        let intervalId;
-        if (isPolling) {
-            intervalId = setInterval(() => {
-                // Call fetch with internal flag to avoid showing loading spinner
-                const fetchHistoryInternal = async () => {
-                    try {
-                        const data = await mediaService.getVideos({
-                            page: pagination.page,
-                            limit: pagination.limit,
-                            search: debouncedSearch,
-                            sortBy: filters.sortBy,
-                            dateRange: filters.dateRange,
-                            status: filters.status,
-                            mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
-                        });
-
-                        const videos = Array.isArray(data) ? data : data.items || [];
-                        const mappedItems = videos.map(video => ({
-                            id: video.id,
-                            title: video.title || video.original_filename,
-                            thumbnail: video.thumbnail_url,
-                            status: video.status.toLowerCase(),
-                            duration: formatDuration(video.duration),
-                            size: formatSize(video.size_bytes),
-                            processed: formatDate(video.updated_at),
-                            started: formatDate(video.created_at),
-
-                            createdAt: video.created_at,
-                            url: video.url,
-                            audioUrl: video.audio_url,
-                            mediaType: video.media_type || (activeMediaTab !== 'all' ? activeMediaTab.toUpperCase() : 'VIDEO')
-                        }));
-
-                        setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
-
-                        const hasActive = mappedItems.some(item =>
-                            item.status === 'processing' || item.status === 'pending'
-                        );
-                        if (!hasActive) setIsPolling(false);
-                    } catch (e) {
-                        console.error("Polling fetch failed", e);
-                        setIsPolling(false);
-                    }
-                };
-                fetchHistoryInternal();
-            }, 5000);
-        }
-        return () => {
-            if (intervalId) clearInterval(intervalId);
-        };
-    }, [isPolling, pagination.page, debouncedSearch, filters.sortBy, filters.dateRange, filters.status, activeMediaTab]);
-
-
-
     const handlePageChange = (newPage) => {
         if (newPage >= 1 && newPage <= pagination.pages) {
             setPagination(prev => ({ ...prev, page: newPage }));
@@ -216,10 +60,7 @@ const OriginalVideos = () => {
 
     const handleFilterChange = (e) => {
         const { name, value } = e.target;
-        setFilters(prev => ({
-            ...prev,
-            [name]: value
-        }));
+        setFilters(prev => ({ ...prev, [name]: value }));
         setPagination(prev => ({ ...prev, page: 1 }));
     };
 
@@ -241,42 +82,48 @@ const OriginalVideos = () => {
         setPagination(prev => ({ ...prev, page: 1 }));
     };
 
-    const handlePreview = (id) => {
-        const item = historyItems.find(i => i.id === id);
-        if (item && item.url) {
-            setPreviewJob({
-                ...item,
-                name: item.title
-            });
-            setPreviewModalOpen(true);
-        } else {
-            toast.error(t('dashboard.noPreviewError') || "No preview URL available.");
+    const handlePreview = (item) => {
+        setPreviewJob(item);
+        setPreviewModalOpen(true);
+    };
+
+    const handleDownload = (item) => {
+        if (item.url) window.open(item.url, '_blank');
+    };
+
+    const handleDelete = async (id) => {
+        const result = await Swal.fire({
+            title: t('history.confirmDeleteTitle') || 'Are you sure?',
+            text: t('history.confirmDeleteText') || "You won't be able to revert this!",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ff4b2b',
+            cancelButtonColor: '#333',
+            confirmButtonText: t('history.confirmDeleteBtn') || 'Yes, delete it!'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                deletingIds.current.add(id);
+                await mediaService.deleteVideo(id);
+                toast.success(t('dashboard.deleteSuccess') || "Deleted successfully.");
+                await fetchHistory();
+            } catch (err) {
+                if (import.meta.env.DEV) console.error("Failed to delete video:", err);
+                toast.error(t('dashboard.deleteError') || "Failed to delete video");
+            } finally {
+                deletingIds.current.delete(id);
+            }
         }
     };
 
-    const handleDownload = (id) => {
-        const item = historyItems.find(i => i.id === id);
-        if (item && item.url) {
-            const link = document.createElement('a');
-            link.href = item.url;
-            link.download = item.title || 'download';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        } else {
-            toast.error(t('dashboard.noPreviewError') || "No download URL available.");
-        }
-    };
-
-    const handleFileSelect = () => {
+    const handleUploadClick = () => {
         fileInputRef.current?.click();
     };
 
     const handleFileChange = (e) => {
         const file = e.target.files?.[0];
-        if (file) {
-            setSelectedFile(file);
-        }
+        if (file) setSelectedFile(file);
     };
 
     const handleDragOver = (e) => {
@@ -292,35 +139,25 @@ const OriginalVideos = () => {
         e.preventDefault();
         setIsDragOver(false);
         const file = e.dataTransfer.files?.[0];
-        if (file) {
-            setSelectedFile(file);
-        }
+        if (file) setSelectedFile(file);
     };
 
-    const handleStartProcessing = async () => {
-        if (!selectedFile) {
-            toast.error(t('dashboard.selectFileError') || "Please select or upload a video first.");
-            return;
-        }
+    const handleStartUpload = async () => {
+        if (!selectedFile) return;
 
         setIsUploading(true);
         setUploadError(null);
-
         try {
-            const formDataToUpload = new FormData();
-            formDataToUpload.append('file', selectedFile);
-            formDataToUpload.append('output_type', 'uploadOnly');
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            await mediaService.uploadVideo(formData);
 
-            await mediaService.uploadVideo(formDataToUpload);
-
-            toast.success(t('dashboard.uploadSuccess') || "Upload successful! Processing started.");
+            toast.success(t('originalVideos.uploadSuccess') || "Video uploaded successfully.");
             setSelectedFile(null);
             setShowUploadSection(false);
-
-            // Refresh history
-            setRefreshKey(k => k + 1);
+            fetchHistory();
         } catch (err) {
-            console.error("Upload failed:", err);
+            if (import.meta.env.DEV) console.error("Upload failed:", err);
             setUploadError(err.message || "Failed to start processing.");
         } finally {
             setIsUploading(false);
@@ -328,147 +165,26 @@ const OriginalVideos = () => {
     };
 
     const handleYoutubeDownload = async () => {
-        if (!youtubeUrl.trim()) {
-            setYoutubeError(t('originalVideos.youtubeErrorEmpty'));
-            return;
-        }
-        const ytRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?.*v=[\w-]+|shorts\/[\w-]+)|youtu\.be\/[\w-]+)/;
-        if (!ytRegex.test(youtubeUrl.trim())) {
-            setYoutubeError(t('originalVideos.youtubeErrorInvalid'));
-            return;
-        }
+        if (!youtubeUrl) return;
 
         setIsYoutubeDownloading(true);
         setYoutubeError(null);
-
         try {
             await mediaService.downloadFromYoutube({
-                youtube_url: youtubeUrl.trim(),
+                youtube_url: youtubeUrl,
                 format: youtubeFormat,
-                quality: youtubeQuality,
+                quality: youtubeQuality
             });
-
-            toast.success(t('originalVideos.youtubeSuccessMsg'));
+            toast.success(t('originalVideos.youtubeSuccess') || 'Video added to processing queue.');
             setYoutubeUrl('');
             setShowYoutubeModal(false);
             setShowUploadSection(false);
-            setRefreshKey(k => k + 1);
+            fetchHistory();
         } catch (err) {
-            console.error('YouTube download failed:', err);
+            if (import.meta.env.DEV) console.error('YouTube download failed:', err);
             setYoutubeError(err.message || 'Failed to queue YouTube download.');
         } finally {
             setIsYoutubeDownloading(false);
-        }
-    };
-
-    const handleDelete = async (id) => {
-        const confirmResult = await Swal.fire({
-            title: t('common.warning') || 'Are you sure?',
-            text: t('originalVideos.deleteConfirm') || "Are you sure you want to delete this item?",
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#d33',
-            cancelButtonColor: '#3085d6',
-            confirmButtonText: t('common.delete') || 'Yes, delete it!'
-        });
-
-        if (confirmResult.isConfirmed) {
-            try {
-                // Mark as deleting
-                deletingIds.current.add(id);
-
-                // Optimistically remove from UI
-                setHistoryItems(prev => prev.filter(item => item.id !== id));
-                setPagination(prev => ({
-                    ...prev,
-                    total: Math.max(0, prev.total - 1)
-                }));
-
-                await mediaService.deleteVideo(id);
-
-                const data = await mediaService.getVideos({
-                    page: pagination.page,
-                    limit: pagination.limit,
-                    search: debouncedSearch,
-                    sortBy: filters.sortBy,
-                    dateRange: filters.dateRange,
-                    status: filters.status,
-                    mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase()
-                });
-                const videos = Array.isArray(data) ? data : data.items || [];
-                const mappedItems = videos.map(video => ({
-                    id: video.id,
-                    title: video.title || video.original_filename,
-                    thumbnail: video.thumbnail_url,
-                    status: video.status.toLowerCase(),
-                    domain: video.domain || t('originalVideos.domainGeneral') || 'General',
-                    style: video.style || 'Neutral',
-                    voice: video.voice || 'Male Voice 1',
-                    duration: formatDuration(video.duration),
-                    size: formatSize(video.size_bytes),
-                    processed: formatDate(video.updated_at),
-                    started: formatDate(video.created_at),
-                    attempted: formatDate(video.created_at),
-                    rawDate: video.created_at,
-                    creditsUsed: 0,
-                    error: video.error_message,
-
-                    createdAt: video.created_at,
-                    url: video.url,
-                    audioUrl: video.audio_url,
-                    mediaType: video.media_type || (activeMediaTab !== 'all' ? activeMediaTab.toUpperCase() : 'VIDEO')
-                }));
-                setHistoryItems(mappedItems.filter(item => !deletingIds.current.has(item.id)));
-                setPagination(prev => ({
-                    ...prev,
-                    total: data.total || 0,
-                    pages: data.pages || 1,
-                    totalCompleted: data.total_completed || 0,
-                    totalFailed: data.total_failed || 0
-                }));
-                toast.success(t('dashboard.deleteSuccess') || "Deleted successfully.");
-            } catch (err) {
-                console.error("Failed to delete video:", err);
-                toast.error(t('dashboard.deleteError') || "Failed to delete video");
-
-                deletingIds.current.delete(id);
-                // Refresh to restore state
-                setRefreshKey(k => k + 1);
-            } finally {
-                setTimeout(() => {
-                    if (deletingIds.current) deletingIds.current.delete(id);
-                }, 10000);
-            }
-        }
-    };
-
-    const getStatusClass = (status) => {
-        switch (status) {
-            case 'completed': return 'status-completed';
-            case 'failed': return 'status-failed';
-            case 'processing':
-            case 'pending': return 'status-processing';
-            default: return '';
-        }
-    };
-
-    const getStatusIcon = (status) => {
-        switch (status) {
-            case 'completed': return '✓';
-            case 'failed': return '✗';
-            case 'processing':
-            case 'pending': return '⏳';
-            default: return '';
-        }
-    };
-
-    const getStatusText = (status) => {
-        switch (status) {
-            case 'completed': return t('originalVideos.statusCompleted');
-            case 'failed': return t('originalVideos.statusFailed');
-            case 'processing':
-            case 'pending': return t('originalVideos.statusProcessing');
-            default: return status;
         }
     };
 
@@ -550,7 +266,7 @@ const OriginalVideos = () => {
                                     onDragOver={handleDragOver}
                                     onDragLeave={handleDragLeave}
                                     onDrop={handleDrop}
-                                    onClick={handleFileSelect}
+                                    onClick={handleUploadClick}
                                 >
                                     <div className="upload-icon">📤</div>
                                     <div className="upload-text">
@@ -585,7 +301,7 @@ const OriginalVideos = () => {
                                 <button
                                     className="btn btn-primary"
                                     style={{ marginTop: '12px' }}
-                                    onClick={handleStartProcessing}
+                                    onClick={handleStartUpload}
                                     disabled={isUploading}
                                 >
                                     {isUploading ? t('common.uploading') : t('originalVideos.startUploadingButton')}
@@ -716,12 +432,7 @@ const OriginalVideos = () => {
 
                         <div className="filter-group">
                             <label className="filter-label">{t('originalVideos.domain')}</label>
-                            <select
-                                className="filter-select"
-                                name="domain"
-                                value={filters.domain}
-                                onChange={handleFilterChange}
-                            >
+                            <select className="filter-select" name="domain" value={filters.domain} onChange={handleFilterChange}>
                                 <option value="all">{t('originalVideos.domainAll')}</option>
                                 <option value="general">{t('originalVideos.domainGeneral')}</option>
                                 <option value="technical">{t('originalVideos.domainTechnical')}</option>
@@ -750,8 +461,8 @@ const OriginalVideos = () => {
                                 <option value="nameZA">{t('originalVideos.nameZA')}</option>
                             </select>
                         </div>
-
                     </div>
+
                     <div style={{ display: 'flex', marginTop: '12px' }}>
                         <button className="btn btn-secondary" onClick={handleResetFilters} style={{ height: '42px', marginInlineEnd: 'auto' }}>
                             {t('originalVideos.resetFilters')}
@@ -781,16 +492,13 @@ const OriginalVideos = () => {
                         </div>
                     ) : (
                         historyItems.map((item) => (
-                            <OriginalVideoItem 
+                            <OriginalVideoItem
                                 key={item.id}
-                                item={item} 
-                                t={t} 
-                                getStatusClass={getStatusClass} 
-                                getStatusIcon={getStatusIcon} 
-                                getStatusText={getStatusText} 
-                                handlePreview={handlePreview} 
-                                handleDownload={handleDownload} 
-                                handleDelete={handleDelete} 
+                                item={item}
+                                t={t}
+                                onPreview={handlePreview}
+                                onDownload={handleDownload}
+                                onDelete={handleDelete}
                             />
                         ))
                     )}

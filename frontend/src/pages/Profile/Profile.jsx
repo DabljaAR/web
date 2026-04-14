@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import Swal from 'sweetalert2';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -11,12 +10,13 @@ import Navbar from '../../components/layout/Navbar';
 import Footer from '../../components/layout/Footer';
 import { useAvatarUpload } from '../../hooks/useAvatarUpload';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { usePageTitle } from '../../hooks/usePageTitle';
 import '../../styles/home.css';
 import '../../styles/profile.css';
 
 const Profile = () => {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  usePageTitle('profile.title');
   const { user: authUser, logout } = useAuth();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -32,7 +32,6 @@ const Profile = () => {
     handleAvatarChange,
     uploadAvatar,
     resetAvatar,
-    setAvatarPreview
   } = useAvatarUpload();
 
   const [formData, setFormData] = useState({
@@ -78,7 +77,7 @@ const Profile = () => {
         }));
       } catch (err) {
         setError(err.message || 'Failed to load user data');
-        console.error('Error fetching user data:', err);
+        if (import.meta.env.DEV) console.error('Error fetching user data:', err);
       } finally {
         setLoading(false);
       }
@@ -508,7 +507,7 @@ const Profile = () => {
           <div className="plan-card premium">
             <div className="plan-header">
               <h3 className="plan-name">{t('profile.premiumPlan')}</h3>
-              <span className="plan-badge" style={{ background: 'var(--accent-orange)' }}>
+              <span className="plan-badge plan-badge-orange">
                 {t('profile.recommended')}
               </span>
             </div>
@@ -573,7 +572,7 @@ const Profile = () => {
             </div>
             <div className="stat-item">
               <div className="stat-label">{t('profile.favoriteDomain')}</div>
-              <div className="stat-value" style={{ fontSize: '1.25rem' }}>
+              <div className="stat-value stat-value-small">
                 {t('profile.domainTechnical')}
               </div>
             </div>

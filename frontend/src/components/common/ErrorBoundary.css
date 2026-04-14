@@ -5,13 +5,13 @@
   min-height: 100vh;
   padding: 2rem;
   background-color: var(--bg-primary);
-  color: var(--text-primary);
+  color: var(--text-dark);
   text-align: center;
 }
 
 .error-content {
   max-width: 500px;
-  background: var(--bg-secondary);
+  background: var(--bg-white);
   padding: 3rem;
   border-radius: 1rem;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);

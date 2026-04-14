@@ -5,6 +5,7 @@ import Swal from 'sweetalert2';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../hooks/useAuth';
 import { useJobPolling } from '../../hooks/useJobPolling';
+import { usePageTitle } from '../../hooks/usePageTitle';
 import { useYoutubeImport } from '../../hooks/useYoutubeImport';
 import { mediaService } from '../../services/mediaService';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
@@ -24,6 +25,7 @@ import '../../styles/dashboard-job-item.css';
 
 const Dashboard = () => {
   const { t } = useTranslation();
+  usePageTitle('nav.dashboard');
   const tx = (key, fallback) => {
     const value = t(key);
     return value && value !== key ? value : fallback;
@@ -333,7 +335,7 @@ const Dashboard = () => {
         setSelectedLibraryFile(null);
         toast.success(t('dashboard.uploadSuccess') || 'Processing started.');
       } catch (error) {
-        console.error("Reprocess failed", error);
+        if (import.meta.env.DEV) console.error("Reprocess failed", error);
         setUploadError("Failed to start processing: " + (error.message || "Unknown error"));
         toast.error(t('dashboard.uploadError') || "Failed to start processing. Please try again.");
       } finally {
@@ -448,7 +450,7 @@ const Dashboard = () => {
         await mediaService.deleteVideo(id);
         toast.success(t('dashboard.deleteSuccess') || "Deleted successfully.");
       } catch (error) {
-        console.error("Delete failed", error);
+        if (import.meta.env.DEV) console.error("Delete failed", error);
 
         toast.error(t('dashboard.deleteError') || "Failed to delete job.");
 

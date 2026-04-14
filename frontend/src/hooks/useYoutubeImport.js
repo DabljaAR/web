@@ -51,7 +51,7 @@ export const useYoutubeImport = (onSuccessCallback, hideModalCallback) => {
       resetYoutubeState();
       if (onSuccessCallback) onSuccessCallback();
     } catch (err) {
-      console.error('YouTube download failed:', err);
+      if (import.meta.env.DEV) console.error('YouTube download failed:', err);
       if (showYoutubeModal) setYoutubeError(err.message || 'Failed to queue YouTube download.');
       else toast.error(err.message || 'Failed to queue YouTube download.');
     } finally {

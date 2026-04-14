@@ -5,7 +5,7 @@ const ProblemSection = () => {
   const { t } = useTranslation();
 
   return (
-    <section className="problem-section">
+    <section id="challenge" className="problem-section">
       <div className="container-large">
         <div className="section-header-custom">
           <span className="section-eyebrow">{t('problem.eyebrow')}</span>

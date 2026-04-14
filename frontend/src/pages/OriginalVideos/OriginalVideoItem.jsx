@@ -1,58 +1,90 @@
-import React from 'react';
+import React, { memo } from 'react';
+import PropTypes from 'prop-types';
 
-const OriginalVideoItem = ({ item, t, getStatusClass, getStatusIcon, getStatusText, handlePreview, handleDownload, handleDelete }) => {
+const OriginalVideoItem = memo(({ item, t, onPreview, onDownload, onDelete }) => {
+    const getStatusClass = (status) => {
+        switch (status) {
+            case 'completed': return 'completed';
+            case 'processing':
+            case 'queued':
+            case 'pending': return 'processing';
+            case 'failed': return 'failed';
+            default: return '';
+        }
+    };
+
+    const getStatusIcon = (status) => {
+        switch (status) {
+            case 'completed': return '✅';
+            case 'processing':
+            case 'queued':
+            case 'pending': return '⏳';
+            case 'failed': return '❌';
+            default: return '❓';
+        }
+    };
+
+    const isVideo = item.mediaType === 'VIDEO' || (!item.mediaType && item.name.match(/\.(mp4|mov|avi|mkv)$/i));
+    const isAudio = item.mediaType === 'AUDIO' || (!item.mediaType && item.name.match(/\.(mp3|wav|m4a)$/i));
+
     return (
         <div className="history-item">
             <div className="item-content">
                 <div className="item-thumbnail">
-                    {item.thumbnail ? (
-                        <img src={item.thumbnail} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '4px' }} />
+                    {item.thumbnailUrl ? (
+                        <img src={item.thumbnailUrl} alt={item.name} className="item-thumb-img" />
                     ) : (
-                        item.mediaType === 'AUDIO' ? '🎵' :
-                            item.mediaType === 'TEXT' ? '📄' : '🎬'
+                        <div className="item-type-icon">
+                            {isVideo ? '🎬' : isAudio ? '🎵' : '📄'}
+                        </div>
                     )}
                 </div>
                 <div className="item-details">
                     <div className="item-header">
-                        <h3 className="item-title">{item.title}</h3>
+                        <h3 className="item-title" title={item.name}>{item.name}</h3>
                         <span className={`item-status ${getStatusClass(item.status)}`}>
                             <span>{getStatusIcon(item.status)}</span>
-                            <span>{getStatusText(item.status)}</span>
+                            <span>{t(`history.status${item.status.charAt(0).toUpperCase() + item.status.slice(1)}`) || item.status}</span>
                         </span>
                     </div>
 
-                    <div className="item-meta">
-                        <div className="meta-item">
-                            <span className="meta-label">{t('originalVideos.metaDuration')}</span>
-                            <span className="meta-value">{item.duration}</span>
-                        </div>
-                        <div className="meta-item">
-                            <span className="meta-label">{t('originalVideos.metaSize')}</span>
-                            <span className="meta-value">{item.size}</span>
-                        </div>
+                    <div className="item-info" style={{ marginTop: '8px' }}>
+                        <span>{new Date(item.date).toLocaleDateString()}</span>
+                        {item.mediaType && <span className="item-type-badge" style={{ marginLeft: '12px' }}>{item.mediaType}</span>}
                     </div>
 
-                    <div className="item-info">
-                        <span>{t('originalVideos.started')}</span> {item.started}
-                    </div>
-
-                    <div className="item-actions">
+                    <div className="item-actions" style={{ marginTop: '16px' }}>
                         {item.status === 'completed' && (
                             <>
-                                <button className="btn btn-secondary" onClick={() => handlePreview(item.id)}>
-                                    <span>👁</span> {t('originalVideos.preview')}
+                                <button className="btn btn-secondary" onClick={() => onPreview(item)}>
+                                    <span>👁️</span> {t('originalVideos.preview')}
                                 </button>
-                                <button className="btn btn-secondary" onClick={() => handleDownload(item.id)}>
-                                    <span>⬇</span> {t('originalVideos.download')}
+                                <button className="btn btn-secondary" onClick={() => onDownload(item)}>
+                                    <span>⬇️</span> {t('originalVideos.download')}
                                 </button>
                             </>
                         )}
-                        <button className="btn btn-danger btn-icon" onClick={() => handleDelete(item.id)}>🗑</button>
+                        <div className="spacer" style={{ flex: 1 }}></div>
+                        <button 
+                            className="btn btn-danger btn-icon" 
+                            onClick={() => onDelete(item.id)}
+                            aria-label={t('history.delete') || 'Delete'}
+                        >
+                            🗑️
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
     );
+});
+
+OriginalVideoItem.propTypes = {
+    item: PropTypes.object.isRequired,
+    t: PropTypes.func.isRequired,
+    onPreview: PropTypes.func.isRequired,
+    onDownload: PropTypes.func.isRequired,
+    onDelete: PropTypes.func.isRequired,
 };
 
 export default OriginalVideoItem;

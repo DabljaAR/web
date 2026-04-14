@@ -39,7 +39,7 @@ const FileSelectorModal = ({ isOpen, onClose, onSelect, activeTab }) => {
             });
             setFiles(data.items || []);
         } catch (error) {
-            console.error("Failed to fetch files", error);
+            if (import.meta.env.DEV) console.error("Failed to fetch files", error);
         } finally {
             setLoading(false);
         }
