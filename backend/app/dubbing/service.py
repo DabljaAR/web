@@ -1,7 +1,7 @@
 """Dubbing merge service."""
 
 from __future__ import annotations
-
+from app.config import settings
 import asyncio
 import logging
 import shutil
@@ -27,8 +27,7 @@ class DubbingMergeService:
         self.max_stretch = 1.2
         self.min_stretch = 0.8
         self.silence_threshold = 0.1
-        self.temp_dir = Path("uploads/dubbing_merge")
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir = Path(settings.DUBBING_MERGE_PATH)
         self._tts_sample_rate = 44100
         self._tts_channels = 2
 
