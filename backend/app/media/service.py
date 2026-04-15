@@ -1,13 +1,12 @@
 import os
 import uuid
 import logging
-import asyncio
 import tempfile
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Optional
 from fastapi import UploadFile, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, and_, or_, exists, func, not_
+from sqlalchemy import select, and_, or_, exists, func
 from app.media.models import Video, VideoStatus, MediaType
 from app.media.storage import get_storage_service
 from app.media.ffmpeg_service import FFmpegService, MediaProcessingError
@@ -820,8 +819,15 @@ class VideoService:
         
         # Process URLs (same as before)
         for video in videos:
-             if video.file_path:
-                 video.url = await self.storage.get_url(video.file_path, filename=video.original_filename)
+             dubbed_path = getattr(video, "dubbed_video_path", None)
+             display_video_key = dubbed_path or video.file_path
+             if display_video_key:
+                 video.url = await self.storage.get_url(display_video_key, filename=video.original_filename)
+             if dubbed_path:
+                 try:
+                     video.dubbed_video_url = await self.storage.get_url(dubbed_path)
+                 except Exception as e:
+                     logger.warning("Error fetching dubbed video url for video %s: %s", video.id, e)
              if video.thumbnail_path:
                  try:
                      video.thumbnail_url = await self.storage.get_url(video.thumbnail_path)
@@ -971,6 +977,8 @@ class VideoService:
         # to see if we have transcripts or translations.
         processed_recent = []
         for v in recent_videos:
+             dubbed_path = getattr(v, "dubbed_video_path", None)
+             display_video_key = dubbed_path or v.file_path
              video_data = {
                  "id": v.id,
                  "title": v.title,
@@ -978,9 +986,10 @@ class VideoService:
                  "status": v.status,
                  "media_type": v.media_type,
                  "created_at": v.created_at,
-                 "url": await self.storage.get_url(v.file_path, filename=v.original_filename) if v.file_path else None,
+                 "url": await self.storage.get_url(display_video_key, filename=v.original_filename) if display_video_key else None,
                  "thumbnail_url": await self.storage.get_url(v.thumbnail_path) if v.thumbnail_path else None,
-                 "audio_url": None
+                 "audio_url": None,
+                 "dubbed_video_url": await self.storage.get_url(dubbed_path) if dubbed_path else None,
              }
 
              if v.audio_path:
@@ -1025,8 +1034,12 @@ class VideoService:
         result = await self.db.execute(select(Video).where(Video.id == video_id))
         video = result.scalar_one_or_none()
         if video:
-             if video.file_path:
-                 video.url = await self.storage.get_url(video.file_path, filename=video.original_filename)
+             dubbed_path = getattr(video, "dubbed_video_path", None)
+             display_video_key = dubbed_path or video.file_path
+             if display_video_key:
+                 video.url = await self.storage.get_url(display_video_key, filename=video.original_filename)
+             if dubbed_path:
+                 video.dubbed_video_url = await self.storage.get_url(dubbed_path)
              if video.thumbnail_path:
                  video.thumbnail_url = await self.storage.get_url(video.thumbnail_path)
              if video.audio_path:
@@ -1063,6 +1076,7 @@ class VideoService:
         file_path_key = video.file_path
         thumbnail_key = video.thumbnail_path
         audio_key = video.audio_path
+        dubbed_video_key = video.dubbed_video_path
         
         # 3. Delete from DB
         try:
@@ -1088,6 +1102,9 @@ class VideoService:
             if audio_key:
                 logger.info(f"Deleting audio {audio_key} from storage")
                 await storage.delete(audio_key)
+            if dubbed_video_key:
+                logger.info(f"Deleting dubbed video {dubbed_video_key} from storage")
+                await storage.delete(dubbed_video_key)
         except Exception as e:
             logger.error(f"Error cleaning up files for video {video_id}: {e}")
             # Don't fail the request if file cleanup fails, as DB record is gone.
@@ -1119,6 +1136,8 @@ class VideoService:
                 keys_to_delete.append(video.thumbnail_path)
             if video.audio_path:
                 keys_to_delete.append(video.audio_path)
+            if video.dubbed_video_path:
+                keys_to_delete.append(video.dubbed_video_path)
         
         # 3. Delete from storage
         for key in keys_to_delete:

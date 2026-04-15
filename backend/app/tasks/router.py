@@ -60,6 +60,7 @@ class VideoTaskDetail(VideoTaskSummary):
     combined_audio_key: Optional[str]
     original_audio_url: Optional[str] = None
     combined_audio_url: Optional[str] = None
+    dubbed_video_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +98,7 @@ async def get_task(
 
     original_audio_url: Optional[str] = None
     combined_audio_url: Optional[str] = None
+    dubbed_video_url: Optional[str] = None
 
     # Best-effort presigned URL generation — failures are logged but do not break the response
     try:
@@ -114,6 +116,14 @@ async def get_task(
                     logger.warning(
                         "Failed to generate presigned URL for original audio key %s: %s",
                         audio_key, e,
+                    )
+            if getattr(video, "dubbed_video_path", None):
+                try:
+                    dubbed_video_url = await storage.get_url(video.dubbed_video_path)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to generate presigned URL for dubbed video key %s: %s",
+                        video.dubbed_video_path, e,
                     )
 
         if task.combined_audio_key:
@@ -150,4 +160,5 @@ async def get_task(
         combined_audio_key=task.combined_audio_key,
         original_audio_url=original_audio_url,
         combined_audio_url=combined_audio_url,
+        dubbed_video_url=dubbed_video_url,
     )

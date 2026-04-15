@@ -19,6 +19,10 @@ class StorageService(Protocol):
         """Save a local file by path and return its key."""
         ...
 
+    async def upload_file(self, file_path: str, key: str, content_type: str | None = None) -> str:
+        """Upload a local file to an explicit storage key."""
+        ...
+
     async def get_url(self, path: str, filename: str = None) -> str:
         """Get public or presigned URL for a file path. Optionally set download filename."""
         ...
@@ -115,6 +119,17 @@ class LocalStorageService:
             return f"{directory}/{unique_name}"
         return unique_name
 
+    async def upload_file(self, file_path: str, key: str, content_type: str | None = None) -> str:
+        del content_type  # Not used for local filesystem storage.
+        src_path = Path(file_path)
+        if not src_path.exists():
+            raise FileNotFoundError(f"Source file does not exist: {file_path}")
+
+        dest_path = self.base_dir / key
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dest_path)
+        return key
+
     async def get_url(self, path: str, filename: str = None) -> str:
         # Local storage serving usually doesn't support dynamic content-disposition via URL alone 
         # unless served by a smart controller. For now, just return path.
@@ -183,7 +198,6 @@ class LocalStorageService:
 
     async def upload_bytes(self, data: bytes, key: str, content_type: str = "audio/wav") -> str:
         """Upload raw bytes to local storage."""
-        from pathlib import Path
         file_path = self.base_dir / key
         file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, "wb") as f:
@@ -305,9 +319,21 @@ class S3StorageService:
             await self._ensure_bucket(s3)
             logger.info(f"S3Storage: uploading file {file_path} to key {key}...")
             await s3.upload_file(str(file_path), self.bucket_name, key)
-            logger.info(f"S3Storage: upload complete.")
+            logger.info("S3Storage: upload complete.")
 
             
+        return key
+
+    async def upload_file(self, file_path: str, key: str, content_type: str | None = None) -> str:
+        extra_args = {"ContentType": content_type} if content_type else None
+        async with self.session.client("s3", **self._client_kwargs()) as s3:
+            await self._ensure_bucket(s3)
+            logger.info(f"S3Storage: uploading local file {file_path} to explicit key {key}...")
+            if extra_args:
+                await s3.upload_file(str(file_path), self.bucket_name, key, ExtraArgs=extra_args)
+            else:
+                await s3.upload_file(str(file_path), self.bucket_name, key)
+            logger.info("S3Storage: explicit upload complete.")
         return key
 
     async def get_url(self, path: str, filename: str = None) -> str:

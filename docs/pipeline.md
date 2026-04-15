@@ -47,6 +47,8 @@ Expected:
 - TTS jobs are created per segment as NMT completes
 - TTS kwargs include MinIO upload parameters
 - TTS output contains non-null storage key/URL
+- Final combine preserves segment timing gaps/offsets
+- For video inputs, final output is a dubbed video artifact (original video stream + replaced speech track)
 
 ## Smoke Test Commands
 

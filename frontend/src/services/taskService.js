@@ -16,6 +16,14 @@ export const taskService = {
 
     return api.post(`/videos/${videoId}/reprocess`, payload);
   },
+
+  /** Explicit GUI path for full video dubbing requests. */
+  startFullVideoDubbing: (videoId, payload = {}) => {
+    return api.post(`/videos/${videoId}/reprocess`, {
+      ...payload,
+      output_type: 'fullDubbing',
+    });
+  },
 };
 
 export default taskService;

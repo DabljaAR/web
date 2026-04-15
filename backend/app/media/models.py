@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import enum
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, Boolean, Enum as SQLEnum, Float, BigInteger
+from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, Enum as SQLEnum, Float, BigInteger, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
+
+if TYPE_CHECKING:
+    from app.core.models import User
 
 class VideoStatus(str, enum.Enum):
     PENDING = "PENDING"
@@ -32,6 +37,8 @@ class Video(Base):
     file_path: Mapped[str] = mapped_column(String(512), nullable=False) # Path or key
     thumbnail_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     audio_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    dubbed_video_path: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    dubbing_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     
     duration: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     width: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -54,6 +61,7 @@ class Video(Base):
         self.url = None
         self.thumbnail_url = None
         self.audio_url = None
+        self.dubbed_video_url = None
 
     def __repr__(self):
         return f"<Video {self.title} status={self.status}>"

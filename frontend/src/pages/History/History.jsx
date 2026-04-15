@@ -312,6 +312,10 @@ const History = () => {
   };
 
   const handleRedubSubmit = async (videoId, outputType) => {
+    if (outputType === 'fullDubbing') {
+      await taskService.startFullVideoDubbing(videoId);
+      return;
+    }
     await taskService.startTask(videoId, outputType);
   };
 
@@ -725,4 +729,3 @@ const History = () => {
 };
 
 export default History;
-

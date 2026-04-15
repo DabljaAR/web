@@ -325,6 +325,7 @@ def tts_synthesize_segment(
     result: dict = {
         "segment_id": segment_id, "start": start, "end": end,
         "tts_key": None, "audio_url": None,
+        "translated_text": text or "",
     }
 
     logger.info(
@@ -463,14 +464,14 @@ def tts_combine_results(
     output_type: str,
 ) -> dict:
     """
-    Sort segment results, merge all segment WAVs into a single time-aligned
-    audio file, optionally mix with background SFX via Demucs, upload,
-    then write combined output to DB.
+    Sort segment results, run timing-aware merge, optionally mux with original
+    video audio replacement, then write combined output to DB.
     """
     import asyncio
-    import shutil
-    import subprocess
 
+    from app.dubbing.schemas import SegmentTimingInfo
+    from app.dubbing.service import DubbingMergeService
+    from app.media.models import MediaType, Video as MediaVideo
     from app.media.storage import get_storage_service
 
     sorted_results = sorted(segment_results, key=lambda r: r["segment_id"])
@@ -490,176 +491,105 @@ def tts_combine_results(
 
     combined_minio_key: Optional[str] = None
     combined_audio_url: Optional[str] = None
+    dubbed_video_key: Optional[str] = None
+    dubbed_video_url: Optional[str] = None
 
     segments_with_audio = [r for r in sorted_results if r.get("tts_key") and not r.get("tts_error")]
 
     if segments_with_audio:
-        _tmp = tempfile.mkdtemp()
         try:
-            storage = get_storage_service()
+            media_type_value = "audio"
+            original_media_key: Optional[str] = None
 
-            # ── Step 1: Download each TTS segment WAV ───────────────────────
-            local_paths: list = []
-            for r in segments_with_audio:
-                local_f = os.path.join(_tmp, f"seg_{r['segment_id']}.wav")
-                _loop = asyncio.new_event_loop()
-                try:
-                    _loop.run_until_complete(storage.download(r["tts_key"], local_f))
-                finally:
-                    _loop.close()
-                if os.path.exists(local_f) and os.path.getsize(local_f) > 0:
-                    local_paths.append((r["start"] or 0.0, r["end"] or 0.0, local_f))
-                else:
-                    logger.warning("[TTS] segment download empty | key=%s", r["tts_key"])
-
-            if not local_paths:
-                logger.error("[TTS] no segment files downloaded | job=%s", job_id)
-            else:
-                # ── Step 2: Concat all TTS segments into one track ───────────
-                concat_list = os.path.join(_tmp, "concat_list.txt")
-                with open(concat_list, "w") as _cl:
-                    for _, _, path in local_paths:
-                        _cl.write(f"file '{path}'\n")
-
-                tts_track = os.path.join(_tmp, "tts_track.wav")
-                proc = subprocess.run(
-                    ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                     "-i", concat_list,
-                     "-ar", "24000", "-ac", "1", tts_track],
-                    capture_output=True,
-                )
-                if proc.returncode != 0:
-                    logger.error(
-                        "[TTS] ffmpeg concat failed | job=%s\n%s",
-                        job_id, proc.stderr.decode(),
-                    )
-                else:
-                    logger.info("[TTS] concat done | job=%s | segments=%d", job_id, len(local_paths))
-
-                    # ── Step 3: Extract SFX track (Demucs) and mix ──────────
-                    # Uses Demucs to separate vocals from background (SFX/music).
-                    # Only the no-vocals stem is mixed in. Falls back to TTS-only.
-                    combined_local = os.path.join(_tmp, "combined.wav")
-                    sfx_track: Optional[str] = None
-
-                    try:
-                        engine_v, SL_v = BaseJobTask._make_db()
-                        try:
-                            with SL_v() as db:
-                                from app.media.models import Video as _V
-                                _vrow = db.get(_V, video_id)
-                                _orig_key = (_vrow.audio_path or _vrow.file_path) if _vrow else None
-                        finally:
-                            engine_v.dispose()
-
-                        if _orig_key:
-                            orig_audio_local = os.path.join(_tmp, "orig_audio.wav")
-                            _loop_bg = asyncio.new_event_loop()
-                            try:
-                                _loop_bg.run_until_complete(
-                                    storage.download(_orig_key, orig_audio_local)
-                                )
-                            finally:
-                                _loop_bg.close()
-
-                            if os.path.exists(orig_audio_local) and os.path.getsize(orig_audio_local) > 0:
-                                orig_wav = os.path.join(_tmp, "orig_audio_conv.wav")
-                                subprocess.run(
-                                    ["ffmpeg", "-y", "-i", orig_audio_local,
-                                     "-ar", "44100", "-ac", "2", orig_wav],
-                                    capture_output=True, check=True,
-                                )
-
-                                demucs_out = os.path.join(_tmp, "demucs_out")
-                                proc_demucs = subprocess.run(
-                                    [
-                                        "demucs",
-                                        "--two-stems", "vocals",
-                                        "--out", demucs_out,
-                                        "--name", "htdemucs",
-                                        orig_wav,
-                                    ],
-                                    capture_output=True,
-                                )
-
-                                if proc_demucs.returncode == 0:
-                                    import glob as _glob
-                                    no_vocals_candidates = _glob.glob(
-                                        os.path.join(demucs_out, "**", "no_vocals.wav"),
-                                        recursive=True,
-                                    )
-                                    if no_vocals_candidates:
-                                        sfx_track = no_vocals_candidates[0]
-                                        logger.info(
-                                            "[TTS] Demucs SFX track ready | job=%s | path=%s",
-                                            job_id, sfx_track,
-                                        )
-                                    else:
-                                        logger.warning(
-                                            "[TTS] Demucs ran but no_vocals.wav not found | job=%s", job_id
-                                        )
-                                else:
-                                    logger.warning(
-                                        "[TTS] Demucs failed | job=%s\n%s",
-                                        job_id, proc_demucs.stderr.decode(),
-                                    )
-                    except FileNotFoundError:
-                        logger.warning("[TTS] demucs not installed — mixing without SFX | job=%s", job_id)
-                    except Exception as _bg_exc:
-                        logger.warning("[TTS] SFX extraction failed: %s | job=%s", _bg_exc, job_id)
-
-                    if sfx_track:
-                        mix_fc = (
-                            "[0:a]volume=1.0[tts];"
-                            "[1:a]aresample=24000,volume=0.80[sfx];"
-                            "[tts][sfx]amix=inputs=2:duration=first:normalize=0[out]"
+            engine_v, SessionLocal_v = BaseJobTask._make_db()
+            try:
+                with SessionLocal_v() as db:
+                    video_row = db.get(MediaVideo, video_id)
+                    if video_row is not None:
+                        media_type_value = (
+                            video_row.media_type.value.lower()
+                            if isinstance(video_row.media_type, MediaType)
+                            else str(video_row.media_type).lower()
                         )
-                        proc2 = subprocess.run(
-                            ["ffmpeg", "-y",
-                             "-i", tts_track,
-                             "-i", sfx_track,
-                             "-filter_complex", mix_fc,
-                             "-map", "[out]",
-                             "-ar", "24000", "-ac", "1",
-                             combined_local],
-                            capture_output=True,
-                        )
-                        if proc2.returncode != 0:
-                            logger.warning(
-                                "[TTS] SFX mix failed, using TTS-only | job=%s\n%s",
-                                job_id, proc2.stderr.decode(),
-                            )
-                            combined_local = tts_track
+                        if media_type_value == "video":
+                            original_media_key = video_row.file_path
                         else:
-                            logger.info("[TTS] SFX mixed | job=%s", job_id)
-                    else:
-                        combined_local = tts_track
+                            original_media_key = video_row.audio_path or video_row.file_path
+            finally:
+                engine_v.dispose()
 
-                    # ── Step 4: Upload combined audio ────────────────────────
-                    combined_minio_key = f"tts/{job_id}/combined_{job_id}.wav"
-                    with open(combined_local, "rb") as _f:
-                        combined_bytes = _f.read()
+            segment_infos: list[SegmentTimingInfo] = []
+            for idx, row in enumerate(sorted_results):
+                if not row.get("tts_key") or row.get("tts_error"):
+                    continue
 
-                    _loop3 = asyncio.new_event_loop()
-                    try:
-                        _loop3.run_until_complete(
-                            storage.upload_bytes(combined_bytes, combined_minio_key, "audio/wav")
-                        )
-                        combined_audio_url = _loop3.run_until_complete(
-                            storage.get_url(combined_minio_key)
-                        )
-                    finally:
-                        _loop3.close()
-
-                    logger.info(
-                        "[TTS] combined audio uploaded | key=%s | job=%s",
-                        combined_minio_key, job_id,
+                start_val = float(row.get("start") or 0.0)
+                end_raw = float(row.get("end") or start_val)
+                end_val = end_raw if end_raw > start_val else start_val + 0.001
+                segment_infos.append(
+                    SegmentTimingInfo(
+                        segment_id=int(row.get("segment_id", idx)),
+                        start=start_val,
+                        end=end_val,
+                        duration=max(end_val - start_val, 0.001),
+                        translated_text=str(row.get("translated_text") or ""),
+                        tts_audio_key=row.get("tts_key"),
                     )
+                )
 
+            if not segment_infos:
+                logger.error("[TTS] no usable segment infos for merge | job=%s", job_id)
+            else:
+                merge_service = DubbingMergeService()
+                preferred_audio_key = f"tts/{job_id}/combined_{job_id}.wav"
+
+                merge_response = asyncio.run(
+                    merge_service.merge_segments(
+                        video_id=str(video_id),
+                        segments=segment_infos,
+                        job_id=job_id,
+                        media_type=media_type_value,
+                        output_key_prefix=f"dubbed/{video_id}",
+                        original_media_key=original_media_key,
+                        combined_audio_key=preferred_audio_key,
+                    )
+                )
+
+                merged_meta = merge_response.metadata or {}
+                combined_minio_key = merged_meta.get("combined_audio_key")
+                combined_audio_url = merged_meta.get("combined_audio_url")
+
+                if media_type_value == "video":
+                    dubbed_video_key = merge_response.output_key
+                    dubbed_video_url = merge_response.output_url
+
+                engine_u, SessionLocal_u = BaseJobTask._make_db()
+                try:
+                    with SessionLocal_u() as db:
+                        up_video = db.get(MediaVideo, video_id)
+                        if up_video is not None:
+                            if dubbed_video_key:
+                                up_video.dubbed_video_path = dubbed_video_key
+                            existing_meta = (
+                                dict(up_video.dubbing_metadata)
+                                if up_video.dubbing_metadata
+                                else {}
+                            )
+                            up_video.dubbing_metadata = {
+                                **existing_meta,
+                                "tts_job_id": job_id,
+                                "media_type": media_type_value,
+                                "combined_audio_key": combined_minio_key,
+                                "combined_audio_url": combined_audio_url,
+                                "dubbed_video_key": dubbed_video_key,
+                                "dubbed_video_url": dubbed_video_url,
+                                "updated_at": _utcnow().isoformat(),
+                            }
+                            db.commit()
+                finally:
+                    engine_u.dispose()
         except Exception as _exc:
             logger.error("[TTS] merge step failed | job=%s: %s", job_id, _exc, exc_info=True)
-        finally:
-            shutil.rmtree(_tmp, ignore_errors=True)
 
     output = {
         "job_id": job_id,
@@ -667,8 +597,11 @@ def tts_combine_results(
         "segments": result_segments,
         "combined_audio_key": combined_minio_key,
         "combined_audio_url": combined_audio_url,
+        "dubbed_video_key": dubbed_video_key,
+        "dubbed_video_url": dubbed_video_url,
         "metadata": {
             **metadata,
+            "media_type": media_type_value if segments_with_audio else None,
             "tts_segments": len(result_segments),
             "tts_failed": failed,
         },
@@ -677,11 +610,7 @@ def tts_combine_results(
     # ── Clean up shared ref clip ─────────────────────────────────────────────
     if ref_clip_minio_key:
         try:
-            _loop4 = asyncio.new_event_loop()
-            try:
-                _loop4.run_until_complete(get_storage_service().delete(ref_clip_minio_key))
-            finally:
-                _loop4.close()
+            asyncio.run(get_storage_service().delete(ref_clip_minio_key))
         except Exception as _exc:
             logger.warning("[TTS] could not delete ref clip %s: %s", ref_clip_minio_key, _exc)
 

@@ -30,6 +30,8 @@ class VideoResponse(VideoBase):
     file_path: str
     thumbnail_path: Optional[str] = None
     audio_path: Optional[str] = None
+    dubbed_video_path: Optional[str] = None
+    dubbing_metadata: Optional[dict] = None
     duration: Optional[float] = None
     width: Optional[int] = None
     height: Optional[int] = None
@@ -46,6 +48,7 @@ class VideoResponse(VideoBase):
     url: Optional[str] = None # Added for convenience to return full URL
     thumbnail_url: Optional[str] = None
     audio_url: Optional[str] = None
+    dubbed_video_url: Optional[str] = None
     transcript_url: Optional[str] = None
     translation_url: Optional[str] = None
     has_active_job: Optional[bool] = None

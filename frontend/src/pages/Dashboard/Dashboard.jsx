@@ -109,6 +109,13 @@ const Dashboard = () => {
     }));
   };
 
+  const getRequestOutputType = () => {
+    if (activeTab === 'video') {
+      return formData.outputType || 'fullDubbing';
+    }
+    return formData.outputType;
+  };
+
   const handleFileSelect = () => {
     fileInputRef.current?.click();
   };
@@ -217,7 +224,7 @@ const Dashboard = () => {
     try {
       const uploadFormData = new FormData();
       uploadFormData.append('file', file);
-      uploadFormData.append('output_type', formData.outputType);
+      uploadFormData.append('output_type', getRequestOutputType());
       uploadFormData.append('domain', formData.domain);
       uploadFormData.append('voice', formData.voice);
       uploadFormData.append('translation_style', formData.translationStyle);
@@ -257,7 +264,7 @@ const Dashboard = () => {
         youtube_url: (ytInfo.url || '').trim(),
         format: ytInfo.format,
         quality: ytInfo.quality,
-        output_type: formData.outputType,
+        output_type: getRequestOutputType(),
         domain: formData.domain,
         voice: formData.voice,
         translation_style: formData.translationStyle
@@ -309,7 +316,7 @@ const Dashboard = () => {
       setUploadError(null);
       try {
         const payload = {
-          output_type: formData.outputType,
+          output_type: getRequestOutputType(),
           domain: formData.domain,
           voice: formData.voice,
           translation_style: formData.translationStyle
@@ -920,4 +927,3 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
-
