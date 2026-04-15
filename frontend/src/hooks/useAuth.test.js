@@ -52,7 +52,7 @@ describe('useAuth Hook', () => {
     expect(result.current.isAuthenticated).toBe(true);
   });
 
-  it('login stores only remember_me preference in localStorage when rememberMe is true', () => {
+  it('login stores auth in localStorage when rememberMe is true', () => {
     const { result } = renderHook(() => useAuth());
     const userData = { id: 1, username: 'testuser' };
     
@@ -62,7 +62,8 @@ describe('useAuth Hook', () => {
     
     expect(sessionStorage.getItem('access_token')).toBe('access123');
     expect(sessionStorage.getItem('refresh_token')).toBe('refresh123');
-    expect(localStorage.getItem('access_token')).toBeNull();
+    expect(localStorage.getItem('access_token')).toBe('access123');
+    expect(localStorage.getItem('refresh_token')).toBe('refresh123');
     expect(localStorage.getItem('remember_me')).toBe('true');
     expect(result.current.user).toEqual(userData);
     expect(result.current.isAuthenticated).toBe(true);
@@ -115,6 +116,21 @@ describe('useAuth Hook', () => {
     expect(sessionStorage.getItem('access_token')).toBeNull();
   });
 
+  it('returns user from localStorage when remember_me is true', () => {
+    const userData = { id: 1, username: 'testuser', email: 'test@example.com' };
+    localStorage.setItem('remember_me', 'true');
+    localStorage.setItem('access_token', 'token123');
+    localStorage.setItem('user', JSON.stringify(userData));
+    act(() => {
+      useStore.getState().reset();
+    });
+
+    const { result } = renderHook(() => useAuth());
+
+    expect(result.current.user).toEqual(userData);
+    expect(result.current.isAuthenticated).toBe(true);
+  });
+
   it('listens to storage changes across tabs', () => {
     const { result } = renderHook(() => useAuth());
     
@@ -131,5 +147,27 @@ describe('useAuth Hook', () => {
     // Note: This test verifies the event listener is set up
     expect(result.current).toBeDefined();
   });
-});
 
+  it('logs out current tab when logout sync event comes from another tab', () => {
+    const { result } = renderHook(() => useAuth());
+    const userData = { id: 1, username: 'testuser' };
+
+    act(() => {
+      result.current.login(userData, 'access123', 'refresh123', false);
+    });
+    expect(result.current.isAuthenticated).toBe(true);
+
+    act(() => {
+      const event = new StorageEvent('storage', {
+        key: 'auth:logout',
+        newValue: String(Date.now()),
+      });
+      window.dispatchEvent(event);
+    });
+
+    expect(localStorage.getItem('access_token')).toBeNull();
+    expect(sessionStorage.getItem('access_token')).toBeNull();
+    expect(result.current.user).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
+  });
+});
