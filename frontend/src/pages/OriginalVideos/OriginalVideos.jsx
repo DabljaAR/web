@@ -155,7 +155,7 @@ const OriginalVideos = () => {
             toast.success(t('originalVideos.uploadSuccess') || "Video uploaded successfully.");
             setSelectedFile(null);
             setShowUploadSection(false);
-            fetchHistory();
+            await fetchHistory(true);
         } catch (err) {
             if (import.meta.env.DEV) console.error("Upload failed:", err);
             setUploadError(err.message || "Failed to start processing.");
@@ -179,7 +179,7 @@ const OriginalVideos = () => {
             setYoutubeUrl('');
             setShowYoutubeModal(false);
             setShowUploadSection(false);
-            fetchHistory();
+            await fetchHistory(true);
         } catch (err) {
             if (import.meta.env.DEV) console.error('YouTube download failed:', err);
             setYoutubeError(err.message || 'Failed to queue YouTube download.');
@@ -189,16 +189,7 @@ const OriginalVideos = () => {
     };
 
     if (loading) {
-        return (
-            <div className="history-page">
-                <BackgroundDecorations />
-                <Navbar />
-                <div className="main-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-                    <div className="loading-spinner"><LoadingSpinner size="large" /></div>
-                </div>
-                <Footer />
-            </div>
-        );
+        return <LoadingSpinner fullPage size="large" />;
     }
 
     return (

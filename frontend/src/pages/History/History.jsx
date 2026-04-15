@@ -163,16 +163,7 @@ const History = () => {
   };
 
   if (loading) {
-    return (
-      <div className="history-page">
-        <BackgroundDecorations />
-        <Navbar />
-        <div className="main-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
-          <div className="loading-spinner"><LoadingSpinner size="large" /></div>
-        </div>
-        <Footer />
-      </div>
-    );
+    return <LoadingSpinner fullPage size="large" />;
   }
 
   return (
