@@ -186,17 +186,34 @@ jobs:
             exit 1
           fi
 
-          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+          # Start infra first so migrations can run cleanly.
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d postgres redis minio
+
+          # Run DB migrations before starting app services.
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml run --rm backend sh -lc "uv run alembic upgrade head"
+
+          # Start application services after schema is up to date.
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d --build backend celery-worker-media celery-worker-ai flower caddy
           $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml ps
 
+          # Ensure Caddy reloads after frontend dist + backend rollout.
           $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml restart caddy
 
-          for _ in 1 2 3 4 5; do
+          backend_healthy=false
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
             if curl -fsS http://localhost:8000/api/health >/dev/null; then
+              backend_healthy=true
               break
             fi
             sleep 3
           done
+
+          if [ "$backend_healthy" != "true" ]; then
+            echo "Backend health check failed after deploy. Recent backend/caddy logs:"
+            $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml logs --tail=200 backend caddy || true
+            $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml ps || true
+            exit 1
+          fi
 
           curl -fsS http://localhost:8000/api/health >/dev/null
           git rev-parse --short HEAD

@@ -66,6 +66,14 @@ Apply migrations after deploy:
 docker compose exec backend alembic upgrade head
 ```
 
+For CI/CD VM deploys (`.github/workflows/deploy-gcp.yml`), migrations are run automatically before backend/workers are started:
+
+```bash
+docker compose ... up -d postgres redis minio
+docker compose ... run --rm backend sh -lc "uv run alembic upgrade head"
+docker compose ... up -d --build backend celery-worker-media celery-worker-ai flower caddy
+```
+
 ## Common Issues
 
 ### PostgreSQL authentication failed
@@ -79,6 +87,8 @@ Check:
 - Migration errors in backend logs
 - API reachability on `/api/health`
 - Postgres readiness (service health + startup ordering)
+
+In GitHub Actions deploys, backend and caddy logs are dumped automatically on health-check failure to speed up diagnosis.
 
 ### Worker queue not processing
 
