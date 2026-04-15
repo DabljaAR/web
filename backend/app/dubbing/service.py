@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
@@ -27,7 +28,7 @@ class DubbingMergeService:
         self.max_stretch = 1.2
         self.min_stretch = 0.8
         self.silence_threshold = 0.1
-        self.temp_dir = Path("uploads/dubbing_merge")
+        self.temp_dir = Path(tempfile.gettempdir()) / "dabljaar" / "dubbing_merge"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self._tts_sample_rate = 44100
         self._tts_channels = 2
