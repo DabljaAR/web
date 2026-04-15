@@ -190,7 +190,8 @@ jobs:
           $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d postgres redis minio
 
           # Run DB migrations before starting app services.
-          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml run --rm backend sh -lc "uv run alembic upgrade head"
+          # Use a direct entrypoint override to avoid the backend entrypoint running app startup command paths.
+          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml run --rm --entrypoint sh backend -lc "alembic upgrade head"
 
           # Start application services after schema is up to date.
           $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d --build backend celery-worker-media celery-worker-ai flower caddy

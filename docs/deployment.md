@@ -70,7 +70,7 @@ For CI/CD VM deploys (`.github/workflows/deploy-gcp.yml`), migrations are run au
 
 ```bash
 docker compose ... up -d postgres redis minio
-docker compose ... run --rm backend sh -lc "uv run alembic upgrade head"
+docker compose ... run --rm --entrypoint sh backend -lc "alembic upgrade head"
 docker compose ... up -d --build backend celery-worker-media celery-worker-ai flower caddy
 ```
 
