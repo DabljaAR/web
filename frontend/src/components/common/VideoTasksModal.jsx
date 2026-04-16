@@ -16,6 +16,23 @@ const fmt = (iso) =>
     ? new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
     : '—';
 
+const fmtTime = (seconds) => {
+  if (seconds == null || Number.isNaN(seconds)) return '—';
+  const s = Math.max(0, Number(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  const ms = Math.floor((s - Math.floor(s)) * 1000);
+
+  const hh = String(h).padStart(2, '0');
+  const mm = String(m).padStart(2, '0');
+  const ss = String(sec).padStart(2, '0');
+  const mmm = String(ms).padStart(3, '0');
+
+  // Keep it compact for UI: omit hours if not needed
+  return h > 0 ? `${hh}:${mm}:${ss}.${mmm}` : `${mm}:${ss}.${mmm}`;
+};
+
 function toSrtTime(seconds) {
   const h  = Math.floor(seconds / 3600);
   const m  = Math.floor((seconds % 3600) / 60);
@@ -118,7 +135,8 @@ function CaptionedVideoPlayer({ originalVideoUrl, dubbedVideoUrl, segments, hasT
           ref={videoRef}
           className="vtm-video"
           controls
-          controlsList="nofullscreen"
+  controlsList="nofullscreen nodownload noremoteplayback"
+          disablePictureInPicture
           onTimeUpdate={syncCaption}
           onSeeked={syncCaption}
           src={activeUrl}
@@ -131,44 +149,43 @@ function CaptionedVideoPlayer({ originalVideoUrl, dubbedVideoUrl, segments, hasT
           </div>
         )}
 
-        {/* floating settings — only in fullscreen */}
-        {isFullscreen && (
-          <div className="vtm-fs-widget">
-            {panelOpen && (
-              <div className="vtm-fs-panel">
+        {/* settings widget (top-right in normal, bottom-right in fullscreen) */}
+        <div className={`vtm-fs-widget ${isFullscreen ? 'vtm-fs-widget--fs' : 'vtm-fs-widget--inline'}`}>
+          {panelOpen && (
+            <div className="vtm-fs-panel">
+              <div className="vtm-fs-panel-section">
+                <span className="vtm-fs-panel-label">Captions</span>
+                <div className="vtm-fs-panel-btns">
+                  <button className={`vtm-fs-option-btn ${captionMode === 'original' ? 'active' : ''}`} onClick={() => setCaptionMode('original')}>Original</button>
+                  {hasTranslation && (
+                    <button className={`vtm-fs-option-btn ${captionMode === 'translation' ? 'active' : ''}`} onClick={() => setCaptionMode('translation')}>Translation</button>
+                  )}
+                  <button className={`vtm-fs-option-btn ${captionMode === 'off' ? 'active' : ''}`} onClick={() => setCaptionMode('off')}>Off</button>
+                </div>
+              </div>
+              {hasDubbed && (
                 <div className="vtm-fs-panel-section">
-                  <span className="vtm-fs-panel-label">Captions</span>
+                  <span className="vtm-fs-panel-label">Video</span>
                   <div className="vtm-fs-panel-btns">
-                    <button className={`vtm-fs-option-btn ${captionMode === 'original' ? 'active' : ''}`} onClick={() => setCaptionMode('original')}>Original</button>
-                    {hasTranslation && (
-                      <button className={`vtm-fs-option-btn ${captionMode === 'translation' ? 'active' : ''}`} onClick={() => setCaptionMode('translation')}>Translation</button>
-                    )}
-                    <button className={`vtm-fs-option-btn ${captionMode === 'off' ? 'active' : ''}`} onClick={() => setCaptionMode('off')}>Off</button>
+                    <button className={`vtm-fs-option-btn ${videoSource === 'original' ? 'active' : ''}`} onClick={() => setVideoSource('original')}>Original</button>
+                    <button className={`vtm-fs-option-btn ${videoSource === 'dubbed' ? 'active' : ''}`} onClick={() => setVideoSource('dubbed')}>Dubbed</button>
                   </div>
                 </div>
-                {hasDubbed && (
-                  <div className="vtm-fs-panel-section">
-                    <span className="vtm-fs-panel-label">Video</span>
-                    <div className="vtm-fs-panel-btns">
-                      <button className={`vtm-fs-option-btn ${videoSource === 'original' ? 'active' : ''}`} onClick={() => setVideoSource('original')}>Original</button>
-                      <button className={`vtm-fs-option-btn ${videoSource === 'dubbed' ? 'active' : ''}`} onClick={() => setVideoSource('dubbed')}>Dubbed</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            <button
-              className={`vtm-fs-settings-btn${panelOpen ? ' open' : ''}`}
-              onClick={() => setPanelOpen(p => !p)}
-              title="Settings"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-              </svg>
-            </button>
-          </div>
-        )}
+              )}
+            </div>
+          )}
+          <button
+            className={`vtm-fs-settings-btn${panelOpen ? ' open' : ''}`}
+            onClick={() => setPanelOpen((p) => !p)}
+            title="Settings"
+            aria-label="Settings"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* ── bottom bar ── */}
@@ -456,12 +473,44 @@ export default function VideoTasksModal({ isOpen, onClose, videoId, videoTitle }
         onClick={(e) => e.stopPropagation()}
       >
         <div className="vtm-header">
-          <h2 className="vtm-title">{selected ? '📄 Task Output' : '📋 Tasks'}</h2>
+          <h2 className="vtm-title">{selected ? 'Task Output' : 'Tasks'}</h2>
           <div className="vtm-header-controls">
-            <button className="vtm-ctrl-btn" title={maximized ? 'Restore' : 'Fullscreen'} onClick={() => setMaximized(m => !m)}>
-              {maximized ? '⊡' : '⊞'}
+            <button
+              className={`vtm-ctrl-btn${maximized ? '' : ' vtm-disabled'}`}
+              title="Minimize"
+              aria-label="Minimize"
+              disabled={!maximized}
+              onClick={() => setMaximized(false)}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 18h12" />
+              </svg>
             </button>
-            <button className="vtm-ctrl-btn vtm-close" title="Close" onClick={onClose}>✕</button>
+
+            <button
+              className="vtm-ctrl-btn"
+              title={maximized ? 'Restore' : 'Maximize'}
+              aria-label={maximized ? 'Restore' : 'Maximize'}
+              onClick={() => setMaximized((m) => !m)}
+            >
+              {maximized ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 8h10v10H8z" />
+                  <path d="M6 16H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v1" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 7h10v10H7z" />
+                </svg>
+              )}
+            </button>
+
+            <button className="vtm-ctrl-btn vtm-close" title="Close" aria-label="Close" onClick={onClose}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 6l12 12" />
+                <path d="M18 6L6 18" />
+              </svg>
+            </button>
           </div>
         </div>
 

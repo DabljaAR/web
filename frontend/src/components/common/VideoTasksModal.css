@@ -87,17 +87,36 @@
   background: transparent;
   border: none;
   color: var(--text-light);
-  font-size: 16px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.2s, color 0.2s, opacity 0.2s;
+}
+
+.vtm-ctrl-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .vtm-ctrl-btn:hover {
   background: rgba(0, 0, 0, 0.06);
   color: var(--text-dark);
+}
+
+.vtm-ctrl-btn.vtm-disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.vtm-ctrl-btn.vtm-disabled:hover {
+  background: transparent;
+  color: var(--text-light);
 }
 
 [data-theme="dark"] .vtm-ctrl-btn:hover {
@@ -457,8 +476,9 @@
 
 .vtm-video {
   width: 100%;
+
   display: block;
-  max-height: 360px;
+  /* max-height: 360px; */
   background: #000;
   object-fit: contain;
 }
@@ -470,9 +490,11 @@
 /* YouTube-style caption overlay */
 .vtm-caption-overlay {
   position: absolute;
-  bottom: 52px;      /* clear the native browser controls (~44px) */
+  /* keep captions above native controls + device safe-area */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 52px); /* ~44px controls + padding */
   left: 0;
   right: 0;
+  padding: 0 16px; /* prevent edge clipping in fullscreen */
   display: flex;
   justify-content: center;
   pointer-events: none;
@@ -486,16 +508,19 @@
 }
 
 .vtm-caption-text {
-  display: inline;
+  display: inline-block;
+  max-width: min(92vw, 980px);
   background: rgba(8, 8, 8, 0.85);
   color: #fff;
   font-size: 1.15rem;
   font-family: 'Inter', sans-serif;
   font-weight: 600;
-  line-height: 2;
+  line-height: 1.9;
   padding: 4px 10px;
   border-radius: 4px;
   text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   letter-spacing: 0.01em;
   /* each wrapped line gets its own background — YouTube signature look */
@@ -553,16 +578,25 @@
   flex-shrink: 0;
 }
 
-/* ── Fullscreen floating settings widget ────────────────────────────────── */
+/* ── Floating settings widget (inline + fullscreen) ────────────────────── */
 .vtm-fs-widget {
   position: absolute;
-  bottom: 72px;
   right: 16px;
   z-index: 30;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
+}
+
+/* Normal (not fullscreen): keep it at the TOP like a player overlay */
+.vtm-fs-widget.vtm-fs-widget--inline {
+  top: 12px;
+}
+
+/* Fullscreen: keep it near bottom-right above controls */
+.vtm-fs-widget.vtm-fs-widget--fs {
+  bottom: 72px;
 }
 
 .vtm-fs-settings-btn {
@@ -656,37 +690,68 @@
 }
 .vtm-fs-toggle-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
 
-/* ── Fullscreen container: video fills screen, overlay stays inside ──────── */
+/* ── Fullscreen: match native player (no reserved black area) ───────────── */
 .vtm-video-area:-webkit-full-screen,
 .vtm-video-area:fullscreen {
+  /* Some browsers don't resolve 100% in fullscreen reliably; pin to viewport */
+  position: fixed;
+  inset: 0;
   background: #000;
   width: 100vw;
   height: 100vh;
+
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 .vtm-video-area:-webkit-full-screen .vtm-video,
 .vtm-video-area:fullscreen .vtm-video {
   width: 100vw !important;
   height: 100vh !important;
+  max-width: 100vw !important;
   max-height: 100vh !important;
+
+  /* Keep full frame visible (no cropping). If you want NO black bars, change to 'cover'. */
   object-fit: contain;
+  background: #000;
 }
 
 /* hide native fullscreen button (Chrome/Safari) */
 .vtm-video::-webkit-media-controls-fullscreen-button { display: none !important; }
 
-/* larger captions in fullscreen */
+/* Captions overlay on video (like your screenshot) */
 .vtm-video-area:-webkit-full-screen .vtm-caption-overlay,
 .vtm-video-area:fullscreen .vtm-caption-overlay {
-  bottom: 70px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 0 16px;
+
+  /* keep captions above native controls + device safe-area */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 52px);
+
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+
+  pointer-events: none;
+  z-index: 20;
+  background: transparent;
 }
+
 .vtm-video-area:-webkit-full-screen .vtm-caption-text,
 .vtm-video-area:fullscreen .vtm-caption-text {
   font-size: 1.4rem;
-  padding: 5px 14px;
+  padding: 6px 14px;
+  max-width: min(94vw, 1100px);
+}
+
+/* Keep the fullscreen settings button visible above controls */
+.vtm-video-area:-webkit-full-screen .vtm-fs-widget,
+.vtm-video-area:fullscreen .vtm-fs-widget {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
 }
 
 /* ── Segments list ──────────────────────────────────────────────────────── */
