@@ -9,10 +9,12 @@
 
     /* Bundler mode */
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
-    "noEmit": true,
+    "emitDeclarationOnly": true,
+
+    /* Project references */
+    "composite": true,
 
     /* Linting */
     "strict": true,
