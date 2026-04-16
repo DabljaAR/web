@@ -56,8 +56,6 @@ const JobItem: React.FC<JobItemProps> = memo(({
   const nameForMatch = typeof displayName === 'string' ? displayName : '';
   const isVideo = job.mediaType === 'VIDEO' || (!job.mediaType && /\.(mp4|mov|avi|mkv)$/i.test(nameForMatch));
   const isAudio = job.mediaType === 'AUDIO' || (!job.mediaType && /\.(mp3|wav|m4a)$/i.test(nameForMatch));
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const isText = job.mediaType === 'TEXT' || (!job.mediaType && /\.(txt)$/i.test(nameForMatch));
 
   // Determine Icon/Thumbnail
   let thumbnailContent: React.ReactNode;
