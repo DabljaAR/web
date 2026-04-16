@@ -212,8 +212,18 @@ class Settings(BaseSettings):
     # chunk through STT -> NMT -> TTS while keeping response contracts stable.
     PIPELINE_USE_SINGLE_CHUNK: bool = os.getenv("PIPELINE_USE_SINGLE_CHUNK", "false").lower() == "true"
 
+    # ========== DUBBING / MERGE ==========
+    # Backward-compatible: older deployments use DUBBING_MERGE_PATH.
     DUBBING_MERGE_PATH: str = os.getenv("DUBBING_MERGE_PATH", "/tmp/dubbing_merge")
-    
+    # New canonical name used by DubbingMergeService.
+    DUBBING_TEMP_DIR: str = os.getenv("DUBBING_TEMP_DIR", DUBBING_MERGE_PATH)
+
+    # Audio timing controls (used during concat / stretching).
+    DUBBING_MAX_STRETCH_RATIO: float = float(os.getenv("DUBBING_MAX_STRETCH_RATIO", "1.2"))
+    DUBBING_MIN_STRETCH_RATIO: float = float(os.getenv("DUBBING_MIN_STRETCH_RATIO", "0.8"))
+    # If the gap between segments is smaller than this (seconds), it will be treated as 0.
+    DUBBING_SILENCE_THRESHOLD: float = float(os.getenv("DUBBING_SILENCE_THRESHOLD", "0.1"))
+
     def get_device(self) -> str:
         """Get the device (auto-detect if set to 'auto')."""
         if self.STT_DEVICE == "auto":

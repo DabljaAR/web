@@ -100,6 +100,18 @@ class FFmpegService:
             logger.error(f"Error getting metadata for {file_path}: {e}")
             raise MediaProcessingError(f"Failed to analyze file: {str(e)}")
 
+    async def get_audio_duration(self, file_path: str) -> float:
+        """Return duration (seconds) for an audio file.
+
+        Kept for backward compatibility with dubbing merge code.
+        """
+        try:
+            meta = await self.get_metadata(file_path)
+            return float(meta.duration or 0.0)
+        except Exception as exc:
+            logger.warning("Failed to read audio duration for %s: %s", file_path, exc)
+            return 0.0
+
     async def extract_audio(self, input_path: str, output_path: str) -> bool:
         """Extract audio to MP3/AAC."""
         # Force overwrite (-y)
