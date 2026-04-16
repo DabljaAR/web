@@ -264,10 +264,21 @@ class DubbingMergeService:
                         seg.segment_id, seg.tts_audio_key,
                     )
                     continue
-                dur = await self.ffmpeg.get_audio_duration(str(local_path))
-                if dur:
-                    seg.tts_duration = dur
                 downloaded.append((seg, local_path))
+
+                # Duration probing is best-effort (should not invalidate the download).
+                try:
+                    dur = await self.ffmpeg.get_audio_duration(str(local_path))
+                    if dur:
+                        seg.tts_duration = dur
+                except Exception as exc:
+                    logger.warning(
+                        "[DubbingMerge] Could not read duration for segment %s (%s): %s",
+                        seg.segment_id,
+                        seg.tts_audio_key,
+                        exc,
+                    )
+
                 logger.debug(
                     "[DubbingMerge] Downloaded segment %s (%.3fs)",
                     seg.segment_id, seg.tts_duration or 0,
@@ -366,7 +377,12 @@ class DubbingMergeService:
         filters.append(f"atempo={rem:.4f}")
         filter_str = ",".join(filters)
 
-        cmd = ["ffmpeg", "-i", input_path, "-filter:a", filter_str, "-y", output_path]
+        cmd = [
+            "ffmpeg", "-i", input_path,
+            "-filter:a", filter_str,
+            "-ar", "44100", "-ac", "2", "-acodec", "pcm_s16le",
+            "-y", output_path,
+        ]
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -436,10 +452,16 @@ class DubbingMergeService:
                             gap, i,
                         )
 
+        # Re-encode to a consistent PCM format during concat.
+        # -c copy fails silently when TTS WAVs (often 22050 Hz mono) and
+        # generated silence (44100 Hz stereo) have mismatched stream params,
+        # producing truncated or garbled output instead of raising an error.
         cmd = [
             "ffmpeg", "-f", "concat", "-safe", "0",
             "-i", str(concat_file),
-            "-c", "copy",
+            "-ar", "44100",
+            "-ac", "2",
+            "-acodec", "pcm_s16le",
             "-y", str(final_audio),
         ]
         proc = await asyncio.create_subprocess_exec(
@@ -462,6 +484,9 @@ class DubbingMergeService:
             "-f", "lavfi",
             "-i", "anullsrc=r=44100:cl=stereo",
             "-t", f"{duration:.6f}",
+            "-ar", "44100",
+            "-ac", "2",
+            "-acodec", "pcm_s16le",
             "-y",
             str(output_path),
         ]
@@ -525,16 +550,32 @@ class DubbingMergeService:
         audio_codec = getattr(settings, "DUBBING_OUTPUT_AUDIO_CODEC", "aac")
         audio_bitrate = getattr(settings, "DUBBING_OUTPUT_AUDIO_BITRATE", "192k")
 
+        # Get exact video duration so we can pad TTS audio to match it precisely.
+        # apad without whole_dur is unreliable with -shortest and can cause the
+        # output to be trimmed to the TTS audio length instead of the video length.
+        try:
+            video_meta = await self.ffmpeg.get_metadata(str(local_video))
+            video_duration = video_meta.duration
+        except Exception as exc:
+            logger.warning("[DubbingMerge] Could not read video duration: %s — using apad without whole_dur", exc)
+            video_duration = None
+
+        if video_duration and video_duration > 0:
+            apad_filter = f"[1:a]apad=whole_dur={video_duration:.6f}[aout]"
+        else:
+            apad_filter = "[1:a]apad[aout]"
+
         cmd = [
             "ffmpeg",
             "-i", str(local_video),          # input 0: original video
             "-i", str(audio_path),            # input 1: TTS combined WAV
+            "-filter_complex", apad_filter,
             "-map", "0:v:0",                  # take video stream from input 0
-            "-map", "1:a:0",                  # take audio stream from input 1 (replaces original)
+            "-map", "[aout]",                 # padded audio (replaces original)
             "-c:v", "copy",                   # copy video without re-encoding
             "-c:a", audio_codec,
             "-b:a", audio_bitrate,
-            "-shortest",                      # end when the shorter stream ends
+            "-shortest",
             "-y",
             str(output_video),
         ]
