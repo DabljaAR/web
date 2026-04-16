@@ -211,6 +211,8 @@ class Settings(BaseSettings):
     # Default-only switch: when enabled, selected output types run as a single
     # chunk through STT -> NMT -> TTS while keeping response contracts stable.
     PIPELINE_USE_SINGLE_CHUNK: bool = os.getenv("PIPELINE_USE_SINGLE_CHUNK", "false").lower() == "true"
+
+    DUBBING_MERGE_PATH: str = os.getenv("DUBBING_MERGE_PATH", "/tmp/dubbing_merge")
     
     def get_device(self) -> str:
         """Get the device (auto-detect if set to 'auto')."""

@@ -99,6 +99,7 @@ app = FastAPI(
     description="Combined API for User Management and Speech-to-Text",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/api/docs"
 )
 
 # ---------------------------------------------------------------------------
