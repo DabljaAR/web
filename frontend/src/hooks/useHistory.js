@@ -45,16 +45,18 @@ export const useHistory = (initialLimit = 5) => {
   const fetchHistory = async (internal = false, signal = null) => {
     try {
       if (!internal) setLoading(true);
-      const data = await mediaService.getVideos({
-        page: pagination.page,
-        limit: pagination.limit,
-        search: debouncedSearch,
-        sortBy: filters.sortBy,
-        dateRange: filters.dateRange,
-        status: filters.status,
-        mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase(),
-        signal
-      });
+      const data = await mediaService.getVideos(
+        {
+          page: pagination.page,
+          limit: pagination.limit,
+          search: debouncedSearch,
+          sortBy: filters.sortBy,
+          dateRange: filters.dateRange,
+          status: filters.status,
+          mediaType: activeMediaTab === 'all' ? '' : activeMediaTab.toUpperCase(),
+        },
+        signal ? { signal } : undefined
+      );
 
       const videos = Array.isArray(data) ? data : data.items || [];
       const total = data.total || videos.length;

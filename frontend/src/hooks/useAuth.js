@@ -34,15 +34,16 @@ export const useAuth = () => {
   }, [setGlobalUser]);
 
   const login = (userData, accessToken, refreshToken, rememberMe = false) => {
-    // Default behavior remains session-scoped.
+    // Always keep access tokens session-scoped to reduce persistence and XSS exposure.
+    // If persistence is required, only persist the refresh token and user profile.
     sessionStorage.setItem('access_token', accessToken);
     sessionStorage.setItem('refresh_token', refreshToken);
     sessionStorage.setItem('user', JSON.stringify(userData));
 
-    // Remember me: persist auth across tabs/restarts in localStorage too.
     if (rememberMe) {
       localStorage.setItem('remember_me', 'true');
-      localStorage.setItem('access_token', accessToken);
+      // Do NOT persist access tokens in localStorage.
+      localStorage.removeItem('access_token');
       localStorage.setItem('refresh_token', refreshToken);
       localStorage.setItem('user', JSON.stringify(userData));
     } else {

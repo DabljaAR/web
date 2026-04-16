@@ -15,7 +15,7 @@ const HistoryPagination = ({ pagination, setPagination, t }) => {
         <button
           className="pagination-btn"
           disabled={page <= 1}
-          onClick={() => setPagination(prev => ({ ...prev, page: page - 1 }))}
+          onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
         >
           {t('history.prev')}
         </button>
@@ -31,7 +31,7 @@ const HistoryPagination = ({ pagination, setPagination, t }) => {
         <button
           className="pagination-btn"
           disabled={page >= pages}
-          onClick={() => setPagination(prev => ({ ...prev, page: page + 1 }))}
+          onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
         >
           {t('history.next')}
         </button>
