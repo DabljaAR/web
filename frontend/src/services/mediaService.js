@@ -31,22 +31,31 @@ export const mediaService = {
 
 
 
-    getDashboardData: async () => {
-        return api.get('/videos/dashboard');
+    getDashboardData: async (options = {}) => {
+        // Forward fetch options (e.g. { signal } for AbortController) to api.get.
+        return api.get('/videos/dashboard', options);
     },
 
-    getVideos: async (params = {}) => {
+    getVideos: async (params = {}, options = {}) => {
+        // `params` are strictly query params.
+        // `options` are forwarded to fetch via api.get (e.g. { signal } for AbortController).
+        // Back-compat: if callers accidentally pass `signal` inside params, plumb it through.
+        const { signal, ...query } = params || {};
+        const requestOptions = signal ? { ...options, signal } : options;
+
         // Build query string
         const queryParams = new URLSearchParams();
-        if (params.page) queryParams.append('page', params.page);
-        if (params.limit) queryParams.append('limit', params.limit);
-        if (params.search) queryParams.append('search', params.search);
-        if (params.sortBy) queryParams.append('sortBy', params.sortBy);
-        if (params.dateRange) queryParams.append('dateRange', params.dateRange);
-        if (params.status) queryParams.append('status', params.status);
-        if (params.mediaType) queryParams.append('mediaType', params.mediaType);
+        if (query.page) queryParams.append('page', query.page);
+        if (query.limit) queryParams.append('limit', query.limit);
+        if (query.search) queryParams.append('search', query.search);
+        if (query.sortBy) queryParams.append('sortBy', query.sortBy);
+        if (query.dateRange) queryParams.append('dateRange', query.dateRange);
+        if (query.status) queryParams.append('status', query.status);
+        if (query.mediaType) queryParams.append('mediaType', query.mediaType);
 
-        return api.get(`/videos/?${queryParams.toString()}`);
+        const qs = queryParams.toString();
+        const endpoint = qs ? `/videos/?${qs}` : '/videos/';
+        return api.get(endpoint, requestOptions);
     },
 
     deleteVideo: async (id) => {

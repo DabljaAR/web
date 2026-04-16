@@ -52,19 +52,23 @@ describe('useAuth Hook', () => {
     expect(result.current.isAuthenticated).toBe(true);
   });
 
-  it('login stores auth in localStorage when rememberMe is true', () => {
+  it('login stores only refresh token in localStorage when rememberMe is true', () => {
     const { result } = renderHook(() => useAuth());
     const userData = { id: 1, username: 'testuser' };
-    
+
     act(() => {
       result.current.login(userData, 'access123', 'refresh123', true);
     });
-    
+
     expect(sessionStorage.getItem('access_token')).toBe('access123');
     expect(sessionStorage.getItem('refresh_token')).toBe('refresh123');
-    expect(localStorage.getItem('access_token')).toBe('access123');
+
+    // Access tokens should not be persisted.
+    expect(localStorage.getItem('access_token')).toBeNull();
     expect(localStorage.getItem('refresh_token')).toBe('refresh123');
     expect(localStorage.getItem('remember_me')).toBe('true');
+    expect(localStorage.getItem('user')).toBe(JSON.stringify(userData));
+
     expect(result.current.user).toEqual(userData);
     expect(result.current.isAuthenticated).toBe(true);
   });
@@ -116,10 +120,10 @@ describe('useAuth Hook', () => {
     expect(sessionStorage.getItem('access_token')).toBeNull();
   });
 
-  it('returns user from localStorage when remember_me is true', () => {
+  it('returns user from localStorage when remember_me is true (refresh-token based)', () => {
     const userData = { id: 1, username: 'testuser', email: 'test@example.com' };
     localStorage.setItem('remember_me', 'true');
-    localStorage.setItem('access_token', 'token123');
+    localStorage.setItem('refresh_token', 'refresh123');
     localStorage.setItem('user', JSON.stringify(userData));
     act(() => {
       useStore.getState().reset();

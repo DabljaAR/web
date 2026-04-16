@@ -62,7 +62,7 @@ describe('MediaService', () => {
 
             const result = await mediaService.getDashboardData();
 
-            expect(api.get).toHaveBeenCalledWith('/videos/dashboard');
+            expect(api.get).toHaveBeenCalledWith('/videos/dashboard', expect.any(Object));
             expect(result).toEqual(mockData);
         });
     });
@@ -84,7 +84,8 @@ describe('MediaService', () => {
             await mediaService.getVideos(params);
 
             expect(api.get).toHaveBeenCalledWith(
-                expect.stringContaining('/videos/?')
+                expect.stringContaining('/videos/?'),
+                expect.any(Object)
             );
 
             const url = api.get.mock.calls[0][0];
@@ -102,7 +103,7 @@ describe('MediaService', () => {
 
             await mediaService.getVideos();
 
-            expect(api.get).toHaveBeenCalledWith('/videos/?');
+            expect(api.get).toHaveBeenCalledWith('/videos/', expect.any(Object));
         });
     });
 

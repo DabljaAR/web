@@ -6,29 +6,49 @@ if (!API_BASE_URL) {
   throw new Error('VITE_API_BASE_URL environment variable is required');
 }
 
-// Helper function to get auth token (checks both storages)
+// Helper function to get auth token.
+// Access tokens should remain session-scoped (avoid localStorage persistence where possible).
 const getAuthToken = () => {
-  const storage = getStorage();
-  return storage.getItem('access_token') || localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+  const token = sessionStorage.getItem('access_token') || getStorage().getItem('access_token');
+  if (token) return token;
+
+  // Legacy migration: if an old persisted access_token exists, move it into the session.
+  if (localStorage.getItem('remember_me') === 'true') {
+    const legacy = localStorage.getItem('access_token');
+    if (legacy) {
+      sessionStorage.setItem('access_token', legacy);
+      localStorage.removeItem('access_token');
+      return legacy;
+    }
+  }
+
+  return null;
 };
 
-// Helper function to get refresh token (checks both storages)
+// Helper function to get refresh token.
+// If remember-me is enabled, refresh_token may be persisted in localStorage.
 const getRefreshToken = () => {
-  const storage = getStorage();
-  return storage.getItem('refresh_token') || localStorage.getItem('refresh_token') || sessionStorage.getItem('refresh_token');
+  const sessionToken = sessionStorage.getItem('refresh_token') || getStorage().getItem('refresh_token');
+  if (sessionToken) return sessionToken;
+
+  if (localStorage.getItem('remember_me') === 'true') {
+    return localStorage.getItem('refresh_token');
+  }
+
+  return null;
 };
 
 // Helper function to save tokens
+// - access_token: sessionStorage only
+// - refresh_token: sessionStorage, and localStorage when remember_me is true
 const saveTokens = (accessToken, refreshToken) => {
-  const storage = getStorage();
-  storage.setItem('access_token', accessToken);
-  storage.setItem('refresh_token', refreshToken);
+  sessionStorage.setItem('access_token', accessToken);
+  sessionStorage.setItem('refresh_token', refreshToken);
 
-  // Also update the other storage if it exists (for migration)
-  const otherStorage = storage === localStorage ? sessionStorage : localStorage;
-  if (otherStorage.getItem('access_token')) {
-    otherStorage.setItem('access_token', accessToken);
-    otherStorage.setItem('refresh_token', refreshToken);
+  if (localStorage.getItem('remember_me') === 'true') {
+    localStorage.setItem('refresh_token', refreshToken);
+    // Never persist access tokens.
+    localStorage.removeItem('access_token');
   }
 };
 
@@ -45,8 +65,25 @@ const clearTokens = () => {
 
 const redirectToLogin = () => {
   try {
-    if (typeof window !== 'undefined' && window.location) {
+    if (typeof window === 'undefined' || !window.location) return;
+
+    // Avoid redirect loops / unnecessary reloads when we're already on the login page.
+    if (window.location.pathname === '/login') return;
+
+    // Prefer replace-style navigation to avoid polluting browser history.
+    if (typeof window.location.replace === 'function') {
+      window.location.replace('/login');
+    } else {
       window.location.href = '/login';
+    }
+
+    // In some test/non-browser environments, `replace` is mocked and may not mutate href.
+    // Keep href/pathname consistent for callers that read it after redirect.
+    try {
+      window.location.href = '/login';
+      window.location.pathname = '/login';
+    } catch (_) {
+      // ignore
     }
   } catch (e) {
     // Ignore navigation errors in non-browser/test environments.

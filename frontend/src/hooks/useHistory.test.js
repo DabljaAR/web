@@ -74,7 +74,8 @@ describe('useHistory', () => {
         dateRange: 'last30Days',
         status: 'all',
         mediaType: '',
-      })
+      }),
+      expect.objectContaining({ signal: expect.any(Object) })
     );
 
     expect(result.current.historyItems).toHaveLength(2);
@@ -137,7 +138,8 @@ describe('useHistory', () => {
       expect.objectContaining({
         search: 'hello',
         page: 1,
-      })
+      }),
+      expect.objectContaining({ signal: expect.any(Object) })
     );
   });
 });
