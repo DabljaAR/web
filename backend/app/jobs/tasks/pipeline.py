@@ -476,16 +476,42 @@ def tts_combine_results(
 
     sorted_results = sorted(segment_results, key=lambda r: r["segment_id"])
 
-    result_segments = [
-        {
+    # Load text already written by NMT and STT so we never lose it
+    _existing_segs: dict[float, dict] = {}
+    _stt_map: dict[float, str] = {}
+    if task_id:
+        try:
+            _eng, _SL = BaseJobTask._make_db()
+            try:
+                with _SL() as _db:
+                    from app.tasks.models import VideoTask as _VT
+                    _vt = _db.get(_VT, task_id)
+                    for _s in (_vt.segments or []):
+                        _existing_segs[round(float(_s.get("start", 0)), 2)] = _s
+                    for _s in (_vt.stt_segments or []):
+                        _stt_map[round(float(_s.get("start", 0)), 2)] = _s.get("text", "")
+            finally:
+                _eng.dispose()
+        except Exception:
+            pass
+
+    result_segments = []
+    for r in sorted_results:
+        key = round(float(r["start"]), 2)
+        existing = _existing_segs.get(key, {})
+        orig = r.get("original_text") or existing.get("original_text") or _stt_map.get(key, "")
+        tran = r.get("translated_text") or existing.get("translated_text") or ""
+        entry = {
             "start": r["start"],
             "end": r["end"],
+            "original_text": orig,
+            "translated_text": tran,
             "tts_key": r.get("tts_key"),
             "audio_url": r.get("audio_url"),
-            **({"tts_error": r["tts_error"]} if r.get("tts_error") else {}),
         }
-        for r in sorted_results
-    ]
+        if r.get("tts_error"):
+            entry["tts_error"] = r["tts_error"]
+        result_segments.append(entry)
 
     failed = sum(1 for r in sorted_results if r.get("tts_error"))
 
