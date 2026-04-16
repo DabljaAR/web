@@ -341,21 +341,41 @@ class DubbingMergeService:
         total = len(stretch_info)
 
         for idx, info in enumerate(stretch_info):
-            out_path = processed_dir / f"segment_{info['segment_id']}_processed.wav"
+            target_duration = info["target_duration"]
+            seg_id = info["segment_id"]
+
+            # Step 1: time-stretch to approximate target duration
+            stretched_path = processed_dir / f"segment_{seg_id}_stretched.wav"
             if abs(info["stretch_factor"] - 1.0) > 0.01:
                 ok = await self._apply_time_stretch(
-                    str(info["audio_path"]), str(out_path), info["stretch_factor"]
+                    str(info["audio_path"]), str(stretched_path), info["stretch_factor"]
                 )
                 if not ok:
                     logger.warning(
                         "[DubbingMerge] Time-stretch failed for segment %s, using original",
-                        info["segment_id"],
+                        seg_id,
                     )
-                    out_path = info["audio_path"]
+                    stretched_path = info["audio_path"]
             else:
-                out_path = info["audio_path"]
+                stretched_path = info["audio_path"]
 
-            info["output_path"] = out_path
+            # Step 2: fit exactly to target duration so every segment occupies
+            # its precise [start, end] slot in the final timeline.
+            # atempo can be slightly off (especially at clamped limits), so we
+            # pad with silence if too short, or hard-trim if too long.
+            final_path = processed_dir / f"segment_{seg_id}_processed.wav"
+            ok = await self._fit_audio_to_duration(
+                str(stretched_path), str(final_path), target_duration
+            )
+            if not ok:
+                logger.warning(
+                    "[DubbingMerge] fit_audio_to_duration failed for segment %s, "
+                    "using stretched audio as-is",
+                    seg_id,
+                )
+                final_path = stretched_path
+
+            info["output_path"] = final_path
             processed.append(info)
             if progress_callback:
                 await progress_callback(40.0 + 30.0 * (idx + 1) / total)
@@ -396,6 +416,71 @@ class DubbingMergeService:
             return Path(output_path).exists()
         except Exception as exc:
             logger.error("[DubbingMerge] Error in time-stretch: %s", exc)
+            return False
+
+    async def _fit_audio_to_duration(
+        self, input_path: str, output_path: str, target_duration: float
+    ) -> bool:
+        """Pad (silence at end) or trim the audio to exactly target_duration seconds.
+
+        This is a correction step run after atempo stretching, which can be
+        slightly off at clamped stretch limits.  A tolerance of 20 ms is used
+        to avoid unnecessary re-encoding when the audio is already close enough.
+        """
+        actual = await self.ffmpeg.get_audio_duration(input_path)
+        if actual <= 0:
+            logger.warning("[DubbingMerge] fit_audio: could not read duration of %s", input_path)
+            return False
+
+        diff = actual - target_duration
+        if abs(diff) <= 0.02:
+            # Close enough — just normalise format via copy
+            cmd = [
+                "ffmpeg", "-i", input_path,
+                "-ar", "44100", "-ac", "2", "-acodec", "pcm_s16le",
+                "-y", output_path,
+            ]
+        elif diff > 0:
+            # Audio is too long → hard trim
+            logger.debug(
+                "[DubbingMerge] fit_audio: trimming %.3fs → %.3fs for %s",
+                actual, target_duration, input_path,
+            )
+            cmd = [
+                "ffmpeg", "-i", input_path,
+                "-t", f"{target_duration:.6f}",
+                "-ar", "44100", "-ac", "2", "-acodec", "pcm_s16le",
+                "-y", output_path,
+            ]
+        else:
+            # Audio is too short → pad with silence
+            logger.debug(
+                "[DubbingMerge] fit_audio: padding %.3fs → %.3fs for %s",
+                actual, target_duration, input_path,
+            )
+            cmd = [
+                "ffmpeg", "-i", input_path,
+                "-filter_complex",
+                f"[0:a]apad=whole_dur={target_duration:.6f}[aout]",
+                "-map", "[aout]",
+                "-t", f"{target_duration:.6f}",
+                "-ar", "44100", "-ac", "2", "-acodec", "pcm_s16le",
+                "-y", output_path,
+            ]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                logger.error("[DubbingMerge] fit_audio failed: %s", stderr.decode())
+                return False
+            return Path(output_path).exists()
+        except Exception as exc:
+            logger.error("[DubbingMerge] Error in fit_audio_to_duration: %s", exc)
             return False
 
     # ------------------------------------------------------------------ #
