@@ -16,6 +16,31 @@ const fmt = (iso) =>
     ? new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
     : '—';
 
+function toSrtTime(seconds) {
+  const h  = Math.floor(seconds / 3600);
+  const m  = Math.floor((seconds % 3600) / 60);
+  const s  = Math.floor(seconds % 60);
+  const ms = Math.round((seconds - Math.floor(seconds)) * 1000);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')},${String(ms).padStart(3,'0')}`;
+}
+
+function downloadSrt(segments, filename, useTranslation = false) {
+  const lines = [];
+  let idx = 1;
+  for (const seg of segments) {
+    const text = useTranslation
+      ? (seg.translated_text || seg.original_text)
+      : seg.original_text;
+    if (!text || seg.start == null || seg.end == null) continue;
+    lines.push(`${idx++}\n${toSrtTime(seg.start)} --> ${toSrtTime(seg.end)}\n${text}\n`);
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'application/x-subrip' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
 /* ── Audio player ─────────────────────────────────────────────────────────── */
 function AudioPlayer({ src, label }) {
   if (!src) return (
@@ -201,6 +226,26 @@ function TaskPreview({ task, onBack }) {
           {OUTPUT_TYPE_LABEL[task.output_type] || task.output_type}
           {' · '}{fmt(task.created_at)}
         </span>
+        {hasSegments && (
+          <div className="vtm-srt-btns">
+            <button
+              className="btn btn-secondary vtm-srt-btn"
+              title="Download original subtitles as SRT"
+              onClick={() => downloadSrt(task.segments, `subtitles_original.srt`, false)}
+            >
+              ↓ SRT (original)
+            </button>
+            {hasTranslation && (
+              <button
+                className="btn btn-secondary vtm-srt-btn"
+                title="Download translated subtitles as SRT"
+                onClick={() => downloadSrt(task.segments, `subtitles_${task.target_lang}.srt`, true)}
+              >
+                ↓ SRT ({task.target_lang})
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── video player with caption overlay ── */}

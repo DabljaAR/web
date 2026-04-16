@@ -314,6 +314,18 @@
   flex-wrap: wrap;
 }
 
+.vtm-srt-btns {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.vtm-srt-btn {
+  font-size: 0.78rem;
+  padding: 4px 10px;
+}
+
 .vtm-back-btn {
   font-size: 0.85rem;
   padding: 8px 16px;
