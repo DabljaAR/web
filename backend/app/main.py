@@ -99,8 +99,46 @@ app = FastAPI(
     description="Combined API for User Management and Speech-to-Text",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/api/docs"
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json"
 )
+
+
+# ---------------------------------------------------------------------------
+# Custom OpenAPI schema generator (ensures version field for Swagger UI)
+# ---------------------------------------------------------------------------
+
+_openapi_schema = None
+
+
+def get_openapi_schema():
+    """
+    Generate and cache the OpenAPI schema.
+    Ensures the 'openapi' version field is always present for Swagger UI validation.
+    """
+    global _openapi_schema
+    if _openapi_schema:
+        return _openapi_schema
+    
+    # Get FastAPI's default schema generation
+    from fastapi.openapi.utils import get_openapi
+    
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    
+    # Ensure the 'openapi' version field is present (required by Swagger UI)
+    if "openapi" not in schema:
+        schema["openapi"] = "3.0.2"
+    
+    _openapi_schema = schema
+    return _openapi_schema
+
+
+app.openapi = get_openapi_schema
 
 # ---------------------------------------------------------------------------
 # Middleware & exception handlers
