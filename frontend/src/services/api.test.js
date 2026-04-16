@@ -118,7 +118,7 @@ describe('API Service', () => {
     it('handles network errors', async () => {
       global.fetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
-      await expect(api.get('/test')).rejects.toThrow('Something went wrong');
+      await expect(api.get('/test')).rejects.toThrow(/network error/i);
     });
   });
 
@@ -228,7 +228,7 @@ describe('API Service', () => {
     it('handles POST network errors', async () => {
       global.fetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
-      await expect(api.post('/test', {})).rejects.toThrow('Something went wrong');
+      await expect(api.post('/test', {})).rejects.toThrow(/network error/i);
     });
   });
 
@@ -305,7 +305,7 @@ describe('API Service', () => {
     it('handles PUT network errors', async () => {
       global.fetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
-      await expect(api.put('/test', {})).rejects.toThrow('Something went wrong');
+      await expect(api.put('/test', {})).rejects.toThrow(/network error/i);
     });
   });
 
@@ -428,7 +428,7 @@ describe('API Service', () => {
     it('handles DELETE network errors', async () => {
       global.fetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
-      await expect(api.delete('/test')).rejects.toThrow('Something went wrong');
+      await expect(api.delete('/test')).rejects.toThrow(/network error/i);
     });
   });
 

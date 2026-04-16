@@ -17,7 +17,7 @@ const Input = ({ label, type = 'text', value, onChange, placeholder, error, clas
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className={`input-field ${error ? 'error' : ''}`}
+        className={`input-field ${error ? 'error' : ''} ${className}`.trim()}
         aria-invalid={error ? 'true' : undefined}
         aria-describedby={error ? `${inputId}-error` : undefined}
         {...props}

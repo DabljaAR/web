@@ -23,19 +23,22 @@ describe('Button Component', () => {
   it('applies primary variant styles by default', () => {
     render(<Button>Primary</Button>);
     const button = screen.getByRole('button');
-    expect(button.className).toContain('bg-blue-600');
+    expect(button.className).toContain('btn-vitals');
+    expect(button.className).toContain('btn-vitals-primary');
   });
 
   it('applies secondary variant styles', () => {
     render(<Button variant="secondary">Secondary</Button>);
     const button = screen.getByRole('button');
-    expect(button.className).toContain('bg-gray-200');
+    expect(button.className).toContain('btn-vitals');
+    expect(button.className).toContain('btn-vitals-secondary');
   });
 
   it('applies danger variant styles', () => {
     render(<Button variant="danger">Danger</Button>);
     const button = screen.getByRole('button');
-    expect(button.className).toContain('bg-red-600');
+    expect(button.className).toContain('btn-vitals');
+    expect(button.className).toContain('btn-vitals-danger');
   });
 
   it('applies custom className', () => {

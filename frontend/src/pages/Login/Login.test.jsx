@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../test/test-utils';
 import userEvent from '@testing-library/user-event';
+import toast from 'react-hot-toast';
 import Login from './Login';
 import { useAuth } from '../../hooks/useAuth';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -13,6 +14,9 @@ const mockNavigate = vi.fn();
 vi.mock('../../hooks/useAuth');
 vi.mock('../../hooks/useTranslation');
 vi.mock('../../services/authService');
+vi.mock('react-hot-toast', () => ({
+  default: vi.fn(),
+}));
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
   return {
@@ -123,15 +127,13 @@ describe('Login Page', () => {
 
   it('handles Google login', async () => {
     const user = userEvent.setup();
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
 
     renderWithProviders(<Login />);
 
     const googleButton = screen.getByRole('button', { name: /login.signInGoogle/i });
     await user.click(googleButton);
 
-    expect(alertSpy).toHaveBeenCalledWith('Google login (Demo)');
-    alertSpy.mockRestore();
+    expect(toast).toHaveBeenCalledWith('login.googleLoginDemo');
   });
 
   it('shows loading state during submission', async () => {
@@ -155,7 +157,7 @@ describe('Login Page', () => {
 
     // Wait for loading state to appear
     await waitFor(() => {
-      expect(screen.getByText(/signing in/i)).toBeInTheDocument();
+      expect(screen.getByText(/login\.signingIn/i)).toBeInTheDocument();
     }, { timeout: 2000 });
 
     // Button should be disabled during loading
