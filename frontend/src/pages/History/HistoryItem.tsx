@@ -48,15 +48,21 @@ const HistoryItem: React.FC<HistoryItemProps> = memo(({
     }
   };
 
-  const isVideo = item.mediaType === 'VIDEO' || (!item.mediaType && item.name.match(/\.(mp4|mov|avi|mkv)$/i));
-  const isAudio = item.mediaType === 'AUDIO' || (!item.mediaType && item.name.match(/\.(mp3|wav|m4a)$/i));
+  // Be defensive: some API shapes may omit name/title/original filename.
+  const displayName = (typeof (item as any)?.name === 'string' && (item as any).name.trim())
+    ? (item as any).name
+    : (t('history.untitled') || 'Untitled');
+
+  const nameForMatch = typeof displayName === 'string' ? displayName : '';
+  const isVideo = item.mediaType === 'VIDEO' || (!item.mediaType && /\.(mp4|mov|avi|mkv)$/i.test(nameForMatch));
+  const isAudio = item.mediaType === 'AUDIO' || (!item.mediaType && /\.(mp3|wav|m4a)$/i.test(nameForMatch));
 
   return (
     <div className="history-item">
       <div className="item-content">
         <div className="item-thumbnail">
           {item.thumbnailUrl ? (
-            <img src={item.thumbnailUrl} alt={item.name} className="item-thumb-img" />
+            <img src={item.thumbnailUrl} alt={displayName} className="item-thumb-img" />
           ) : (
             <div className="item-type-icon">
               {isVideo ? '🎬' : isAudio ? '🎵' : '📄'}
@@ -66,7 +72,7 @@ const HistoryItem: React.FC<HistoryItemProps> = memo(({
         
         <div className="item-details">
           <div className="item-header">
-            <h3 className="item-title" title={item.name}>{item.name}</h3>
+            <h3 className="item-title" title={displayName}>{displayName}</h3>
             <span className={`item-status ${getStatusClass(item.status)}`}>
               <span>{getStatusIcon(item.status)}</span>
               <span>{t(`history.status${item.status.charAt(0).toUpperCase() + item.status.slice(1)}`) || item.status}</span>
@@ -74,13 +80,17 @@ const HistoryItem: React.FC<HistoryItemProps> = memo(({
           </div>
 
           <div className="item-info">
-            <span>{item.date ? new Date(item.date).toLocaleDateString() : 'N/A'}</span>
+            <span>
+              {item.date && !Number.isNaN(new Date(item.date).getTime())
+                ? new Date(item.date).toLocaleDateString()
+                : (t('history.noDate') || 'N/A')}
+            </span>
             {item.mediaType && <span className="item-type-badge">{item.mediaType}</span>}
           </div>
 
           <div className="item-actions">
             {/* Common Actions */}
-            <button className="btn btn-secondary" onClick={() => onViewTasks(item.id, item.name)}>
+            <button className="btn btn-secondary" onClick={() => onViewTasks(item.id, displayName)}>
               <span>📋</span> {t('history.tasks') || 'Tasks'}
             </button>
 
@@ -92,7 +102,7 @@ const HistoryItem: React.FC<HistoryItemProps> = memo(({
                 <button className="btn btn-secondary" onClick={() => onDownload(item)}>
                   <span>⬇️</span> {t('history.download')}
                 </button>
-                <button className="btn btn-secondary" onClick={() => onRedub(item.id, item.name)}>
+                <button className="btn btn-secondary" onClick={() => onRedub(item.id, displayName)}>
                   <span>🔄</span> {t('history.redub')}
                 </button>
                 

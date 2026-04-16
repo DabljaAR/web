@@ -68,8 +68,22 @@ vi.mock('react-hot-toast', () => ({
 describe('Dashboard Page', () => {
   const mockT = vi.fn((key) => key);
   const mockVideos = [
-    { id: 'job_1', title: 'Processing Video.mp4', status: 'PROCESSING', has_active_job: true },
-    { id: 'job_2', title: 'Completed Video.mp4', status: 'COMPLETED', url: 'http://test.com/video.mp4', thumbnail_url: 'http://test.com/thumb.jpg' }
+    {
+      id: 'job_1',
+      name: 'Processing Video.mp4',
+      status: 'PROCESSING',
+      type: 'processing',
+      progress: 10,
+      media_type: 'VIDEO',
+    },
+    {
+      id: 'job_2',
+      title: 'Completed Video.mp4',
+      status: 'COMPLETED',
+      url: 'http://test.com/video.mp4',
+      thumbnail_url: 'http://test.com/thumb.jpg',
+      media_type: 'VIDEO',
+    }
   ];
 
   beforeEach(() => {
@@ -150,16 +164,29 @@ describe('Dashboard Page', () => {
 
     renderComponent();
 
-    // The job list items have delete buttons
-    // Wait for jobs to load
+    // Wait for dashboard data to be fetched and recent jobs to render
     await waitFor(() => {
       expect(mediaService.getDashboardData).toHaveBeenCalled();
+      expect(screen.getByText('dashboard.recentJobs')).toBeInTheDocument();
+      expect(screen.getByText(/Completed Video\.mp4/i)).toBeInTheDocument();
     });
 
-    // We need to find the delete button inside JobList/HistoryItem
-    // Since we mock many things, let's just check if the service is called 
-    // when we trigger the delete logic.
-    // In the real component, it's inside JobList.
+    // Open the kebab menu for the recent job and click delete
+    const optionsButtons = screen.getAllByLabelText('common.options');
+    expect(optionsButtons.length).toBeGreaterThan(0);
+
+    await user.click(optionsButtons[0]);
+
+    const deleteButton = await screen.findByLabelText('dashboard.delete');
+    await user.click(deleteButton);
+
+    await waitFor(() => {
+      expect(Swal.fire).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(mediaService.deleteVideo).toHaveBeenCalledWith('job_2');
+    });
   });
 
   it('navigates to history page', async () => {

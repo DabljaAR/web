@@ -24,15 +24,24 @@ const OriginalVideoItem = memo(({ item, t, onPreview, onDownload, onDelete }) =>
         }
     };
 
-    const isVideo = item.mediaType === 'VIDEO' || (!item.mediaType && item.name.match(/\.(mp4|mov|avi|mkv)$/i));
-    const isAudio = item.mediaType === 'AUDIO' || (!item.mediaType && item.name.match(/\.(mp3|wav|m4a)$/i));
+    // item.name can be missing (e.g., when both title and original_filename are absent upstream),
+    // so normalize to a safe display name and only run extension checks on a string.
+    const displayName =
+        (typeof item?.name === 'string' && item.name.trim()) ? item.name :
+        (typeof item?.title === 'string' && item.title.trim()) ? item.title :
+        (typeof item?.original_filename === 'string' && item.original_filename.trim()) ? item.original_filename :
+        (t('history.untitled') || 'Untitled');
+
+    const nameForMatch = typeof displayName === 'string' ? displayName : '';
+    const isVideo = item.mediaType === 'VIDEO' || (!item.mediaType && /\.(mp4|mov|avi|mkv)$/i.test(nameForMatch));
+    const isAudio = item.mediaType === 'AUDIO' || (!item.mediaType && /\.(mp3|wav|m4a)$/i.test(nameForMatch));
 
     return (
         <div className="history-item">
             <div className="item-content">
                 <div className="item-thumbnail">
                     {item.thumbnailUrl ? (
-                        <img src={item.thumbnailUrl} alt={item.name} className="item-thumb-img" />
+                        <img src={item.thumbnailUrl} alt={displayName} className="item-thumb-img" />
                     ) : (
                         <div className="item-type-icon">
                             {isVideo ? '🎬' : isAudio ? '🎵' : '📄'}
@@ -41,7 +50,7 @@ const OriginalVideoItem = memo(({ item, t, onPreview, onDownload, onDelete }) =>
                 </div>
                 <div className="item-details">
                     <div className="item-header">
-                        <h3 className="item-title" title={item.name}>{item.name}</h3>
+                        <h3 className="item-title" title={displayName}>{displayName}</h3>
                         <span className={`item-status ${getStatusClass(item.status)}`}>
                             <span>{getStatusIcon(item.status)}</span>
                             <span>{t(`history.status${item.status.charAt(0).toUpperCase() + item.status.slice(1)}`) || item.status}</span>
@@ -49,7 +58,11 @@ const OriginalVideoItem = memo(({ item, t, onPreview, onDownload, onDelete }) =>
                     </div>
 
                     <div className="item-info" style={{ marginTop: '8px' }}>
-                        <span>{new Date(item.date).toLocaleDateString()}</span>
+                        <span>
+                            {item.date && !Number.isNaN(new Date(item.date).getTime())
+                                ? new Date(item.date).toLocaleDateString()
+                                : (t('history.noDate') || 'N/A')}
+                        </span>
                         {item.mediaType && <span className="item-type-badge" style={{ marginLeft: '12px' }}>{item.mediaType}</span>}
                     </div>
 

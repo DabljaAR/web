@@ -88,15 +88,30 @@ const refreshAccessToken = async () => {
 };
 
 const request = async (endpoint, options = {}, isRetry = false) => {
+  const { responseType, ...fetchOptions } = options;
   const token = getAuthToken();
-  const headers = {
-    'Content-Type': options.body instanceof FormData ? undefined : 'application/json',
-    ...options.headers,
-  };
+  const headers = { ...fetchOptions.headers };
 
-  if (headers['Content-Type'] === undefined) {
-    delete headers['Content-Type'];
+  if (fetchOptions.body instanceof FormData) {
+    // Unconditionally delete any Content-Type header when the body is FormData.
+    // This allows the browser to set the correct multipart/form-data boundary automatically.
+    Object.keys(headers).forEach(key => {
+      if (key.toLowerCase() === 'content-type') {
+        delete headers[key];
+      }
+    });
+  } else if (!Object.keys(headers).some(key => key.toLowerCase() === 'content-type')) {
+    // If not FormData and no Content-Type was provided, default to application/json.
+    // This maintains backward compatibility with the previous implementation.
+    headers['Content-Type'] = 'application/json';
   }
+
+  // Remove any headers that are explicitly set to undefined
+  Object.keys(headers).forEach(key => {
+    if (headers[key] === undefined) {
+      delete headers[key];
+    }
+  });
 
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -104,7 +119,7 @@ const request = async (endpoint, options = {}, isRetry = false) => {
 
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
+      ...fetchOptions,
       headers,
     });
 
@@ -146,7 +161,7 @@ const request = async (endpoint, options = {}, isRetry = false) => {
       return null;
     }
 
-    if (options.responseType === 'text') {
+    if (responseType === 'text') {
       return response.text();
     }
 
@@ -158,7 +173,7 @@ const request = async (endpoint, options = {}, isRetry = false) => {
     return null;
   } catch (error) {
     if (error instanceof TypeError && error.message === 'Failed to fetch') {
-      throw new Error('Upload failed: the server did not respond. The server may be overloaded, out of storage, or unreachable.');
+      throw new Error('Network error: the server did not respond. The server may be overloaded or unreachable.');
     }
     throw error;
   }
