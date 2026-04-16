@@ -1,9 +1,18 @@
 import { expect, afterEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import * as matchers from '@testing-library/jest-dom/matchers';
+import fs from 'node:fs';
+import path from 'node:path';
 
 // Extend Vitest's expect with jest-dom matchers
 expect.extend(matchers);
+
+// Ensure coverage temp directory exists (workaround for occasional ENOENT when writing v8 coverage files)
+try {
+  fs.mkdirSync(path.join(process.cwd(), 'coverage', '.tmp'), { recursive: true });
+} catch (e) {
+  // ignore
+}
 
 // Cleanup after each test
 afterEach(() => {
