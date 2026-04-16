@@ -34,8 +34,7 @@ describe('API Service', () => {
     });
 
     it('includes authorization header when token exists', async () => {
-      localStorage.setItem('access_token', 'test-token');
-      localStorage.setItem('remember_me', 'true');
+      sessionStorage.setItem('access_token', 'test-token');
 
       global.fetch.mockResolvedValueOnce({
         ok: true,
@@ -143,7 +142,7 @@ describe('API Service', () => {
     });
 
     it('refreshes token on 401 and retries', async () => {
-      localStorage.setItem('access_token', 'expired-token');
+      sessionStorage.setItem('access_token', 'expired-token');
       localStorage.setItem('refresh_token', 'refresh-token');
       localStorage.setItem('remember_me', 'true');
 
@@ -253,7 +252,7 @@ describe('API Service', () => {
     });
 
     it('refreshes token on 401 and retries PUT', async () => {
-      localStorage.setItem('access_token', 'expired-token');
+      sessionStorage.setItem('access_token', 'expired-token');
       localStorage.setItem('refresh_token', 'refresh-token');
       localStorage.setItem('remember_me', 'true');
 
@@ -345,7 +344,7 @@ describe('API Service', () => {
     });
 
     it('refreshes token on 401 and retries DELETE', async () => {
-      localStorage.setItem('access_token', 'expired-token');
+      sessionStorage.setItem('access_token', 'expired-token');
       localStorage.setItem('refresh_token', 'refresh-token');
       localStorage.setItem('remember_me', 'true');
 
@@ -469,7 +468,7 @@ describe('API Service', () => {
     });
 
     it('clears tokens on refresh failure', async () => {
-      localStorage.setItem('access_token', 'expired');
+      sessionStorage.setItem('access_token', 'expired');
       localStorage.setItem('refresh_token', 'invalid-refresh');
       localStorage.setItem('remember_me', 'true');
 
