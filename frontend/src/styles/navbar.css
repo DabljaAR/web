@@ -147,7 +147,6 @@
     font-weight: 700;
     color: var(--text-dark);
     transition: all 0.3s ease;
-    border: none;
 }
 
 .lang-toggle:hover {

@@ -18,10 +18,10 @@ export const useJobPolling = (pollInterval: number = 5000) => {
       const active = data.active || [];
       const recent = data.recent || [];
 
-      const pending: ProcessingJob[] = active.map(v => ({
+      const pending: ProcessingJob[] = active.map((v: any) => ({
         id: v.id,
-        name: v.name,
-        status: v.status.toLowerCase() as any,
+        name: v.name ?? v.title ?? v.original_filename ?? 'Untitled',
+        status: (typeof v.status === 'string' ? v.status : 'PENDING').toLowerCase() as any,
         type: v.type,
         progress: v.progress,
         estTime: v.progress !== undefined && v.progress > 0 ? `${v.progress.toFixed(0)}%` : 'Processing...'

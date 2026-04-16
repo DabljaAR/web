@@ -49,10 +49,15 @@ const JobItem: React.FC<JobItemProps> = memo(({
     setMenuOpen(!menuOpen);
   };
 
-  const isVideo = job.mediaType === 'VIDEO' || (!job.mediaType && job.name.match(/\.(mp4|mov|avi|mkv)$/i));
-  const isAudio = job.mediaType === 'AUDIO' || (!job.mediaType && job.name.match(/\.(mp3|wav|m4a)$/i));
+  const displayName = (typeof (job as any)?.name === 'string' && (job as any).name.trim())
+    ? (job as any).name
+    : (t('history.untitled') || 'Untitled');
+
+  const nameForMatch = typeof displayName === 'string' ? displayName : '';
+  const isVideo = job.mediaType === 'VIDEO' || (!job.mediaType && /\.(mp4|mov|avi|mkv)$/i.test(nameForMatch));
+  const isAudio = job.mediaType === 'AUDIO' || (!job.mediaType && /\.(mp3|wav|m4a)$/i.test(nameForMatch));
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const isText = job.mediaType === 'TEXT' || (!job.mediaType && job.name.match(/\.(txt)$/i));
+  const isText = job.mediaType === 'TEXT' || (!job.mediaType && /\.(txt)$/i.test(nameForMatch));
 
   // Determine Icon/Thumbnail
   let thumbnailContent: React.ReactNode;
@@ -60,7 +65,7 @@ const JobItem: React.FC<JobItemProps> = memo(({
     thumbnailContent = (
       <img 
         src={job.thumbnailUrl} 
-        alt={job.name} 
+        alt={displayName} 
         className="job-thumbnail-img" 
         onError={(e) => { 
           (e.target as HTMLImageElement).style.display = 'none'; 
@@ -96,7 +101,7 @@ const JobItem: React.FC<JobItemProps> = memo(({
 
       {/* Info */}
       <div className="job-info-content">
-        <div className="job-title" title={job.name}>{job.name}</div>
+        <div className="job-title" title={displayName}>{displayName}</div>
         <div className="job-meta">
           <span className={`status-badge ${job.status}`}>
             {t(`dashboard.${job.status}`) || job.status}

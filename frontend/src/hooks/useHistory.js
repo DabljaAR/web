@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { mediaService } from '../services/mediaService';
 import { useTranslation } from './useTranslation';
 
@@ -62,18 +62,23 @@ export const useHistory = (initialLimit = 5) => {
       const totalCompleted = data.total_completed || 0;
       const totalFailed = data.total_failed || 0;
 
-      const mappedItems = videos.map(video => {
-        const hasActiveJob = Boolean(video.has_active_job);
-        const computedStatus = hasActiveJob ? 'processing' : video.status.toLowerCase();
-        
+      const mappedItems = videos.map((video) => {
+        const hasActiveJob = Boolean(video?.has_active_job);
+        const rawStatus = typeof video?.status === 'string' ? video.status : 'pending';
+        const computedStatus = hasActiveJob ? 'processing' : rawStatus.toLowerCase();
+
+        const jobs = Array.isArray(video?.jobs) ? video.jobs : [];
+
         // Find transcript and translation URLs from the jobs array
-        const transcriptUrl = video.jobs?.find(j => j.transcript_url)?.transcript_url;
-        const translationUrl = video.jobs?.find(j => j.translation_url)?.translation_url;
+        const transcriptUrl = jobs.find((j) => j?.transcript_url)?.transcript_url;
+        const translationUrl = jobs.find((j) => j?.translation_url)?.translation_url;
 
         return {
           id: video.id,
-          name: video.title || video.original_filename,
-          date: video.created_at,
+          // Some response types omit both title and original_filename, so always provide a safe string.
+          name: video.title ?? video.original_filename ?? (t('history.untitled') || 'Untitled'),
+          // created_at can be missing; keep null so the UI can render a fallback instead of "Invalid Date".
+          date: video.created_at ?? null,
           status: computedStatus,
           realStatus: video.status,
           url: video.url,

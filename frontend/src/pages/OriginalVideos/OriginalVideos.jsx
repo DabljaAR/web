@@ -88,7 +88,7 @@ const OriginalVideos = () => {
     };
 
     const handleDownload = (item) => {
-        if (item.url) window.open(item.url, '_blank');
+        if (item.url) window.open(item.url, '_blank', 'noopener,noreferrer');
     };
 
     const handleDelete = async (id) => {
@@ -165,17 +165,28 @@ const OriginalVideos = () => {
     };
 
     const handleYoutubeDownload = async () => {
-        if (!youtubeUrl) return;
+        const trimmedUrl = youtubeUrl.trim();
+        if (!trimmedUrl) {
+            setYoutubeError(t('originalVideos.youtubeErrorEmpty'));
+            return;
+        }
+
+        // Basic YouTube URL validation
+        const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
+        if (!youtubeRegex.test(trimmedUrl)) {
+            setYoutubeError(t('originalVideos.youtubeErrorInvalid'));
+            return;
+        }
 
         setIsYoutubeDownloading(true);
         setYoutubeError(null);
         try {
             await mediaService.downloadFromYoutube({
-                youtube_url: youtubeUrl,
+                youtube_url: trimmedUrl,
                 format: youtubeFormat,
                 quality: youtubeQuality
             });
-            toast.success(t('originalVideos.youtubeSuccess') || 'Video added to processing queue.');
+            toast.success(t('originalVideos.youtubeSuccessMsg') || 'Video added to processing queue.');
             setYoutubeUrl('');
             setShowYoutubeModal(false);
             setShowUploadSection(false);
