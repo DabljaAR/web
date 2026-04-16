@@ -233,7 +233,9 @@ const request = async (endpoint, options = {}, isRetry = false) => {
     // In tests, mocked fetch responses often omit headers. If `json()` exists, assume JSON.
     if ((contentType && contentType.includes('application/json')) || (!contentType && typeof response.json === 'function')) {
       try {
-        return response.json();
+        // `response.json()` returns a promise; parse errors reject asynchronously.
+        // Await here so parse failures are caught and we can gracefully return null.
+        return await response.json();
       } catch (e) {
         return null;
       }

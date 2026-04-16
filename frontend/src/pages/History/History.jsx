@@ -330,8 +330,6 @@ const History = () => {
                 onDelete={handleDelete}
                 onViewTasks={handleViewTasks}
                 onRedub={handleRedub}
-                onPreviewAudio={handlePreview}
-                onDownloadAudio={handleDownload}
                 onPreviewTranscript={handlePreviewTranscript}
                 onPreviewTranslation={handlePreviewTranslation}
               />
