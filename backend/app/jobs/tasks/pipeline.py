@@ -493,12 +493,13 @@ def tts_combine_results(
     combined_audio_url: Optional[str] = None
     dubbed_video_key: Optional[str] = None
     dubbed_video_url: Optional[str] = None
+    media_type_value = "audio"
+    merge_error_message: Optional[str] = None
 
     segments_with_audio = [r for r in sorted_results if r.get("tts_key") and not r.get("tts_error")]
 
     if segments_with_audio:
         try:
-            media_type_value = "audio"
             original_media_key: Optional[str] = None
 
             engine_v, SessionLocal_v = BaseJobTask._make_db()
@@ -589,6 +590,7 @@ def tts_combine_results(
                 finally:
                     engine_u.dispose()
         except Exception as _exc:
+            merge_error_message = str(_exc)
             logger.error("[TTS] merge step failed | job=%s: %s", job_id, _exc, exc_info=True)
 
     output = {
@@ -604,6 +606,7 @@ def tts_combine_results(
             "media_type": media_type_value if segments_with_audio else None,
             "tts_segments": len(result_segments),
             "tts_failed": failed,
+            **({"merge_error": merge_error_message} if merge_error_message else {}),
         },
     }
 
@@ -615,11 +618,16 @@ def tts_combine_results(
             logger.warning("[TTS] could not delete ref clip %s: %s", ref_clip_minio_key, _exc)
 
     # ── Write to Job row ─────────────────────────────────────────────────────
-    if failed and not combined_minio_key:
-        msg = f"TTS failed for {failed}/{len(result_segments)} segments"
+    error_message: Optional[str] = None
+    if segments_with_audio and not combined_minio_key:
+        error_message = merge_error_message or "TTS merge failed: no combined output was generated."
+    elif failed and not combined_minio_key:
+        error_message = f"TTS failed for {failed}/{len(result_segments)} segments"
+
+    if error_message:
         BaseJobTask._patch_job(
             job_id, JobStatus.FAILED,
-            output_data=output, error_message=msg, completed_at=_utcnow(),
+            output_data=output, error_message=error_message, completed_at=_utcnow(),
         )
     else:
         BaseJobTask._patch_job(
@@ -630,16 +638,18 @@ def tts_combine_results(
     # ── Update VideoTask ─────────────────────────────────────────────────────
     if task_id:
         from app.tasks.models import TaskStatus
-        logger.info("[TTS] patching VideoTask to COMPLETED | task_id=%s tts_job=%s", task_id, job_id)
-        BaseJobTask._patch_task(
-            task_id,
-            TaskStatus.COMPLETED,
-            segments=result_segments,
-            combined_audio_key=combined_minio_key,
-            combined_audio_url=combined_audio_url,
-            progress=100.0,
-            completed_at=_utcnow(),
-        )
+        task_status = TaskStatus.FAILED if error_message else TaskStatus.COMPLETED
+        logger.info("[TTS] patching VideoTask to %s | task_id=%s tts_job=%s", task_status.value, task_id, job_id)
+        patch_kwargs = {
+            "segments": result_segments,
+            "combined_audio_key": combined_minio_key,
+            "combined_audio_url": combined_audio_url,
+            "progress": 100.0,
+            "completed_at": _utcnow(),
+        }
+        if error_message:
+            patch_kwargs["error_message"] = error_message
+        BaseJobTask._patch_task(task_id, task_status, **patch_kwargs)
 
     logger.info(
         "[TTS] combined | job=%s | segments=%d | failed=%d | merged=%s",

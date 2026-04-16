@@ -129,6 +129,55 @@ class TestTtsCombineResults:
         last_call_status = patched_job_calls[-1][0][1]
         assert last_call_status == JobStatus.FAILED
 
+    def test_combine_marks_failed_when_merge_errors(self):
+        """tts_combine_results marks job/task FAILED when merge step raises."""
+        from app.jobs.models import JobStatus
+        from app.jobs.tasks.pipeline import tts_combine_results
+        from app.tasks.models import TaskStatus
+
+        results = [
+            {"segment_id": 0, "start": 0.0, "end": 1.0, "tts_key": "tts/key.wav", "audio_url": None},
+        ]
+
+        patched_job_calls = []
+        patched_task_calls = []
+
+        def capture_job_patch(*args, **kwargs):
+            patched_job_calls.append((args, kwargs))
+
+        def capture_task_patch(*args, **kwargs):
+            patched_task_calls.append((args, kwargs))
+
+        mock_session = MagicMock()
+        mock_session.__enter__ = MagicMock(return_value=mock_session)
+        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_session.get = MagicMock(return_value=None)
+
+        with patch("app.jobs.tasks.pipeline.BaseJobTask._patch_job", side_effect=capture_job_patch), \
+             patch("app.jobs.tasks.pipeline.BaseJobTask._patch_task", side_effect=capture_task_patch), \
+             patch("app.jobs.tasks.pipeline.BaseJobTask._make_db") as mock_make_db, \
+             patch("app.dubbing.service.DubbingMergeService.merge_segments", new=AsyncMock(side_effect=PermissionError("Permission denied: 'uploads'"))), \
+             patch("asyncio.new_event_loop"):
+            mock_make_db.return_value = (MagicMock(), MagicMock(return_value=mock_session))
+
+            tts_combine_results.run(
+                results,
+                job_id="job-tts-merge-fail",
+                task_id="task-merge-fail",
+                video_id="vid-merge-fail",
+                ref_clip_minio_key=None,
+                metadata={},
+                output_type="fullDubbing",
+            )
+
+        assert patched_job_calls
+        assert patched_job_calls[-1][0][1] == JobStatus.FAILED
+        assert "Permission denied" in (patched_job_calls[-1][1].get("error_message") or "")
+
+        assert patched_task_calls
+        assert patched_task_calls[-1][0][1] == TaskStatus.FAILED
+        assert "Permission denied" in (patched_task_calls[-1][1].get("error_message") or "")
+
 
 class TestProcessingModeHelpers:
     def test_apply_processing_mode_returns_single_chunk(self):

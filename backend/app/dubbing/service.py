@@ -5,6 +5,7 @@ from app.config import settings
 import asyncio
 import logging
 import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
