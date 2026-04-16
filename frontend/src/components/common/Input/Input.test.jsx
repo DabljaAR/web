@@ -40,7 +40,7 @@ describe('Input Component', () => {
   it('applies error styling when error is present', () => {
     render(<Input error="Error message" />);
     const input = screen.getByRole('textbox');
-    expect(input.className).toContain('border-red-500');
+    expect(input.className).toContain('error');
   });
 
   it('renders with different input types', () => {

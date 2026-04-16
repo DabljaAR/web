@@ -13,7 +13,6 @@
     "test:coverage": "vitest --coverage",
     "coverage:percentage": "node scripts/get-coverage.js",
     "coverage:summary": "vitest run --coverage --coverage.reporter=text-summary"
-
   },
   "dependencies": {
     "prop-types": "^15.8.1",

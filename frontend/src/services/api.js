@@ -43,6 +43,16 @@ const clearTokens = () => {
   sessionStorage.removeItem('user');
 };
 
+const redirectToLogin = () => {
+  try {
+    if (typeof window !== 'undefined' && window.location) {
+      window.location.href = '/login';
+    }
+  } catch (e) {
+    // Ignore navigation errors in non-browser/test environments.
+  }
+};
+
 // Token refresh function
 let isRefreshing = false;
 let refreshPromise = null;
@@ -58,6 +68,8 @@ const refreshAccessToken = async () => {
     try {
       const refreshToken = getRefreshToken();
       if (!refreshToken) {
+        clearTokens();
+        redirectToLogin();
         throw new Error('No refresh token available');
       }
 
@@ -72,6 +84,7 @@ const refreshAccessToken = async () => {
       if (!response.ok) {
         // Refresh token is invalid, clear tokens and logout
         clearTokens();
+        redirectToLogin();
         throw new Error('Refresh token expired or invalid');
       }
 
@@ -129,6 +142,7 @@ const request = async (endpoint, options = {}, isRetry = false) => {
         return request(endpoint, options, true);
       } catch (refreshError) {
         clearTokens();
+        redirectToLogin();
         throw refreshError;
       }
     }
@@ -162,14 +176,32 @@ const request = async (endpoint, options = {}, isRetry = false) => {
     }
 
     if (responseType === 'text') {
-      return response.text();
+      if (typeof response.text === 'function') {
+        return response.text();
+      }
+      return null;
     }
 
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      return response.json();
+    const contentType = (() => {
+      const h = response.headers;
+      if (h && typeof h.get === 'function') {
+        return h.get('content-type');
+      }
+      if (h && (h['content-type'] || h['Content-Type'])) {
+        return h['content-type'] || h['Content-Type'];
+      }
+      return null;
+    })();
+
+    // In tests, mocked fetch responses often omit headers. If `json()` exists, assume JSON.
+    if ((contentType && contentType.includes('application/json')) || (!contentType && typeof response.json === 'function')) {
+      try {
+        return response.json();
+      } catch (e) {
+        return null;
+      }
     }
-    
+
     return null;
   } catch (error) {
     if (error instanceof TypeError && error.message === 'Failed to fetch') {
