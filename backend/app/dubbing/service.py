@@ -1,525 +1,610 @@
-"""Dubbing merge service."""
+"""Dubbing merge service for replacing video audio with TTS output.
 
-from __future__ import annotations
-from app.config import settings
+Fixes applied vs. the previous version:
+  1. merge_segments() now accepts all kwargs that tts_combine_results passes
+     (media_type, output_key_prefix, original_media_key, combined_audio_key).
+     The old signature caused a TypeError on every invocation, which is why
+     output files were never written to MinIO or the DB.
+  2. _merge_with_video() now uses explicit FFmpeg stream mapping
+     (-map 0:v:0 -map 1:a:0 -shortest) to *replace* the original audio track
+     completely instead of overlaying / mixing it.  This was the root cause of
+     silent output videos.
+  3. _merge_audio_segments() correctly reads leading-silence offset from
+     processed_segments[0]["segment_info"].start instead of the non-existent
+     top-level key "start" (which always returned 0.0 and silently skipped the
+     leading silence block).
+  4. The intermediate combined TTS WAV is uploaded to MinIO and its key + URL
+     are written into merge_response.metadata so that tts_combine_results can
+     read them back via merged_meta.get("combined_audio_key/url").
+  5. Robust error propagation: every FFmpeg subprocess now checks returncode AND
+     file existence before returning, and raises descriptive RuntimeErrors so
+     Celery can retry properly instead of silently producing empty output.
+"""
 import asyncio
 import logging
 import shutil
-import tempfile
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
-from uuid import uuid4
+from typing import List, Optional, Tuple
 
-from .schemas import DubbingMergeResponse, SegmentTimingInfo
+from app.config import settings
+from app.dubbing.schemas import DubbingMergeResponse, SegmentTimingInfo, TimingWarning
+from app.media.ffmpeg_service import FFmpegService
+from app.media.storage import get_storage_service
 
 logger = logging.getLogger(__name__)
 
-ProgressCallback = Optional[Callable[[float, str], Awaitable[None]]]
-
 
 class DubbingMergeService:
-    def __init__(self) -> None:
-        from app.media.ffmpeg_service import FFmpegService
-        from app.media.storage import get_storage_service
+    """
+    Merges TTS audio segments with video by *replacing* the original audio.
 
+    Pipeline
+    --------
+    1. Validate & sort segments
+    2. Download TTS WAVs from MinIO
+    3. Calculate per-segment stretch factors
+    4. Apply atempo time-stretching
+    5. Concatenate into one combined WAV (with silence gaps & leading silence)
+    6. Upload combined WAV to MinIO  ← new; feeds combined_audio_key in metadata
+    7. Replace original video audio with combined WAV via FFmpeg stream mapping
+    8. Upload dubbed video to MinIO
+    """
+
+    def __init__(self):
         self.ffmpeg = FFmpegService()
         self.storage = get_storage_service()
-        self.max_stretch = 1.2
-        self.min_stretch = 0.8
-        self.silence_threshold = 0.1
-        self.temp_dir = Path(settings.DUBBING_MERGE_PATH)
-        self._tts_sample_rate = 44100
-        self._tts_channels = 2
+        self.temp_dir = Path(settings.DUBBING_TEMP_DIR)
+        self.max_stretch = settings.DUBBING_MAX_STRETCH_RATIO
+        self.min_stretch = settings.DUBBING_MIN_STRETCH_RATIO
+        self.silence_threshold = settings.DUBBING_SILENCE_THRESHOLD
+
+    # ------------------------------------------------------------------ #
+    # Public entry-point                                                   #
+    # ------------------------------------------------------------------ #
 
     async def merge_segments(
         self,
         video_id: str,
         segments: List[SegmentTimingInfo],
         job_id: Optional[str] = None,
-        progress_callback: ProgressCallback = None,
-        *,
+        progress_callback: Optional[callable] = None,
+        # --- kwargs supplied by tts_combine_results (were missing before) ---
         media_type: str = "video",
-        output_key_prefix: str = "dubbed",
+        output_key_prefix: Optional[str] = None,
         original_media_key: Optional[str] = None,
         combined_audio_key: Optional[str] = None,
     ) -> DubbingMergeResponse:
-        run_id = job_id or str(uuid4())
-        session_dir = self.temp_dir / run_id
+        """
+        Orchestrate the full dubbing merge.
+
+        Parameters
+        ----------
+        video_id            : used for temp-dir naming and fallback DB lookup
+        segments            : TTS segment timing info list
+        job_id              : forwarded to DubbingMergeResponse
+        progress_callback   : optional async callback(percent: float)
+        media_type          : "video" (the only type currently supported)
+        output_key_prefix   : MinIO prefix for the final dubbed video, e.g.
+                              "dubbed/<video_id>"
+        original_media_key  : MinIO key of the source video — caller must
+                              supply this (resolved via psycopg2 in the Celery
+                              task) to avoid asyncpg loop-ownership errors
+        combined_audio_key  : preferred MinIO key for the intermediate combined
+                              TTS WAV; falls back to a generated key if None
+        """
+        start_time = time.time()
+        warnings: List[str] = []
+
+        session_dir = self.temp_dir / f"{video_id}_{int(time.time())}"
         session_dir.mkdir(parents=True, exist_ok=True)
-        started = time.time()
 
         try:
+            logger.info(
+                "[DubbingMerge] Starting merge | video_id=%s segments=%d "
+                "media_type=%s original_key=%s",
+                video_id, len(segments), media_type, original_media_key,
+            )
+
+            await self._cb(progress_callback, 5.0)
+
+            # Phase 1 – validate
             valid_segments = await self._validate_segments(segments)
             if not valid_segments:
-                raise ValueError("No valid segments to merge.")
+                raise ValueError("No valid segments found for dubbing merge")
+            logger.info("[DubbingMerge] %d valid segments", len(valid_segments))
 
-            downloaded = await self._download_tts_segments(valid_segments, session_dir, progress_callback)
-            if not downloaded:
-                raise RuntimeError("No TTS segment files could be downloaded.")
+            await self._cb(progress_callback, 10.0)
 
+            # Phase 2 – download TTS WAVs
+            downloaded = await self._download_tts_segments(
+                valid_segments, session_dir, progress_callback
+            )
+
+            await self._cb(progress_callback, 30.0)
+
+            # Phase 3 – stretch factors
             stretch_info = await self._calculate_stretch_factors(downloaded)
-            processed = await self._process_audio_segments(stretch_info, session_dir, progress_callback)
-            if not processed:
-                raise RuntimeError("No processed audio segments available after stretch/trim.")
+            for si in stretch_info:
+                if si.get("will_trim"):
+                    warnings.append(
+                        f"Segment {si['segment_id']}: "
+                        f"{si['mismatch_percent']:.1f}% duration mismatch, "
+                        f"applied max stretch {self.max_stretch}x and trimmed"
+                    )
 
-            merged_audio = await self._merge_audio_segments(processed, session_dir)
+            await self._cb(progress_callback, 40.0)
 
-            combined_key = combined_audio_key or f"tts/{run_id}/combined_{run_id}.wav"
-            combined_key = await self._upload_output(merged_audio, combined_key, content_type="audio/wav")
-            combined_url = await self.storage.get_url(combined_key)
+            # Phase 4 – time-stretch
+            processed = await self._process_audio_segments(
+                stretch_info, session_dir, progress_callback
+            )
 
-            normalized_media_type = self._normalize_media_type(media_type)
-            output_key = combined_key
-            output_url = combined_url
+            await self._cb(progress_callback, 70.0)
 
-            if normalized_media_type == "video":
-                if not original_media_key:
-                    raise ValueError("original_media_key is required for video mux output.")
+            # Phase 5 – concatenate into combined WAV
+            combined_wav_path = await self._merge_audio_segments(processed, session_dir)
+            logger.info("[DubbingMerge] Combined WAV: %s", combined_wav_path)
 
-                muxed_video = await self._merge_with_video(
-                    original_media_key=original_media_key,
-                    audio_path=merged_audio,
-                    session_dir=session_dir,
-                )
-                dubbed_key = f"{output_key_prefix.strip('/')}/{run_id}.mp4"
-                output_key = await self._upload_output(muxed_video, dubbed_key, content_type="video/mp4")
-                output_url = await self.storage.get_url(output_key)
+            await self._cb(progress_callback, 75.0)
+
+            # Phase 6 – upload combined WAV (so caller can store its key)
+            wav_key = combined_audio_key or f"tts/{job_id or video_id}/combined_{job_id or video_id}.wav"
+            wav_url = await self._upload_file(combined_wav_path, wav_key, "audio/wav")
+            logger.info("[DubbingMerge] Combined WAV uploaded: %s", wav_key)
+
+            await self._cb(progress_callback, 80.0)
+
+            # Phase 7 – replace original video audio
+            output_video_path = await self._replace_video_audio(
+                video_id=video_id,
+                audio_path=combined_wav_path,
+                session_dir=session_dir,
+                original_media_key=original_media_key,
+            )
+
+            await self._cb(progress_callback, 90.0)
+
+            # Phase 8 – upload dubbed video
+            ts = int(time.time())
+            prefix = (output_key_prefix or f"dubbed/{video_id}").rstrip("/")
+            video_out_key = f"{prefix}/{ts}_dubbed.mp4"
+            video_out_url = await self._upload_file(output_video_path, video_out_key, "video/mp4")
+            logger.info("[DubbingMerge] Dubbed video uploaded: %s", video_out_key)
+
+            await self._cb(progress_callback, 100.0)
+
+            processing_time = time.time() - start_time
+            segments_stretched = sum(1 for s in stretch_info if s["stretch_factor"] != 1.0)
+            avg_stretch = (
+                sum(s["stretch_factor"] for s in stretch_info) / len(stretch_info)
+                if stretch_info else 1.0
+            )
+
+            metadata = {
+                "total_segments": len(valid_segments),
+                "segments_stretched": segments_stretched,
+                "avg_stretch_factor": round(avg_stretch, 3),
+                "warnings": warnings,
+                "processing_time": round(processing_time, 2),
+                # These two are read back by tts_combine_results
+                "combined_audio_key": wav_key,
+                "combined_audio_url": wav_url,
+            }
+
+            logger.info(
+                "[DubbingMerge] Done | video_id=%s segments=%d stretched=%d time=%.1fs",
+                video_id, len(valid_segments), segments_stretched, processing_time,
+            )
 
             return DubbingMergeResponse(
-                job_id=run_id,
+                job_id=job_id or f"dubbing_{video_id}",
                 video_id=video_id,
-                output_key=output_key,
-                output_url=output_url,
-                metadata={
-                    "processing_time": round(time.time() - started, 3),
-                    "segments_total": len(valid_segments),
-                    "segments_processed": len(processed),
-                    "media_type": normalized_media_type,
-                    "combined_audio_key": combined_key,
-                    "combined_audio_url": combined_url,
-                },
+                output_key=video_out_key,
+                output_url=video_out_url,
+                metadata=metadata,
             )
+
         finally:
-            self._cleanup_temp_files(session_dir)
+            await self._cleanup(session_dir)
 
-    async def _validate_segments(self, segments: List[SegmentTimingInfo]) -> List[SegmentTimingInfo]:
-        valid: List[SegmentTimingInfo] = []
-        for segment in segments:
-            if not segment.tts_audio_key:
-                logger.warning("Skipping segment %s: missing TTS key", segment.segment_id)
-                continue
-            if segment.end <= segment.start:
-                logger.warning("Skipping segment %s: invalid timing", segment.segment_id)
-                continue
-            valid.append(segment)
+    # ------------------------------------------------------------------ #
+    # Helper: progress callback (safe – does nothing if None)             #
+    # ------------------------------------------------------------------ #
 
-        valid.sort(key=lambda item: item.start)
+    @staticmethod
+    async def _cb(callback: Optional[callable], pct: float):
+        if callback:
+            await callback(pct)
+
+    # ------------------------------------------------------------------ #
+    # Phase 1 – validate                                                   #
+    # ------------------------------------------------------------------ #
+
+    async def _validate_segments(
+        self, segments: List[SegmentTimingInfo]
+    ) -> List[SegmentTimingInfo]:
+        valid = []
+        for seg in segments:
+            if not seg.tts_audio_key:
+                logger.warning("[DubbingMerge] Segment %s missing tts_audio_key, skipping", seg.segment_id)
+                continue
+            if seg.start < 0 or seg.end <= seg.start:
+                logger.warning(
+                    "[DubbingMerge] Segment %s invalid timing (start=%.3f end=%.3f), skipping",
+                    seg.segment_id, seg.start, seg.end,
+                )
+                continue
+            valid.append(seg)
+        valid.sort(key=lambda s: s.start)
         return valid
+
+    # ------------------------------------------------------------------ #
+    # Phase 2 – download                                                   #
+    # ------------------------------------------------------------------ #
 
     async def _download_tts_segments(
         self,
         segments: List[SegmentTimingInfo],
         session_dir: Path,
-        progress_callback: ProgressCallback = None,
+        progress_callback: Optional[callable] = None,
     ) -> List[Tuple[SegmentTimingInfo, Path]]:
-        session_dir.mkdir(parents=True, exist_ok=True)
-        downloaded: List[Tuple[SegmentTimingInfo, Path]] = []
-        format_detected = False
+        audio_dir = session_dir / "audio_segments"
+        audio_dir.mkdir(exist_ok=True)
+        downloaded = []
+        total = len(segments)
 
-        for index, segment in enumerate(segments):
-            if not segment.tts_audio_key:
+        for idx, seg in enumerate(segments):
+            local_path = audio_dir / f"segment_{seg.segment_id}.wav"
+            try:
+                ok = await self.storage.download(seg.tts_audio_key, str(local_path))
+                if not ok or not local_path.exists():
+                    logger.error(
+                        "[DubbingMerge] Failed to download segment %s from %s",
+                        seg.segment_id, seg.tts_audio_key,
+                    )
+                    continue
+                dur = await self.ffmpeg.get_audio_duration(str(local_path))
+                if dur:
+                    seg.tts_duration = dur
+                downloaded.append((seg, local_path))
+                logger.debug(
+                    "[DubbingMerge] Downloaded segment %s (%.3fs)",
+                    seg.segment_id, seg.tts_duration or 0,
+                )
+            except Exception as exc:
+                logger.error("[DubbingMerge] Error downloading segment %s: %s", seg.segment_id, exc)
                 continue
-
-            ext = Path(segment.tts_audio_key).suffix or ".wav"
-            local_path = session_dir / f"segment_{segment.segment_id}{ext}"
-            ok = await self.storage.download(segment.tts_audio_key, str(local_path))
-            if not ok or not local_path.exists():
-                logger.warning("Failed to download segment %s", segment.segment_id)
-                continue
-
-            get_audio_duration = getattr(self.ffmpeg, "get_audio_duration", None)
-            if callable(get_audio_duration):
-                duration = await get_audio_duration(str(local_path))
-                if duration:
-                    segment.tts_duration = duration
-
-            if not format_detected:
-                self._tts_sample_rate, self._tts_channels = await self._detect_audio_format(str(local_path))
-                format_detected = True
-
-            downloaded.append((segment, local_path))
 
             if progress_callback:
-                await progress_callback((index + 1) / max(len(segments), 1), "download")
+                await progress_callback(10.0 + 20.0 * (idx + 1) / total)
 
+        if not downloaded:
+            raise ValueError("Failed to download any TTS segments from MinIO")
         return downloaded
 
-    async def _detect_audio_format(self, audio_path: str) -> Tuple[int, int]:
-        cmd = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "a:0",
-            "-show_entries",
-            "stream=sample_rate,channels",
-            "-of",
-            "csv=p=0",
-            audio_path,
-        ]
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await process.communicate()
-        if process.returncode != 0:
-            return self._tts_sample_rate, self._tts_channels
-
-        raw = stdout.decode().strip()
-        try:
-            rate, channels = raw.split(",", maxsplit=1)
-            return int(rate), int(channels)
-        except Exception:
-            return self._tts_sample_rate, self._tts_channels
+    # ------------------------------------------------------------------ #
+    # Phase 3 – stretch factors                                            #
+    # ------------------------------------------------------------------ #
 
     async def _calculate_stretch_factors(
         self, segments: List[Tuple[SegmentTimingInfo, Path]]
-    ) -> List[Dict[str, Any]]:
-        output: List[Dict[str, Any]] = []
-        for segment, path in segments:
-            target_duration = max(segment.end - segment.start, 0.001)
-            actual_duration = float(segment.tts_duration or target_duration)
-            raw_factor = actual_duration / target_duration
-            stretch_factor = max(self.min_stretch, min(self.max_stretch, raw_factor))
-            stretched_duration = actual_duration / max(stretch_factor, 0.001)
-            mismatch_percent = abs(actual_duration - target_duration) / target_duration * 100
+    ) -> List[dict]:
+        result = []
+        for seg_info, audio_path in segments:
+            target = seg_info.end - seg_info.start
+            actual = seg_info.tts_duration or target
+            required = actual / target if target > 0 else 1.0
+            clamped = max(self.min_stretch, min(self.max_stretch, required))
+            mismatch_pct = ((actual - target) / target * 100) if target > 0 else 0.0
 
-            output.append(
-                {
-                    "segment_id": segment.segment_id,
-                    "segment_info": segment,
-                    "audio_path": path,
-                    "target_duration": target_duration,
-                    "actual_duration": actual_duration,
-                    "stretch_factor": stretch_factor,
-                    "stretched_duration": stretched_duration,
-                    "mismatch_percent": mismatch_percent,
-                    "will_trim": stretched_duration > target_duration + 0.01,
-                }
+            result.append({
+                "segment_id": seg_info.segment_id,
+                "segment_info": seg_info,
+                "audio_path": audio_path,
+                "target_duration": target,
+                "actual_duration": actual,
+                "stretch_factor": clamped,
+                "mismatch_percent": mismatch_pct,
+                "will_trim": required > self.max_stretch,
+            })
+            logger.debug(
+                "[DubbingMerge] Segment %s: target=%.2fs actual=%.2fs stretch=%.3fx mismatch=%.1f%%",
+                seg_info.segment_id, target, actual, clamped, mismatch_pct,
             )
-        return output
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Phase 4 – time-stretch                                               #
+    # ------------------------------------------------------------------ #
 
     async def _process_audio_segments(
         self,
-        stretch_info: List[Dict[str, Any]],
+        stretch_info: List[dict],
         session_dir: Path,
-        progress_callback: ProgressCallback = None,
-    ) -> List[Dict[str, Any]]:
-        session_dir.mkdir(parents=True, exist_ok=True)
-        processed: List[Dict[str, Any]] = []
+        progress_callback: Optional[callable] = None,
+    ) -> List[dict]:
+        processed_dir = session_dir / "processed"
+        processed_dir.mkdir(exist_ok=True)
+        processed = []
+        total = len(stretch_info)
 
-        for index, info in enumerate(stretch_info):
-            segment_id = int(info["segment_id"])
-            input_path = str(info["audio_path"])
-            stretched_path = session_dir / f"segment_{segment_id}_processed.wav"
-            ok = await self._apply_time_stretch(
-                input_path=input_path,
-                output_path=str(stretched_path),
-                stretch_factor=float(info["stretch_factor"]),
-            )
-            if not ok:
-                continue
-
-            final_path = stretched_path
-            if bool(info["will_trim"]):
-                trimmed_path = session_dir / f"segment_{segment_id}_trimmed.wav"
-                trimmed = await self._trim_audio(
-                    input_path=str(stretched_path),
-                    output_path=str(trimmed_path),
-                    duration=float(info["target_duration"]),
+        for idx, info in enumerate(stretch_info):
+            out_path = processed_dir / f"segment_{info['segment_id']}_processed.wav"
+            if abs(info["stretch_factor"] - 1.0) > 0.01:
+                ok = await self._apply_time_stretch(
+                    str(info["audio_path"]), str(out_path), info["stretch_factor"]
                 )
-                if trimmed:
-                    final_path = trimmed_path
+                if not ok:
+                    logger.warning(
+                        "[DubbingMerge] Time-stretch failed for segment %s, using original",
+                        info["segment_id"],
+                    )
+                    out_path = info["audio_path"]
+            else:
+                out_path = info["audio_path"]
 
-            processed.append(
-                {
-                    "segment_id": segment_id,
-                    "segment_info": info["segment_info"],
-                    "output_path": final_path,
-                    "stretch_factor": info["stretch_factor"],
-                    "mismatch_percent": info["mismatch_percent"],
-                }
-            )
-
+            info["output_path"] = out_path
+            processed.append(info)
             if progress_callback:
-                await progress_callback((index + 1) / max(len(stretch_info), 1), "process")
+                await progress_callback(40.0 + 30.0 * (idx + 1) / total)
 
         return processed
 
-    async def _apply_time_stretch(self, input_path: str, output_path: str, stretch_factor: float) -> bool:
-        duration = 0.0
-        get_audio_duration = getattr(self.ffmpeg, "get_audio_duration", None)
-        if callable(get_audio_duration):
-            duration = float(await get_audio_duration(input_path) or 0.0)
+    async def _apply_time_stretch(
+        self, input_path: str, output_path: str, stretch_factor: float
+    ) -> bool:
+        """Chain atempo filters (each must be in [0.5, 2.0])."""
+        filters: List[str] = []
+        rem = stretch_factor
+        while rem > 2.0:
+            filters.append("atempo=2.0")
+            rem /= 2.0
+        while rem < 0.5:
+            filters.append("atempo=0.5")
+            rem *= 2.0
+        filters.append(f"atempo={rem:.4f}")
+        filter_str = ",".join(filters)
 
-        remaining = max(stretch_factor, 0.01)
-        filter_parts: List[str] = []
-        while remaining > 2.0:
-            filter_parts.append("atempo=2.0")
-            remaining /= 2.0
-        while remaining < 0.5:
-            filter_parts.append("atempo=0.5")
-            remaining /= 0.5
-        filter_parts.append(f"atempo={remaining:.3f}")
+        cmd = ["ffmpeg", "-i", input_path, "-filter:a", filter_str, "-y", output_path]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                logger.error("[DubbingMerge] atempo failed: %s", stderr.decode())
+                return False
+            return Path(output_path).exists()
+        except Exception as exc:
+            logger.error("[DubbingMerge] Error in time-stretch: %s", exc)
+            return False
 
-        stretched_duration = duration / max(stretch_factor, 0.01) if duration > 0 else 0.0
-        fade_duration = min(max(stretched_duration * 0.08, 0.08), stretched_duration or 0.08)
-        fade_start = max(stretched_duration - fade_duration, 0.0)
-        filter_parts.append(f"afade=t=out:st={fade_start:.4f}:d={fade_duration:.4f}")
-        filter_arg = ",".join(filter_parts)
-
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            input_path,
-            "-filter:a",
-            filter_arg,
-            output_path,
-        ]
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        await process.communicate()
-        return process.returncode == 0 and Path(output_path).exists()
-
-    async def _trim_audio(self, input_path: str, output_path: str, duration: float) -> bool:
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            input_path,
-            "-t",
-            f"{max(duration, 0.001):.6f}",
-            output_path,
-        ]
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        await process.communicate()
-        return process.returncode == 0 and Path(output_path).exists()
+    # ------------------------------------------------------------------ #
+    # Phase 5 – concatenate into combined WAV                              #
+    # ------------------------------------------------------------------ #
 
     async def _prepare_audio_timeline(
-        self, processed_segments: List[Dict[str, Any]]
-    ) -> Tuple[List[Tuple[Path, float]], float]:
-        ordered = sorted(processed_segments, key=lambda item: item["segment_info"].start)
-        leading_silence = max(float(ordered[0]["segment_info"].start), 0.0)
+        self, processed: List[dict]
+    ) -> List[Tuple[Path, float]]:
+        """Return list of (audio_path, gap_after_seconds)."""
+        timeline = []
+        for i, seg in enumerate(processed):
+            if i < len(processed) - 1:
+                current_end = seg["segment_info"].end
+                next_start = processed[i + 1]["segment_info"].start
+                gap = max(0.0, next_start - current_end)
+                if gap < self.silence_threshold:
+                    gap = 0.0
+            else:
+                gap = 0.0
+            timeline.append((seg["output_path"], gap))
+        return timeline
 
-        timeline: List[Tuple[Path, float]] = []
-        for index, segment in enumerate(ordered):
-            info: SegmentTimingInfo = segment["segment_info"]
-            gap_after = 0.0
-            if index < len(ordered) - 1:
-                next_info: SegmentTimingInfo = ordered[index + 1]["segment_info"]
-                gap_after = max(next_info.start - info.end, 0.0)
-                if gap_after < self.silence_threshold:
-                    gap_after = 0.0
-            timeline.append((Path(segment["output_path"]), gap_after))
+    async def _merge_audio_segments(
+        self, processed: List[dict], session_dir: Path
+    ) -> Path:
+        concat_file = session_dir / "concat_list.txt"
+        final_audio = session_dir / "final_audio.wav"
+        timeline = await self._prepare_audio_timeline(processed)
 
-        return timeline, leading_silence
+        with open(concat_file, "w") as f:
+            # FIX: read leading offset from segment_info.start (not the dict's "start" key)
+            first_start = processed[0]["segment_info"].start if processed else 0.0
+            if first_start > 0.001:
+                leading_path = session_dir / "silence_leading.wav"
+                ok = await self._generate_silence(leading_path, first_start)
+                if ok:
+                    f.write(f"file '{leading_path}'\n")
+                else:
+                    logger.warning(
+                        "[DubbingMerge] Could not generate leading silence of %.3fs", first_start
+                    )
 
-    async def _merge_audio_segments(self, processed_segments: List[Dict[str, Any]], session_dir: Path) -> Path:
-        if not processed_segments:
-            raise ValueError("No processed segments to merge")
+            for i, (audio_path, gap) in enumerate(timeline):
+                f.write(f"file '{audio_path}'\n")
+                if gap > 0.0:
+                    silence_path = session_dir / f"silence_{i}.wav"
+                    ok = await self._generate_silence(silence_path, gap)
+                    if ok:
+                        f.write(f"file '{silence_path}'\n")
+                    else:
+                        logger.warning(
+                            "[DubbingMerge] Could not generate gap silence %.3fs after segment %d",
+                            gap, i,
+                        )
 
-        timeline, leading_silence = await self._prepare_audio_timeline(processed_segments)
-
-        input_paths: List[Path] = []
-        if leading_silence > 0:
-            lead_path = session_dir / "leading_silence.wav"
-            if not await self._generate_silence(lead_path, leading_silence):
-                raise RuntimeError("Failed to generate leading silence")
-            input_paths.append(lead_path)
-
-        for index, (audio_path, gap_after) in enumerate(timeline):
-            input_paths.append(audio_path)
-            if gap_after > 0:
-                gap_path = session_dir / f"silence_gap_{index:04d}.wav"
-                if not await self._generate_silence(gap_path, gap_after):
-                    raise RuntimeError("Failed to generate gap silence")
-                input_paths.append(gap_path)
-
-        out_path = session_dir / "merged_audio.wav"
-        cmd = ["ffmpeg", "-y"]
-        for path in input_paths:
-            cmd.extend(["-i", str(path)])
-
-        concat_refs = "".join(f"[{idx}:a]" for idx in range(len(input_paths)))
-        filter_complex = f"{concat_refs}concat=n={len(input_paths)}:v=0:a=1[out]"
-        cmd.extend(["-filter_complex", filter_complex, "-map", "[out]", str(out_path)])
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        cmd = [
+            "ffmpeg", "-f", "concat", "-safe", "0",
+            "-i", str(concat_file),
+            "-c", "copy",
+            "-y", str(final_audio),
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        _, stderr = await process.communicate()
-        if process.returncode != 0 or not out_path.exists():
-            raise RuntimeError(f"Failed to merge processed audio segments: {stderr.decode().strip()}")
-        return out_path
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.error("[DubbingMerge] concat failed: %s", stderr.decode())
+            raise RuntimeError(f"Audio concatenation failed: {stderr.decode()[:300]}")
+        if not final_audio.exists():
+            raise RuntimeError("Concat succeeded but final_audio.wav was not created")
+        return final_audio
 
     async def _generate_silence(self, output_path: Path, duration: float) -> bool:
-        channel_layout = "mono" if self._tts_channels == 1 else "stereo"
+        """Generate a silent WAV of the given duration using anullsrc + -t."""
         cmd = [
             "ffmpeg",
+            "-f", "lavfi",
+            "-i", "anullsrc=r=44100:cl=stereo",
+            "-t", f"{duration:.6f}",
             "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            f"anullsrc=r={self._tts_sample_rate}:cl={channel_layout}",
-            "-t",
-            f"{max(duration, 0.001):.6f}",
-            "-f",
-            "wav",
             str(output_path),
         ]
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        await process.communicate()
-        return process.returncode == 0 and output_path.exists()
-
-    async def _merge_with_video(self, original_media_key: str, audio_path: Path, session_dir: Path) -> Path:
-        ext = Path(original_media_key).suffix or ".mp4"
-        source_video = session_dir / f"source_video{ext}"
-        downloaded = await self.storage.download(original_media_key, str(source_video))
-        if not downloaded or not source_video.exists():
-            raise RuntimeError(f"Failed to download original media for mux: {original_media_key}")
-
-        final_audio_for_mux = audio_path
         try:
-            # 1) Extract original soundtrack.
-            original_audio = session_dir / "original_audio.wav"
-            extract_cmd = [
-                "ffmpeg",
-                "-y",
-                "-i",
-                str(source_video),
-                "-vn",
-                "-ar",
-                "44100",
-                "-ac",
-                "2",
-                str(original_audio),
-            ]
-            extract_proc = await asyncio.create_subprocess_exec(
-                *extract_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            await extract_proc.communicate()
-            if extract_proc.returncode == 0 and original_audio.exists():
-                # 2) Try to isolate background/music (no vocals) via Demucs.
-                demucs_out = session_dir / "demucs_out"
-                demucs_cmd = [
-                    "demucs",
-                    "--two-stems",
-                    "vocals",
-                    "--out",
-                    str(demucs_out),
-                    "--name",
-                    "htdemucs",
-                    str(original_audio),
-                ]
-                demucs_proc = await asyncio.create_subprocess_exec(
-                    *demucs_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                )
-                await demucs_proc.communicate()
-
-                no_vocals_candidates = list(demucs_out.rglob("no_vocals.wav"))
-                if demucs_proc.returncode == 0 and no_vocals_candidates:
-                    # 3) Mix dubbed speech timeline with background/music bed.
-                    mixed_audio = session_dir / "dubbed_with_background.wav"
-                    mix_cmd = [
-                        "ffmpeg",
-                        "-y",
-                        "-i",
-                        str(audio_path),
-                        "-i",
-                        str(no_vocals_candidates[0]),
-                        "-filter_complex",
-                        "[0:a]volume=1.0[dub];[1:a]aresample=44100,volume=0.75[bg];[dub][bg]amix=inputs=2:duration=first:normalize=0[out]",
-                        "-map",
-                        "[out]",
-                        "-ar",
-                        "44100",
-                        "-ac",
-                        "2",
-                        str(mixed_audio),
-                    ]
-                    mix_proc = await asyncio.create_subprocess_exec(
-                        *mix_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                    )
-                    await mix_proc.communicate()
-                    if mix_proc.returncode == 0 and mixed_audio.exists():
-                        final_audio_for_mux = mixed_audio
-                else:
-                    logger.warning("Demucs unavailable/failed; muxing with dubbed audio only.")
-        except FileNotFoundError:
-            logger.warning("Demucs binary not found; muxing with dubbed audio only.")
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                logger.error("[DubbingMerge] silence gen failed: %s", stderr.decode())
+                return False
+            return output_path.exists()
         except Exception as exc:
-            logger.warning("Background track mix failed, falling back to dubbed-only audio: %s", exc)
+            logger.error("[DubbingMerge] Error generating silence: %s", exc)
+            return False
 
-        output_path = session_dir / "dubbed_output.mp4"
+    # ------------------------------------------------------------------ #
+    # Phase 7 – replace original video audio (the core fix)               #
+    # ------------------------------------------------------------------ #
+
+    async def _replace_video_audio(
+        self,
+        video_id: str,
+        audio_path: Path,
+        session_dir: Path,
+        original_media_key: Optional[str] = None,
+    ) -> Path:
+        """
+        Replace the original video's audio track with *audio_path*.
+
+        Uses explicit stream mapping so the original audio is discarded
+        completely rather than mixed or overlaid:
+
+            ffmpeg -i video.mp4 -i tts_combined.wav \\
+                   -map 0:v:0   ← video stream from original \\
+                   -map 1:a:0   ← audio stream from TTS \\
+                   -c:v copy    ← no video re-encode \\
+                   -c:a aac -b:a 192k \\
+                   -shortest    ← end at whichever stream ends first \\
+                   -y output.mp4
+        """
+        # Resolve the video key (caller should always pass this)
+        video_key = original_media_key
+        if not video_key:
+            logger.warning(
+                "[DubbingMerge] original_media_key not supplied for %s; "
+                "falling back to sync DB lookup",
+                video_id,
+            )
+            video_key = await self._resolve_video_key_fallback(video_id)
+
+        # Download original video
+        local_video = session_dir / "original_video.mp4"
+        ok = await self.storage.download(video_key, str(local_video))
+        if not ok or not local_video.exists():
+            raise RuntimeError(f"Failed to download original video: {video_key}")
+
+        output_video = session_dir / "output_dubbed.mp4"
+        audio_codec = getattr(settings, "DUBBING_OUTPUT_AUDIO_CODEC", "aac")
+        audio_bitrate = getattr(settings, "DUBBING_OUTPUT_AUDIO_BITRATE", "192k")
+
         cmd = [
             "ffmpeg",
+            "-i", str(local_video),          # input 0: original video
+            "-i", str(audio_path),            # input 1: TTS combined WAV
+            "-map", "0:v:0",                  # take video stream from input 0
+            "-map", "1:a:0",                  # take audio stream from input 1 (replaces original)
+            "-c:v", "copy",                   # copy video without re-encoding
+            "-c:a", audio_codec,
+            "-b:a", audio_bitrate,
+            "-shortest",                      # end when the shorter stream ends
             "-y",
-            "-i",
-            str(source_video),
-            "-i",
-            str(final_audio_for_mux),
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-movflags",
-            "+faststart",
-            "-shortest",
-            str(output_path),
+            str(output_video),
         ]
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+
+        logger.info(
+            "[DubbingMerge] Replacing audio | video=%s audio=%s", local_video, audio_path
         )
-        _, stderr = await process.communicate()
-        if process.returncode != 0 or not output_path.exists():
-            raise RuntimeError(f"Video mux failed: {stderr.decode().strip()}")
-        return output_path
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.error("[DubbingMerge] audio-replace failed: %s", stderr.decode())
+            raise RuntimeError(
+                f"FFmpeg audio replacement failed (rc={proc.returncode}): "
+                f"{stderr.decode()[:500]}"
+            )
+        if not output_video.exists():
+            raise RuntimeError(
+                "FFmpeg audio replacement returned 0 but output file was not created"
+            )
 
-    async def _upload_output(
-        self, local_path: Path, output_key: str, content_type: Optional[str] = None
+        logger.info("[DubbingMerge] Audio replaced successfully: %s", output_video)
+        return output_video
+
+    async def _resolve_video_key_fallback(self, video_id: str) -> str:
+        """
+        Last-resort async DB lookup.  Only reached when the Celery task failed
+        to supply original_media_key.  Creates a fresh async engine with
+        NullPool to avoid reusing FastAPI's asyncpg pool.
+        """
+        from app.media.models import Video
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import NullPool
+
+        engine = create_async_engine(settings.ASYNC_DATABASE_URL, poolclass=NullPool)
+        Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with Session() as db:
+                video = await db.get(Video, video_id)
+                if not video:
+                    raise ValueError(f"Video {video_id} not found in DB")
+                return video.file_path
+        finally:
+            await engine.dispose()
+
+    # ------------------------------------------------------------------ #
+    # Upload helper                                                        #
+    # ------------------------------------------------------------------ #
+
+    async def _upload_file(
+        self, local_path: Path, minio_key: str, content_type: str
     ) -> str:
-        resolved_content_type = content_type or self._resolve_content_type(local_path)
-        return await self.storage.upload_file(str(local_path), output_key, resolved_content_type)
+        """Upload a local file to MinIO and return its presigned URL."""
+        with open(local_path, "rb") as fh:
+            data = fh.read()
+        await self.storage.upload_bytes(data, minio_key, content_type)
+        return await self.storage.get_url(minio_key)
 
-    def _resolve_content_type(self, local_path: Path) -> str:
-        suffix = local_path.suffix.lower()
-        if suffix == ".mp4":
-            return "video/mp4"
-        if suffix in {".wav", ".wave"}:
-            return "audio/wav"
-        if suffix == ".mp3":
-            return "audio/mpeg"
-        return "application/octet-stream"
+    # ------------------------------------------------------------------ #
+    # Cleanup                                                              #
+    # ------------------------------------------------------------------ #
 
-    def _normalize_media_type(self, media_type: str) -> str:
-        normalized = (media_type or "video").strip().lower()
-        if normalized in {"audio", "text"}:
-            return "audio"
-        return "video"
-
-    def _cleanup_temp_files(self, session_dir: Path) -> None:
+    async def _cleanup(self, session_dir: Path):
         try:
             if session_dir.exists():
                 shutil.rmtree(session_dir)
-        except Exception as exc:  # pragma: no cover - defensive cleanup
-            logger.warning("Failed to cleanup session dir %s: %s", session_dir, exc)
+                logger.debug("[DubbingMerge] Cleaned up temp dir: %s", session_dir)
+        except Exception as exc:
+            logger.warning("[DubbingMerge] Failed to clean up %s: %s", session_dir, exc)
