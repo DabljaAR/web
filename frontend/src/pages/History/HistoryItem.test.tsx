@@ -15,8 +15,6 @@ describe('HistoryItem', () => {
     const onDelete = vi.fn();
     const onViewTasks = vi.fn();
     const onRedub = vi.fn();
-    const onPreviewAudio = vi.fn();
-    const onDownloadAudio = vi.fn();
     const onPreviewTranscript = vi.fn();
     const onPreviewTranslation = vi.fn();
 
@@ -40,8 +38,6 @@ describe('HistoryItem', () => {
         onDelete={onDelete}
         onViewTasks={onViewTasks}
         onRedub={onRedub}
-        onPreviewAudio={onPreviewAudio}
-        onDownloadAudio={onDownloadAudio}
         onPreviewTranscript={onPreviewTranscript}
         onPreviewTranslation={onPreviewTranslation}
       />

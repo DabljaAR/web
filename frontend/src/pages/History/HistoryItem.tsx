@@ -9,8 +9,6 @@ interface HistoryItemProps {
   onDelete: (id: string) => void;
   onViewTasks: (id: string, name: string) => void;
   onRedub: (id: string, name: string) => void;
-  onPreviewAudio: (id: string) => void;
-  onDownloadAudio: (id: string) => void;
   onPreviewTranscript: (item: RecentJob) => void;
   onPreviewTranslation: (item: RecentJob) => void;
 }
