@@ -175,6 +175,8 @@ class Settings(BaseSettings):
     TTS_DEFAULT_NFE_STEP: int = int(os.getenv("TTS_DEFAULT_NFE_STEP", "64"))  # More diffusion steps = fewer robotic artifacts
     TTS_DEFAULT_SWAY_COEF: float = float(os.getenv("TTS_DEFAULT_SWAY_COEF", "-1.0"))  # Sway sampling coefficient
     TTS_DEFAULT_TARGET_RMS: float = float(os.getenv("TTS_DEFAULT_TARGET_RMS", "0.12"))  # Target RMS for audio normalization
+    TTS_ENABLE_NORMALIZER: bool = os.getenv("TTS_ENABLE_NORMALIZER", "True").lower() == "true"  # Enable text normalizer for better handling of numbers, dates, etc. in Arabic input text
+    TTS_FORCE_TASHKEEL: bool = os.getenv("TTS_FORCE_TASHKEEL", "False").lower() == "true"  # Force inclusion of Arabic diacritics (tashkeel) in input text for better pronunciation, at the cost of requiring properly formatted input
     
     # ========== NEURAL MACHINE TRANSLATION (NMT) ==========
     NMT_MODEL_LOCAL_PATH: str = os.getenv("NMT_MODEL_LOCAL_PATH", "/model-cache/nmt-v4")
@@ -184,7 +186,7 @@ class Settings(BaseSettings):
 
     # ========== HUGGINGFACE AUTHENTICATION ==========
     HF_TOKEN: str = os.getenv("HF_TOKEN", "")  # HuggingFace access token for model downloads
-    
+    HF_HOME: str = os.getenv("HF_HOME", os.path.expanduser("/model-cache/hf"))  # HuggingFace cache directory
     # ========== SERVER ==========
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))

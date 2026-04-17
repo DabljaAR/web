@@ -102,7 +102,11 @@ class SilmaTTSModelManager(Task):
 
             logger.info("Loading SILMA-TTS model...")
             try:
-                self._model = SilmaTTS()
+                self._model = SilmaTTS(
+                    hf_cache_dir=settings.HF_HOME,
+                    enable_normalizer=settings.TTS_ENABLE_NORMALIZER,
+                    force_tashkeel=settings.TTS_FORCE_TASHKEEL,
+                )
             except Exception as e:
                 runtime_paths = {
                     "HF_HOME": os.environ.get("HF_HOME", ""),
