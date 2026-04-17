@@ -113,6 +113,41 @@
     align-items: center;
 }
 
+/* Mobile-only: Install/Download app */
+.btn-install-app {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
+    color: white;
+    border: none;
+    border-radius: 50px;
+    font-weight: 800;
+    font-size: 0.875rem;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.25);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    white-space: nowrap;
+}
+
+.btn-install-app:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.35);
+}
+
+@media (max-width: 768px) {
+    .btn-install-app { display: inline-flex; }
+}
+
+@media (max-width: 544px) {
+    .btn-install-app {
+        padding: 7px 10px;
+        font-size: 0.75rem;
+        gap: 6px;
+    }
+}
+
 /* Theme Toggle */
 .theme-toggle {
     width: 40px;

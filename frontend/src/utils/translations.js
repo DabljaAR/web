@@ -15,7 +15,13 @@ export const translations = {
       login: "Login",
       tryNow: "Try Now",
       about: "About",
-      user: "User"
+      user: "User",
+      downloadApp: "Download app",
+      installApp: "Install app",
+      installHint: "Open your browser menu → Install app / Add to Home Screen",
+      installIosHint: "On iPhone: Share → Add to Home Screen",
+      installAccepted: "Installing…",
+      installDismissed: "Install canceled"
     },
     hero: {
       badge: "AI-Powered Dubbing Platform",
@@ -573,7 +579,13 @@ export const translations = {
       login: "تسجيل الدخول",
       tryNow: "جرب الآن",
       about: "عن المنصة",
-      user: "المستخدم"
+      user: "المستخدم",
+      downloadApp: "تنزيل التطبيق",
+      installApp: "تثبيت التطبيق",
+      installHint: "افتح قائمة المتصفح ← تثبيت التطبيق / إضافة إلى الشاشة الرئيسية",
+      installIosHint: "في الآيفون: مشاركة ← إضافة إلى الشاشة الرئيسية",
+      installAccepted: "جاري التثبيت…",
+      installDismissed: "تم إلغاء التثبيت"
     },
     hero: {
       badge: "منصة دبلجة مدعومة بالذكاء الاصطناعي",
