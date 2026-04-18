@@ -68,7 +68,7 @@ def _validate_model_dir(path: str) -> bool:
     return bool(files & _REQUIRED_WEIGHT_FILES) and bool(files & _REQUIRED_TOKENIZER_FILES)
 
 
-def resolve_default_model() -> str:
+def resolve_default_model() -> tuple[str, str]:
     """
     Resolve the NMT model path using a priority chain:
 
@@ -88,8 +88,8 @@ def resolve_default_model() -> str:
 
     # 1. Local cache hit — fastest path, no I/O beyond a directory listing
     if _validate_model_dir(local_path):
-        logger.info("[NMT] Using verified local cache: %s", local_path)
-        return local_path
+        logger.info("[NMT][CACHE] source=local_disk_hit path=%s", local_path)
+        return local_path, "local_disk_hit"
 
     # 2. Object storage download (S3-compatible: MinIO, GCP interop, AWS)
     if settings.STORAGE_BACKEND.lower() == "s3" and key:
@@ -102,8 +102,8 @@ def resolve_default_model() -> str:
             storage = get_storage_service()
             _download_model_files(storage, key, Path(local_path), bucket_name=bucket)
             if _validate_model_dir(local_path):
-                logger.info("[NMT] Object storage download complete — using %s", local_path)
-                return local_path
+                logger.info("[NMT][CACHE] source=s3_hit path=%s", local_path)
+                return local_path, "s3_hit"
             logger.warning(
                 "[NMT] Object storage download finished but model validation failed at %s "
                 "(missing weight or tokenizer files). Falling back to HF Hub.",
@@ -124,7 +124,8 @@ def resolve_default_model() -> str:
         "Configure S3_MODELS_BUCKET + NMT_MODEL_KEY to avoid this.",
         hf_fallback,
     )
-    return hf_fallback
+    logger.info("[NMT][CACHE] source=hf_fallback model=%s", hf_fallback)
+    return hf_fallback, "hf_fallback"
 
 
 # ===========================================================================
@@ -142,12 +143,13 @@ class NLLBTranslatorWrapper:
 
     def __init__(self, model_name: Optional[str] = None):
         self._model_name = model_name
+        self._model_source: Optional[str] = None
         self._device     = None
 
     @property
     def model_name(self) -> str:
         if self._model_name is None:
-            self._model_name = resolve_default_model()
+            self._model_name, self._model_source = resolve_default_model()
         return self._model_name
 
     @property
@@ -160,6 +162,10 @@ class NLLBTranslatorWrapper:
     @property
     def tokenizer(self):
         """Lazy load the tokenizer once."""
+        if NLLBTranslatorWrapper._tokenizer is not None:
+            logger.info("[NMT][CACHE] source=in_memory_hit component=tokenizer")
+            return NLLBTranslatorWrapper._tokenizer
+
         if NLLBTranslatorWrapper._tokenizer is None:
             with NLLBTranslatorWrapper._lock:
                 if NLLBTranslatorWrapper._tokenizer is None:
@@ -175,10 +181,19 @@ class NLLBTranslatorWrapper:
     @property
     def model(self):
         """Lazy load the NLLB model once."""
+        if NLLBTranslatorWrapper._model is not None:
+            logger.info("[NMT][CACHE] source=in_memory_hit component=model")
+            return NLLBTranslatorWrapper._model
+
         if NLLBTranslatorWrapper._model is None:
             with NLLBTranslatorWrapper._lock:
                 if NLLBTranslatorWrapper._model is None:
-                    logger.info("[NMT] Loading model from '%s' on %s", self.model_name, self.device)
+                    logger.info(
+                        "[NMT] Loading model from '%s' on %s | cache_source=%s",
+                        self.model_name,
+                        self.device,
+                        self._model_source or "unknown",
+                    )
                     _local = os.path.isdir(self.model_name)
 
                     # float16 saves ~1.3 GB VRAM on GPU
@@ -232,6 +247,68 @@ class NLLBTranslatorWrapper:
             return 0.0
         return sum(NLLBTranslatorWrapper._is_english_word(w) for w in words) / len(words)
 
+    @staticmethod
+    def _is_arabic_letter(char: str) -> bool:
+        code = ord(char)
+        return (
+            0x0600 <= code <= 0x06FF
+            or 0x0750 <= code <= 0x077F
+            or 0x08A0 <= code <= 0x08FF
+            or 0xFB50 <= code <= 0xFDFF
+            or 0xFE70 <= code <= 0xFEFF
+        )
+
+    @staticmethod
+    def _arabic_script_ratio(text: str) -> float:
+        """Arabic letters / all alphabetic letters in output text."""
+        arabic_letters = 0
+        alphabetic_letters = 0
+
+        for char in text:
+            if char.isalpha():
+                alphabetic_letters += 1
+                if NLLBTranslatorWrapper._is_arabic_letter(char):
+                    arabic_letters += 1
+
+        if alphabetic_letters == 0:
+            return 0.0
+        return arabic_letters / alphabetic_letters
+
+    @staticmethod
+    def _mixed_token_penalty(text: str) -> float:
+        """Penalize tokens that contain both Arabic and ASCII letters (e.g. multi-النموذج)."""
+        tokens = text.split()
+        if not tokens:
+            return 0.0
+
+        eligible_tokens = 0
+        mixed_tokens = 0
+        for token in tokens:
+            has_ascii_alpha = any(c.isascii() and c.isalpha() for c in token)
+            has_arabic_alpha = any(
+                NLLBTranslatorWrapper._is_arabic_letter(c) for c in token
+            )
+
+            if has_ascii_alpha or has_arabic_alpha:
+                eligible_tokens += 1
+                if has_ascii_alpha and has_arabic_alpha:
+                    mixed_tokens += 1
+
+        if eligible_tokens == 0:
+            return 0.0
+        return mixed_tokens / eligible_tokens
+
+    @staticmethod
+    def _updated_quality_score(text: str) -> float:
+        """
+        Combined score for deciding if stage-3 fallback is needed:
+          - low Arabic script ratio increases score
+          - mixed-script tokens increase score
+        """
+        arabic_ratio = NLLBTranslatorWrapper._arabic_script_ratio(text)
+        mixed_penalty = NLLBTranslatorWrapper._mixed_token_penalty(text)
+        return min(1.0, (1.0 - arabic_ratio) + mixed_penalty)
+
     def _translate_word_by_word(self, text: str, src_lang: str, tgt_lang: str) -> str:
         """Last-resort fallback: translate each word individually and join."""
         translated_words = []
@@ -284,7 +361,9 @@ class NLLBTranslatorWrapper:
         Translates a single string with a 3-stage quality fallback:
           Stage 1 — translate with num_beams (default 5)
           Stage 2 — if >english_ratio_threshold of output is still English → retry num_beams=1
-          Stage 3 — still above threshold → translate word by word
+                    Stage 3 — controlled by NMT_FALLBACK_MODE:
+                                        - stage2_only: stop after Stage 2
+                                        - stage3_updated: use Arabic/mixed-token score to decide word-by-word fallback
         """
         # 0. Robust language mapping (ensures "ar" -> "arb_Arab")
         tgt_lang = self.LANG_MAP.get(tgt_lang, tgt_lang)
@@ -330,10 +409,16 @@ class NLLBTranslatorWrapper:
             result = self._run_inference(stripped, item_src_lang, tgt_lang, max_length, num_beams=1)
 
         # 5. Stage 3 — still too many English words → word-by-word fallback
-        if self._english_ratio(result) > english_ratio_threshold:
+        fallback_mode = settings.NMT_FALLBACK_MODE
+        if fallback_mode == "stage2_only":
+            logger.debug("[NMT] stage-3 skipped (NMT_FALLBACK_MODE=stage2_only)")
+            return result
+
+        updated_score = self._updated_quality_score(result)
+        if updated_score > english_ratio_threshold:
             logger.info(
-                "[NMT] stage-3: english_ratio still high (%.2f) → word-by-word",
-                self._english_ratio(result),
+                "[NMT] stage-3: updated_score high (%.2f) → word-by-word",
+                updated_score,
             )
             result = self._translate_word_by_word(stripped, item_src_lang, tgt_lang)
 

@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 import uuid
 import logging
 from pathlib import Path
@@ -245,6 +246,8 @@ class LocalStorageService:
 
 
 class S3StorageService:
+    _bucket_exists_cache: dict[str, float] = {}
+
     def __init__(self):
         raw_endpoint = (settings.S3_ENDPOINT_URL or "").strip()
         if not raw_endpoint:
@@ -259,6 +262,9 @@ class S3StorageService:
         self.region = (settings.S3_REGION or "").strip() or None
         self.session = aioboto3.Session()
         from botocore.config import Config
+        self._bucket_check_ttl_seconds = int(
+            os.getenv("S3_BUCKET_CHECK_TTL_SECONDS", "300")
+        )
 
         # GCS / R2: botocore 1.36+ default checksum headers break S3-interop PutObject.
         self.config = Config(
@@ -282,16 +288,29 @@ class S3StorageService:
         return kw
 
     async def _ensure_bucket(self, s3_client):
+        cache_key = f"{self.endpoint_url or 'default'}::{self.bucket_name}"
+        now = time.time()
+        expires_at = self._bucket_exists_cache.get(cache_key, 0.0)
+        if expires_at > now:
+            logger.debug(
+                "S3Storage: bucket cache hit for %s (ttl=%.0fs)",
+                self.bucket_name,
+                expires_at - now,
+            )
+            return
+
         logger.info(f"S3Storage: checking bucket {self.bucket_name}...")
         try:
             await s3_client.head_bucket(Bucket=self.bucket_name)
             logger.info(f"S3Storage: bucket {self.bucket_name} exists.")
+            self._bucket_exists_cache[cache_key] = now + self._bucket_check_ttl_seconds
         except Exception:
             # Try to create bucket if it doesn't exist (only if permissions allow)
             logger.warning(f"S3Storage: bucket {self.bucket_name} not found or inaccessible, attempting to create...")
             try:
                 await s3_client.create_bucket(Bucket=self.bucket_name)
                 logger.info(f"S3Storage: bucket {self.bucket_name} created successfully.")
+                self._bucket_exists_cache[cache_key] = now + self._bucket_check_ttl_seconds
             except Exception as e:
                 logger.warning(f"S3Storage: could not check/create bucket {self.bucket_name}: {e}")
 
