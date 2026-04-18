@@ -5,6 +5,7 @@ import JobItem from './JobItem';
 const JobList = ({
   recentJobs,
   t,
+  language,
   handlePreview,
   handleDownload,
   handleDelete,
@@ -29,6 +30,7 @@ const JobList = ({
             key={job.id}
             job={job}
             t={t}
+            language={language}
             onPreview={handlePreview}
             onDownload={handleDownload}
             onDelete={handleDelete}
@@ -56,6 +58,7 @@ const JobList = ({
 JobList.propTypes = {
   recentJobs: PropTypes.arrayOf(PropTypes.object).isRequired,
   t: PropTypes.func.isRequired,
+  language: PropTypes.string,
   handlePreview: PropTypes.func.isRequired,
   handleDownload: PropTypes.func.isRequired,
   handleDelete: PropTypes.func.isRequired,

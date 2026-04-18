@@ -192,17 +192,50 @@ class TestSettings:
         # CPU should get int8
         assert compute_type == "int8"
 
-    def test_pipeline_single_chunk_default_false(self):
-        """PIPELINE_USE_SINGLE_CHUNK defaults to false when unset."""
-        if "PIPELINE_USE_SINGLE_CHUNK" in os.environ:
-            del os.environ["PIPELINE_USE_SINGLE_CHUNK"]
+    def test_pipeline_mode_default_single(self):
+        """PIPELINE_SEGMENTS_MODE defaults to single when unset."""
+        if "PIPELINE_SEGMENTS_MODE" in os.environ:
+            del os.environ["PIPELINE_SEGMENTS_MODE"]
 
         settings = Settings()
-        assert settings.PIPELINE_USE_SINGLE_CHUNK is False
+        assert settings.PIPELINE_SEGMENTS_MODE == "single"
 
-    def test_pipeline_single_chunk_true(self):
-        """PIPELINE_USE_SINGLE_CHUNK parses true values correctly."""
-        os.environ["PIPELINE_USE_SINGLE_CHUNK"] = "true"
+    @pytest.mark.parametrize("mode", ["stt_focused", "single", "tts_focused"])
+    def test_pipeline_mode_accepts_valid_values(self, mode):
+        """PIPELINE_SEGMENTS_MODE accepts the canonical string values."""
+        os.environ["PIPELINE_SEGMENTS_MODE"] = mode
 
         settings = Settings()
-        assert settings.PIPELINE_USE_SINGLE_CHUNK is True
+        assert settings.PIPELINE_SEGMENTS_MODE == mode
+
+    def test_pipeline_mode_invalid_warns_and_falls_back(self, caplog):
+        """Invalid PIPELINE_SEGMENTS_MODE should warn and fallback to single."""
+        os.environ["PIPELINE_SEGMENTS_MODE"] = "not_a_valid_mode"
+
+        settings = Settings()
+        assert settings.PIPELINE_SEGMENTS_MODE == "single"
+        assert "Invalid PIPELINE_SEGMENTS_MODE" in caplog.text
+
+    def test_nmt_fallback_mode_default(self):
+        """NMT_FALLBACK_MODE defaults to stage2_only when unset."""
+        if "NMT_FALLBACK_MODE" in os.environ:
+            del os.environ["NMT_FALLBACK_MODE"]
+
+        settings = Settings()
+        assert settings.NMT_FALLBACK_MODE == "stage2_only"
+
+    @pytest.mark.parametrize("mode", ["stage2_only", "stage3_updated"])
+    def test_nmt_fallback_mode_accepts_valid_values(self, mode):
+        """NMT_FALLBACK_MODE accepts the canonical string values."""
+        os.environ["NMT_FALLBACK_MODE"] = mode
+
+        settings = Settings()
+        assert settings.NMT_FALLBACK_MODE == mode
+
+    def test_nmt_fallback_mode_invalid_warns_and_falls_back(self, caplog):
+        """Invalid NMT_FALLBACK_MODE should warn and fallback to stage2_only."""
+        os.environ["NMT_FALLBACK_MODE"] = "not_a_valid_mode"
+
+        settings = Settings()
+        assert settings.NMT_FALLBACK_MODE == "stage2_only"
+        assert "Invalid NMT_FALLBACK_MODE" in caplog.text

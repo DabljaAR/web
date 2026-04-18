@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect, memo } from 'react';
 import type { RecentJob } from '../../types/job';
+import { formatDate } from '../../utils/formatters';
 
 interface JobItemProps {
   job: RecentJob;
   t: (key: string) => string;
+  language?: string;
   onPreview: (id: string) => void;
   onDownload: (id: string) => void;
   onDelete: (id: string) => void;
@@ -19,6 +21,7 @@ interface JobItemProps {
 const JobItem: React.FC<JobItemProps> = memo(({ 
   job, 
   t, 
+  language,
   onPreview, 
   onDownload, 
   onDelete, 
@@ -52,6 +55,13 @@ const JobItem: React.FC<JobItemProps> = memo(({
   const displayName = (typeof (job as any)?.name === 'string' && (job as any).name.trim())
     ? (job as any).name
     : (t('history.untitled') || 'Untitled');
+
+  const resolvedLocale = language === 'ar'
+    ? 'ar'
+    : (language === 'en' ? 'en-US' : (language || (typeof navigator !== 'undefined' ? navigator.language : 'en-US')));
+
+  const formattedDate = formatDate(job.date ?? '', resolvedLocale);
+  const showDate = Boolean(job.date) && formattedDate !== '—';
 
   const nameForMatch = typeof displayName === 'string' ? displayName : '';
   const isVideo = job.mediaType === 'VIDEO' || (!job.mediaType && /\.(mp4|mov|avi|mkv)$/i.test(nameForMatch));
@@ -104,7 +114,12 @@ const JobItem: React.FC<JobItemProps> = memo(({
           <span className={`status-badge ${job.status}`}>
             {t(`dashboard.${job.status}`) || job.status}
           </span>
-          {/* Add date or size here if available later */}
+          {showDate && (
+            <>
+              <span className="job-date-sep" aria-hidden="true">•</span>
+              <span className="job-date">{formattedDate}</span>
+            </>
+          )}
         </div>
       </div>
 

@@ -36,6 +36,7 @@ export const useJobPolling = (pollInterval: number = 5000) => {
           id: v.id,
           name: v.title || v.original_filename || 'Unknown Video',
           status: v.status.toLowerCase() as any,
+          date: v.created_at,
           url: v.url,
           thumbnailUrl: v.thumbnail_url,
           audioUrl: v.audio_url,

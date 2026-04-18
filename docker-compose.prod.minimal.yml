@@ -13,11 +13,9 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-      flower:
-        condition: service_started
     restart: unless-stopped
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile.minimal:/etc/caddy/Caddyfile:ro
       - ./frontend/dist:/srv:ro
       - caddy_data:/data
       - caddy_config:/config
@@ -27,22 +25,40 @@ services:
       - dabljaar_network
 
   postgres:
-    ports: []
+    image: postgres:16-alpine
+    container_name: dabljaar_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-dabljaar}
+    volumes:
+      - dabljaar_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-dabljaar}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
 
   redis:
-    ports: []
-
-  minio:
-    image: minio/minio:latest
-    ports: []
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
-      MINIO_BROWSER_REDIRECT_URL: https://minio.${DOMAIN:?DOMAIN is required for production}
+    image: redis:7-alpine
+    container_name: dabljaar_redis
+    volumes:
+      - dabljaar_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
 
   backend:
     build:
@@ -50,10 +66,13 @@ services:
       dockerfile: Dockerfile.prod
       args:
         INSTALL_AI: "true"
+    container_name: dabljaar_backend
     ports: []
     volumes: []
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
     environment:
@@ -65,19 +84,14 @@ services:
       REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-dablaja-videos}
-      MINIO_SECURE: "false"
-      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-${MINIO_BUCKET_NAME:-dablaja-videos}}
-      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
-      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
-      S3_REGION: ${S3_REGION:-}
-      S3_SECURE: ${S3_SECURE:-false}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:?S3_MEDIA_BUCKET is required}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:?S3_MODELS_BUCKET is required}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?S3_ENDPOINT_URL is required}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_SECURE: ${S3_SECURE:-true}
       PIPELINE_SEGMENTS_MODE: ${PIPELINE_SEGMENTS_MODE:-single}
       NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
       ENVIRONMENT: production
@@ -90,45 +104,11 @@ services:
       start_period: 30s
     tmpfs:
       - /tmp
+    restart: unless-stopped
     security_opt:
       - no-new-privileges:true
-
-  frontend:
-    profiles: ["dev"]
-
-  celery-worker-media:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
-    volumes: []
-    environment:
-      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
-      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
-      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-dablaja-videos}
-      MINIO_SECURE: "false"
-      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-${MINIO_BUCKET_NAME:-dablaja-videos}}
-      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
-      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
-      S3_REGION: ${S3_REGION:-}
-      S3_SECURE: ${S3_SECURE:-false}
-      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
-      PIPELINE_SEGMENTS_MODE: ${PIPELINE_SEGMENTS_MODE:-single}
-      NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
-      ENVIRONMENT: production
-      DEBUG: "false"
-    tmpfs:
-      - /tmp
-    security_opt:
-      - no-new-privileges:true
+    networks:
+      - dabljaar_network
 
   celery-worker-ai:
     build:
@@ -136,30 +116,31 @@ services:
       dockerfile: Dockerfile.prod
       args:
         INSTALL_AI: "true"
+    container_name: dabljaar_worker_ai
+    entrypoint: []
+    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
     volumes:
       - nmt_model_cache:/model-cache
-    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
       AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
       INSTALL_AI: "true"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:-dablaja-videos}
-      MINIO_SECURE: "false"
-      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-${MINIO_BUCKET_NAME:-dablaja-videos}}
-      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
-      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
-      S3_REGION: ${S3_REGION:-}
-      S3_SECURE: ${S3_SECURE:-false}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:?S3_MEDIA_BUCKET is required}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:?S3_MODELS_BUCKET is required}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?S3_ENDPOINT_URL is required}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_SECURE: ${S3_SECURE:-true}
       PIPELINE_SEGMENTS_MODE: ${PIPELINE_SEGMENTS_MODE:-single}
       NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
       ENVIRONMENT: production
@@ -170,10 +151,8 @@ services:
       STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
       STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
       SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
-      # SILMA reference: container filesystem path, or S3 object key in S3_MEDIA_BUCKET (downloaded on first use)
       SILMA_REFERENCE_AUDIO: ${SILMA_REFERENCE_AUDIO:-}
       SILMA_REFERENCE_TEXT: ${SILMA_REFERENCE_TEXT:-ويدقق النظر في القرآن الكريم وسائر الكتب السماوية ويتبع مسالك الرسل العظام عليهم الصلاة والسلام.}
-      # TTS quality tuning — defaults match config.py
       TTS_DEFAULT_SPEED: ${TTS_DEFAULT_SPEED:-0.9}
       TTS_DEFAULT_CFG_STRENGTH: ${TTS_DEFAULT_CFG_STRENGTH:-2.0}
       TTS_DEFAULT_NFE_STEP: ${TTS_DEFAULT_NFE_STEP:-64}
@@ -186,7 +165,6 @@ services:
       DUBBING_MAX_STRETCH_RATIO: ${DUBBING_MAX_STRETCH_RATIO:-1.2}
       DUBBING_MIN_STRETCH_RATIO: ${DUBBING_MIN_STRETCH_RATIO:-0.8}
       DUBBING_SILENCE_THRESHOLD: ${DUBBING_SILENCE_THRESHOLD:-0.1}
-      # NMT model location
       NMT_MODEL_LOCAL_PATH: ${NMT_MODEL_LOCAL_PATH:-/model-cache/nmt-v4}
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
       NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
@@ -204,16 +182,43 @@ services:
       PREWARM_TTS_MODEL: ${PREWARM_TTS_MODEL:-false}
     tmpfs:
       - /tmp
+    restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+    networks:
+      - dabljaar_network
 
   flower:
-    ports: []
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: dabljaar_flower
+    entrypoint: []
+    command: celery -A app.jobs.celery_app flower --port=5555
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery-worker-ai:
+        condition: service_started
     environment:
       FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:?FLOWER_BASIC_AUTH is required}
       FLOWER_INSPECT_TIMEOUT: ${FLOWER_INSPECT_TIMEOUT:-15000}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    ports: []
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
 
 volumes:
+  dabljaar_postgres_data:
+  dabljaar_redis_data:
+  nmt_model_cache:
   caddy_data:
   caddy_config:
-  nmt_model_cache:
+
+networks:
+  dabljaar_network:
+    driver: bridge

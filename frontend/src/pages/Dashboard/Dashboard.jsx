@@ -24,7 +24,7 @@ import '../../styles/dashboard-job-item.css';
 
 
 const Dashboard = () => {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   usePageTitle('nav.dashboard');
   const tx = (key, fallback) => {
     const value = t(key);
@@ -866,6 +866,7 @@ const Dashboard = () => {
         <JobList 
           recentJobs={recentJobs}
           t={t}
+          language={language}
           handlePreview={handlePreview}
           handleDownload={handleDownload}
           handleDelete={handleDelete}

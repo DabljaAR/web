@@ -117,6 +117,15 @@
     color: var(--text-light);
 }
 
+.job-date-sep {
+    color: var(--text-light);
+    opacity: 0.8;
+}
+
+.job-date {
+    white-space: nowrap;
+}
+
 .status-badge {
     padding: 2px 8px;
     border-radius: 4px;

@@ -16,6 +16,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -30,6 +31,7 @@ logger = get_task_logger(__name__)
 # ---------------------------------------------------------------------------
 # Model manager
 # ---------------------------------------------------------------------------
+
 
 class SilmaTTSModelManager(Task):
     """
@@ -65,23 +67,43 @@ class SilmaTTSModelManager(Task):
         """Auto-detect device if not already set."""
         if self._device is None:
             from app.config import settings
+
             silma_device = settings.SILMA_DEVICE.lower()
-            
+
             if silma_device == "cpu":
                 self._device = "cpu"
             elif silma_device == "cuda":
                 self._device = "cuda"
             else:  # "auto"
                 self._device = "cuda" if torch.cuda.is_available() else "cpu"
-            
-            logger.info("SILMA-TTS using device: %s (SILMA_DEVICE=%s)", self._device, silma_device)
+
+            logger.info(
+                "SILMA-TTS using device: %s (SILMA_DEVICE=%s)",
+                self._device,
+                silma_device,
+            )
         return self._device
 
     def _load_model(self):
         """Load SILMA-TTS model (lazy initialization)."""
+        if self._model is not None:
+            logger.info("[TTS][CACHE] source=in_memory_hit component=model")
+            return self._model
+
         if self._model is None:
+            from app.config import settings
+
             self._configure_tts_runtime_paths()
-            self._patch_catt_tashkeel_model_dir()
+            logger.info(
+                "TTS_FORCE_TASHKEEL: %s (type: %s)",
+                settings.TTS_FORCE_TASHKEEL,
+                type(settings.TTS_FORCE_TASHKEEL).__name__,
+            )
+
+            # Only patch tashkeel if it will be used
+            if settings.TTS_FORCE_TASHKEEL:
+                self._patch_catt_tashkeel_model_dir()
+
             self._patch_torchaudio_load()
             try:
                 from silma_tts.api import SilmaTTS
@@ -92,7 +114,6 @@ class SilmaTTSModelManager(Task):
                 ) from e
 
             # Set HuggingFace token if available
-            from app.config import settings
             if settings.HF_TOKEN:
                 os.environ["HF_TOKEN"] = settings.HF_TOKEN
                 logger.info("HF_TOKEN configured for model download authentication")
@@ -101,22 +122,32 @@ class SilmaTTSModelManager(Task):
             os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
             logger.info("Loading SILMA-TTS model...")
+            load_started_at = time.time()
             try:
-                self._model = SilmaTTS()
+                self._model = SilmaTTS(
+                    hf_cache_dir=settings.HF_HOME,
+                    enable_normalizer=settings.TTS_ENABLE_NORMALIZER,
+                    force_tashkeel=settings.TTS_FORCE_TASHKEEL,
+                )
             except Exception as e:
                 runtime_paths = {
                     "HF_HOME": os.environ.get("HF_HOME", ""),
                     "XDG_CACHE_HOME": os.environ.get("XDG_CACHE_HOME", ""),
                     "TRANSFORMERS_CACHE": os.environ.get("TRANSFORMERS_CACHE", ""),
                     "TORCH_HOME": os.environ.get("TORCH_HOME", ""),
-                    "CATT_TASHKEEL_MODEL_DIR": os.environ.get("CATT_TASHKEEL_MODEL_DIR", ""),
+                    "CATT_TASHKEEL_MODEL_DIR": os.environ.get(
+                        "CATT_TASHKEEL_MODEL_DIR", ""
+                    ),
                 }
                 raise RuntimeError(
                     "SILMA-TTS initialization failed. "
                     f"uid={os.getuid()} paths={runtime_paths}. "
                     "Ensure these paths are writable in celery-worker-ai."
                 ) from e
-            logger.info("SILMA-TTS model loaded successfully.")
+            logger.info(
+                "SILMA-TTS model loaded successfully. [TTS][CACHE] source=runtime_cache_loaded load_ms=%.1f",
+                (time.time() - load_started_at) * 1000.0,
+            )
 
         return self._model
 
@@ -124,7 +155,9 @@ class SilmaTTSModelManager(Task):
         """Route runtime model caches to writable paths for non-root containers."""
         preferred_root = Path("/model-cache")
         fallback_root = Path(tempfile.gettempdir()) / "dabljaar" / "model-cache"
-        writable_root = preferred_root if self._is_writable_dir(preferred_root) else fallback_root
+        writable_root = (
+            preferred_root if self._is_writable_dir(preferred_root) else fallback_root
+        )
         writable_root.mkdir(parents=True, exist_ok=True)
 
         defaults = {
@@ -134,7 +167,9 @@ class SilmaTTSModelManager(Task):
             "XDG_CACHE_HOME": str(writable_root / "xdg-cache"),
             "TORCH_HOME": str(writable_root / "torch"),
             # Custom override consumed by a sitecustomize shim for catt_tashkeel.
-            "CATT_TASHKEEL_MODEL_DIR": str(writable_root / "catt_tashkeel" / "onnx_models"),
+            "CATT_TASHKEEL_MODEL_DIR": str(
+                writable_root / "catt_tashkeel" / "onnx_models"
+            ),
         }
         for env_name, default_path in defaults.items():
             resolved = os.environ.get(env_name, "").strip() or default_path
@@ -164,7 +199,13 @@ class SilmaTTSModelManager(Task):
 
         model_root = Path(
             os.environ.get("CATT_TASHKEEL_MODEL_DIR", "").strip()
-            or (Path(tempfile.gettempdir()) / "dabljaar" / "model-cache" / "catt_tashkeel" / "onnx_models")
+            or (
+                Path(tempfile.gettempdir())
+                / "dabljaar"
+                / "model-cache"
+                / "catt_tashkeel"
+                / "onnx_models"
+            )
         )
         model_root.mkdir(parents=True, exist_ok=True)
 
@@ -261,7 +302,9 @@ class SilmaTTSModelManager(Task):
         except Exception:
             return False
 
-    def _ensure_short_reference_audio(self, ref_audio_path: str, *, max_seconds: float = 8.0) -> str:
+    def _ensure_short_reference_audio(
+        self, ref_audio_path: str, *, max_seconds: float = 8.0
+    ) -> str:
         """Create (and cache) a short WAV clip of the reference audio.
 
         Providing an already-short clip avoids silma_tts's internal "audio was cut"
@@ -273,8 +316,9 @@ class SilmaTTSModelManager(Task):
 
         stat = src.stat()
         cache_key = (
-            f"{src.resolve()}|{stat.st_mtime_ns}|{stat.st_size}|{max_seconds}"
-            .encode("utf-8")
+            f"{src.resolve()}|{stat.st_mtime_ns}|{stat.st_size}|{max_seconds}".encode(
+                "utf-8"
+            )
         )
         digest = hashlib.sha256(cache_key).hexdigest()[:16]
 
@@ -286,10 +330,23 @@ class SilmaTTSModelManager(Task):
 
         tmp_out = out_path.with_name(out_path.name + ".tmp.wav")
         cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(src),
-            "-f", "wav", "-t", str(max_seconds),
-            "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le",
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(src),
+            "-f",
+            "wav",
+            "-t",
+            str(max_seconds),
+            "-ac",
+            "1",
+            "-ar",
+            "24000",
+            "-c:a",
+            "pcm_s16le",
             str(tmp_out),
         ]
         try:
@@ -303,7 +360,9 @@ class SilmaTTSModelManager(Task):
                 tmp_out.unlink(missing_ok=True)
             return ref_audio_path
         except subprocess.CalledProcessError as e:
-            logger.warning("Failed to prepare short reference clip: %s; using original", e)
+            logger.warning(
+                "Failed to prepare short reference clip: %s; using original", e
+            )
             if tmp_out.exists():
                 tmp_out.unlink(missing_ok=True)
             return ref_audio_path
@@ -383,46 +442,78 @@ class SilmaTTSModelManager(Task):
         # Use defaults from settings if not provided
         _nfe_step = nfe_step if nfe_step is not None else settings.TTS_DEFAULT_NFE_STEP
         _speed = speed if speed is not None else settings.TTS_DEFAULT_SPEED
-        _cfg = cfg_strength if cfg_strength is not None else settings.TTS_DEFAULT_CFG_STRENGTH
-        _sway = sway_sampling_coef if sway_sampling_coef is not None else settings.TTS_DEFAULT_SWAY_COEF
+        _cfg = (
+            cfg_strength
+            if cfg_strength is not None
+            else settings.TTS_DEFAULT_CFG_STRENGTH
+        )
+        _sway = (
+            sway_sampling_coef
+            if sway_sampling_coef is not None
+            else settings.TTS_DEFAULT_SWAY_COEF
+        )
         _rms = target_rms if target_rms is not None else settings.TTS_DEFAULT_TARGET_RMS
 
         # Clean text — strip stray double-quotes
-        clean_text = text.replace('"', '').strip()
+        clean_text = text.replace('"', "").strip()
         if not clean_text:
             raise ValueError("TTS synthesis received empty text after cleaning.")
 
         logger.info(
             "Synthesizing [nfe=%d, speed=%.2f, cfg=%.2f, sway=%.2f, rms=%.2f], "
             "text length=%d chars",
-            _nfe_step, _speed, _cfg, _sway, _rms, len(clean_text),
+            _nfe_step,
+            _speed,
+            _cfg,
+            _sway,
+            _rms,
+            len(clean_text),
         )
 
         # Create temp file for output (SILMA requires file_wave parameter)
         import tempfile
+
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
             tmp_path = tmp_file.name
 
         try:
+            infer_kwargs = {
+                "ref_file": _ref_audio,
+                "ref_text": _ref_text,
+                "gen_text": clean_text,
+                "file_wave": tmp_path,
+                "seed": seed,
+                "speed": _speed,
+                "cfg_strength": _cfg,
+                "nfe_step": _nfe_step,
+                "sway_sampling_coef": _sway,
+                "target_rms": _rms,
+                # Keep infer-time behavior in sync with model initialization.
+                "force_tashkeel": settings.TTS_FORCE_TASHKEEL,
+            }
+
             # Run SILMA inference
-            wav, sr, spec = model.infer(
-                ref_file=_ref_audio,
-                ref_text=_ref_text,
-                gen_text=clean_text,
-                file_wave=tmp_path,
-                seed=seed,
-                speed=_speed,
-                cfg_strength=_cfg,
-                nfe_step=_nfe_step,
-                sway_sampling_coef=_sway,
-                target_rms=_rms,
-            )
+            try:
+                wav, sr, spec = model.infer(**infer_kwargs)
+            except AttributeError as exc:
+                # Defensive fallback for silma_tts internal tashkeel state issues.
+                is_tashkeel_none_error = "do_tashkeel" in str(exc)
+                if infer_kwargs["force_tashkeel"] and is_tashkeel_none_error:
+                    logger.warning(
+                        "SILMA infer hit tashkeel initialization error; retrying with force_tashkeel=False"
+                    )
+                    infer_kwargs["force_tashkeel"] = False
+                    wav, sr, spec = model.infer(**infer_kwargs)
+                else:
+                    raise
 
             # Read the generated audio file
             with open(tmp_path, "rb") as f:
                 audio_bytes = f.read()
 
-            logger.info("SILMA synthesis completed, output size: %d bytes", len(audio_bytes))
+            logger.info(
+                "SILMA synthesis completed, output size: %d bytes", len(audio_bytes)
+            )
 
         finally:
             # Clean up temp file
@@ -446,6 +537,7 @@ class SilmaTTSModelManager(Task):
 # ---------------------------------------------------------------------------
 # Celery task
 # ---------------------------------------------------------------------------
+
 
 def register_tts_task(celery_app):
     """
@@ -527,42 +619,46 @@ def register_tts_task(celery_app):
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             with open(output_path, "wb") as f:
                 f.write(audio_bytes)
-            logger.info("TTS output written to %s (%d bytes)", output_path, len(audio_bytes))
+            logger.info(
+                "TTS output written to %s (%d bytes)", output_path, len(audio_bytes)
+            )
 
         # Upload to MinIO if requested
         if upload_to_minio:
             try:
                 from app.media.storage import get_storage_service
+
                 storage = get_storage_service()
                 final_minio_key = minio_key or f"tts/{job_id}/output.wav"
-                
+
                 # Run async upload in sync context
                 import asyncio
+
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     loop.run_until_complete(
                         storage.upload_bytes(audio_bytes, final_minio_key, "audio/wav")
                     )
-                    
+
                     # Get presigned URL
                     audio_url = loop.run_until_complete(
                         storage.get_url(final_minio_key)
                     )
                 finally:
                     loop.close()
-                
+
                 logger.info("TTS output uploaded to MinIO: %s", final_minio_key)
             except Exception as e:
                 logger.warning("Failed to upload TTS to MinIO: %s", e)
 
         return {
-            "status":      "success",
-            "job_id":      job_id,
+            "status": "success",
+            "job_id": job_id,
             "output_path": output_path,
-            "minio_key":   final_minio_key,
-            "audio_url":   audio_url,
-            "bytes_size":  len(audio_bytes),
+            "minio_key": final_minio_key,
+            "audio_url": audio_url,
+            "bytes_size": len(audio_bytes),
         }
 
     return synthesize_tts

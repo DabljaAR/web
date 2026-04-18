@@ -18,7 +18,7 @@ import '../../styles/home.css';
 import '../../styles/history.css';
 
 const History = () => {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   usePageTitle('nav.history');
   const {
     filters,
@@ -325,6 +325,7 @@ const History = () => {
                 key={item.id}
                 item={item}
                 t={t}
+                language={language}
                 onPreview={handlePreview}
                 onDownload={handleDownload}
                 onDelete={handleDelete}

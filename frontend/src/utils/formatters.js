@@ -20,6 +20,48 @@ export const formatDate = (dateString, locale = 'en-US') => {
 };
 
 /**
+ * Format a date string into a numeric date (e.g. 4/18/2026 in en-US)
+ * @param {string} dateString - The date string to format
+ * @param {string} locale - The locale to use for formatting
+ * @returns {string} Formatted numeric date string
+ */
+export const formatDateNumeric = (dateString, locale = 'en-US') => {
+  if (!dateString) return '—';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString(locale, {
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric'
+    });
+  } catch (error) {
+    return '—';
+  }
+};
+
+/**
+ * Format a date string into a long day-month-year (e.g. "18 أبريل 2026" for Arabic).
+ * @param {string} dateString - The date string to format
+ * @param {string} locale - The locale to use for formatting
+ * @returns {string} Formatted long date string
+ */
+export const formatDateLongDMY = (dateString, locale = 'en-US') => {
+  if (!dateString) return '—';
+  try {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '—';
+    return date.toLocaleDateString(locale, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  } catch (error) {
+    return '—';
+  }
+};
+
+/**
  * Format duration in seconds into MM:SS format
  * @param {number} seconds - Duration in seconds
  * @returns {string} Formatted duration string

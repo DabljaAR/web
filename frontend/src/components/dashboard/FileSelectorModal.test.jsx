@@ -13,7 +13,7 @@ describe('FileSelectorModal', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    useTranslation.mockReturnValue({ t: mockT });
+    useTranslation.mockReturnValue({ t: mockT, language: 'en' });
   });
 
   afterEach(() => {

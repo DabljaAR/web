@@ -6,7 +6,7 @@ This guide documents backend deployment and runtime configuration for local and 
 
 - Docker and Docker Compose
 - Python 3.12+ (for local non-Docker runs)
-- PostgreSQL, Redis, and MinIO credentials
+- PostgreSQL and Redis credentials, plus object storage credentials (MinIO or external S3/GCS)
 
 ## Environment Setup
 
@@ -20,10 +20,21 @@ Set at least:
 
 - `POSTGRES_PASSWORD`
 - `SECRET_KEY`
-- `MINIO_ROOT_USER`
-- `MINIO_ROOT_PASSWORD`
 - `DOMAIN`
 - `ACME_EMAIL`
+
+For standard production compose, also set MinIO credentials:
+
+- `MINIO_ROOT_USER`
+- `MINIO_ROOT_PASSWORD`
+
+For minimal production compose, set external S3/GCS credentials instead:
+
+- `S3_ENDPOINT_URL`
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+- `S3_MEDIA_BUCKET`
+- `S3_MODELS_BUCKET`
 
 ## Dependency Profiles
 
@@ -51,6 +62,27 @@ Start the production stack:
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
+### Minimal production compose (AI-only + external object storage)
+
+Use this mode when you want production deployment without local MinIO and without the media worker:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.minimal.yml up -d --build
+```
+
+This stack keeps: `caddy`, `postgres`, `redis`, `backend`, `celery-worker-ai`, `flower`.
+This stack removes: `minio`, `celery-worker-media`.
+
+Required object-storage env vars for this mode:
+
+- `STORAGE_BACKEND=s3`
+- `S3_ENDPOINT_URL=https://storage.googleapis.com`
+- `S3_ACCESS_KEY_ID`
+- `S3_SECRET_ACCESS_KEY`
+- `S3_REGION=us-east-1`
+- `S3_MEDIA_BUCKET`
+- `S3_MODELS_BUCKET`
+
 Check health:
 
 ```bash
@@ -72,6 +104,14 @@ For CI/CD VM deploys (`.github/workflows/deploy-gcp.yml`), migrations are run au
 docker compose ... up -d postgres redis minio
 docker compose ... run --rm --entrypoint sh backend -lc "alembic upgrade head"
 docker compose ... up -d --build backend celery-worker-media celery-worker-ai flower caddy
+```
+
+For minimal production compose:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.minimal.yml up -d postgres redis
+docker compose --env-file .env.production -f docker-compose.prod.minimal.yml run --rm --entrypoint sh backend -lc "alembic upgrade head"
+docker compose --env-file .env.production -f docker-compose.prod.minimal.yml up -d --build backend celery-worker-ai flower caddy
 ```
 
 ## Common Issues
@@ -105,3 +145,10 @@ Verify:
 3. Run migrations
 4. Start backend + workers
 5. Verify health and queue processing
+
+Minimal flow variant:
+
+1. Start infra services (postgres/redis)
+2. Run migrations
+3. Start backend + AI worker (+ Flower/Caddy)
+4. Verify health and queue processing

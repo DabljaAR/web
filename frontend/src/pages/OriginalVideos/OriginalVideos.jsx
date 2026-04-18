@@ -16,7 +16,7 @@ import '../../styles/history.css';
 import '../../styles/dashboard.css';
 
 const OriginalVideos = () => {
-    const { t } = useTranslation();
+    const { t, language } = useTranslation();
     usePageTitle('nav.myLibrary');
     const {
         filters,
@@ -498,6 +498,7 @@ const OriginalVideos = () => {
                                 key={item.id}
                                 item={item}
                                 t={t}
+                                language={language}
                                 onPreview={handlePreview}
                                 onDownload={handleDownload}
                                 onDelete={handleDelete}

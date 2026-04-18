@@ -179,9 +179,41 @@ class TestTtsCombineResults:
         assert "Permission denied" in (patched_task_calls[-1][1].get("error_message") or "")
 
 
+class TestTtsSynthesizeSegment:
+    def test_segment_marks_tashkeel_mismatch_error_code(self):
+        """do_tashkeel NoneType crashes should be tagged for incident triage."""
+        from app.jobs.tasks.pipeline import tts_synthesize_segment
+
+        with patch("app.jobs.tasks.pipeline.BaseJobTask._patch_job"), \
+             patch("app.jobs.tasks.pipeline.BaseJobTask._patch_task"), \
+             patch("app.jobs.celery_app.synthesize_tts") as mock_synthesize:
+            mock_synthesize.run.side_effect = AttributeError(
+                "'NoneType' object has no attribute 'do_tashkeel'"
+            )
+
+            result = tts_synthesize_segment.run(
+                segment_id=2,
+                job_id="job-tts-err",
+                text="مرحبا بالعالم",
+                start=0.0,
+                end=1.0,
+                minio_segment_key="tts/job-tts-err/seg_2.wav",
+                ref_clip_minio_key=None,
+                tts_job_id=None,
+                total_segments=None,
+                task_id=None,
+                tts_metadata=None,
+                output_type="fullDubbing",
+                video_id="vid-001",
+            )
+
+        assert "do_tashkeel" in result.get("tts_error", "")
+        assert result.get("tts_error_code") == "tts_tashkeel_init_mismatch"
+
+
 class TestProcessingModeHelpers:
     def test_apply_processing_mode_returns_single_chunk(self):
-        """single_chunk mode should collapse segments to one transcript chunk."""
+        """single mode should collapse segments to one transcript chunk."""
         from app.jobs.tasks.pipeline import _apply_processing_mode
 
         result = _apply_processing_mode(
@@ -189,9 +221,10 @@ class TestProcessingModeHelpers:
                 {"start": 0.0, "end": 1.0, "text": "Hello"},
                 {"start": 1.0, "end": 2.0, "text": "world"},
             ],
+            words=None,
             transcript="Hello world",
             duration=2.5,
-            processing_mode="single_chunk",
+            processing_mode="single",
         )
 
         assert len(result) == 1
@@ -199,19 +232,62 @@ class TestProcessingModeHelpers:
         assert result[0]["end"] == 2.5
         assert result[0]["text"] == "Hello world"
 
-    def test_apply_processing_mode_keeps_segmented_shape(self):
-        """segmented mode should preserve original segment list."""
+    def test_apply_processing_mode_keeps_stt_focused_shape(self):
+        """stt_focused mode should preserve original segment list."""
         from app.jobs.tasks.pipeline import _apply_processing_mode
 
         segments = [{"start": 0.0, "end": 1.0, "text": "Hello"}]
         result = _apply_processing_mode(
             segments=segments,
+            words=None,
             transcript="Hello",
             duration=1.0,
-            processing_mode="segmented",
+            processing_mode="stt_focused",
         )
 
         assert result == segments
+
+    def test_apply_processing_mode_tts_focused_rebuilds(self):
+        """tts_focused mode should rebuild segments from words."""
+        from app.jobs.tasks.pipeline import _apply_processing_mode
+
+        result = _apply_processing_mode(
+            segments=[{"start": 0.0, "end": 2.0, "text": "old"}],
+            words=[
+                {"word": "one", "start": 0.0, "end": 0.2},
+                {"word": "two", "start": 0.2, "end": 0.4},
+                {"word": "three", "start": 0.4, "end": 0.6},
+                {"word": "four", "start": 0.6, "end": 0.8},
+                {"word": "five", "start": 0.8, "end": 1.0},
+                {"word": "six", "start": 1.0, "end": 1.2},
+                {"word": "seven", "start": 1.2, "end": 1.4},
+                {"word": "eight", "start": 1.4, "end": 1.6},
+                {"word": "nine", "start": 1.6, "end": 1.8},
+                {"word": "ten.", "start": 1.8, "end": 2.0},
+            ],
+            transcript="one two three four five six seven eight nine ten.",
+            duration=2.0,
+            processing_mode="tts_focused",
+        )
+
+        assert len(result) == 1
+        assert result[0]["start"] == 0.0
+        assert result[0]["end"] == 2.0
+
+    def test_apply_processing_mode_invalid_falls_back_to_single(self):
+        """Invalid modes should warn and fallback to single behavior."""
+        from app.jobs.tasks.pipeline import _apply_processing_mode
+
+        result = _apply_processing_mode(
+            segments=[{"start": 1.0, "end": 2.0, "text": "keep"}],
+            words=None,
+            transcript="Hello world",
+            duration=2.5,
+            processing_mode="not_valid",
+        )
+
+        assert len(result) == 1
+        assert result[0]["start"] == 0.0
 
 
 class TestTtsProgressPatches:

@@ -1,7 +1,8 @@
 import React, { memo } from 'react';
 import PropTypes from 'prop-types';
+import { formatDateLongDMY } from '../../utils/formatters';
 
-const OriginalVideoItem = memo(({ item, t, onPreview, onDownload, onDelete }) => {
+const OriginalVideoItem = memo(({ item, t, language, onPreview, onDownload, onDelete }) => {
     const getStatusClass = (status) => {
         switch (status) {
             case 'completed': return 'completed';
@@ -36,6 +37,23 @@ const OriginalVideoItem = memo(({ item, t, onPreview, onDownload, onDelete }) =>
     const isVideo = item.mediaType === 'VIDEO' || (!item.mediaType && /\.(mp4|mov|avi|mkv)$/i.test(nameForMatch));
     const isAudio = item.mediaType === 'AUDIO' || (!item.mediaType && /\.(mp3|wav|m4a)$/i.test(nameForMatch));
 
+    const resolvedLocale = language === 'ar'
+        ? 'ar-EG-u-nu-latn'
+        : (language === 'en' ? 'en-US' : (language || (typeof navigator !== 'undefined' ? navigator.language : 'en-US')));
+
+    const dateText = item.date && !Number.isNaN(new Date(item.date).getTime())
+        ? formatDateLongDMY(item.date, resolvedLocale)
+        : (t('history.noDate') || 'N/A');
+
+    const typeTextRaw = isVideo
+        ? (t('originalVideos.video') || 'Video')
+        : isAudio
+            ? (t('originalVideos.audio') || 'Audio')
+            : (t('originalVideos.text') || 'Text');
+    const typeText = language === 'en'
+        ? `${typeTextRaw}`.slice(0, 1).toUpperCase() + `${typeTextRaw}`.slice(1).toLowerCase()
+        : typeTextRaw;
+
     return (
         <div className="history-item">
             <div className="item-content">
@@ -58,12 +76,9 @@ const OriginalVideoItem = memo(({ item, t, onPreview, onDownload, onDelete }) =>
                     </div>
 
                     <div className="item-info" style={{ marginTop: '8px' }}>
-                        <span>
-                            {item.date && !Number.isNaN(new Date(item.date).getTime())
-                                ? new Date(item.date).toLocaleDateString()
-                                : (t('history.noDate') || 'N/A')}
-                        </span>
-                        {item.mediaType && <span className="item-type-badge" style={{ marginLeft: '12px' }}>{item.mediaType}</span>}
+                        <span className="item-date">{dateText}</span>{' '}
+                        <br />
+                        <span className="item-type-inline">{typeText}</span>
                     </div>
 
                     <div className="item-actions" style={{ marginTop: '16px' }}>
@@ -95,6 +110,7 @@ const OriginalVideoItem = memo(({ item, t, onPreview, onDownload, onDelete }) =>
 OriginalVideoItem.propTypes = {
     item: PropTypes.object.isRequired,
     t: PropTypes.func.isRequired,
+    language: PropTypes.string,
     onPreview: PropTypes.func.isRequired,
     onDownload: PropTypes.func.isRequired,
     onDelete: PropTypes.func.isRequired,

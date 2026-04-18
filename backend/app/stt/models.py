@@ -34,6 +34,35 @@ logger = logging.getLogger(__name__)
 _WHISPER_REQUIRED_FILES = frozenset({"model.bin", "config.json"})
 
 
+def _normalize_storage_prefix(prefix: str) -> str:
+    """Normalize object-storage prefix to avoid accidental leading slash mismatches."""
+    return (prefix or "").strip().lstrip("/")
+
+
+def _sample_downloaded_files(path: str, limit: int = 8) -> list[str]:
+    """Return a small sample of downloaded files to aid cache-debugging logs."""
+    if not path or not os.path.isdir(path):
+        return []
+    sampled: list[str] = []
+    for root, _, files in os.walk(path):
+        for name in sorted(files):
+            rel = os.path.relpath(os.path.join(root, name), path)
+            sampled.append(rel)
+            if len(sampled) >= limit:
+                return sampled
+    return sampled
+
+
+def _missing_required_files(path: str) -> list[str]:
+    if not path or not os.path.isdir(path):
+        return sorted(_WHISPER_REQUIRED_FILES)
+    try:
+        names = set(os.listdir(path))
+    except OSError:
+        return sorted(_WHISPER_REQUIRED_FILES)
+    return sorted(_WHISPER_REQUIRED_FILES - names)
+
+
 def _validate_whisper_model_dir(path: str) -> bool:
     """True if *path* looks like a CTranslate2 / faster-whisper model directory."""
     if not path or not os.path.isdir(path):
@@ -45,14 +74,22 @@ def _validate_whisper_model_dir(path: str) -> bool:
     return bool(names & _WHISPER_REQUIRED_FILES)
 
 
-def resolve_whisper_model() -> str:
+def resolve_whisper_model() -> tuple[str, str]:
     """
     Resolve Whisper model path / id: local cache → S3 (S3_MODELS_BUCKET + STT_MODEL_KEY) → HuggingFace Hub.
     """
     local_path = (settings.STT_MODEL_LOCAL_PATH or "").strip()
-    key = (settings.STT_MODEL_KEY or "").strip()
+    raw_key = (settings.STT_MODEL_KEY or "").strip()
+    key = _normalize_storage_prefix(raw_key)
     bucket = settings.S3_MODELS_BUCKET
     hf_name = settings.STT_MODEL_SIZE
+
+    if raw_key and key != raw_key:
+        logger.warning(
+            "[STT] Normalized STT_MODEL_KEY from %r to %r to match object-prefix contract.",
+            raw_key,
+            key,
+        )
 
     logger.info(
         "[STT] Resolving Whisper model | local_path=%s key=%s bucket=%s hf=%s",
@@ -63,8 +100,8 @@ def resolve_whisper_model() -> str:
     )
 
     if local_path and _validate_whisper_model_dir(local_path):
-        logger.info("[STT] Using verified local Whisper cache: %s", local_path)
-        return local_path
+        logger.info("[STT][CACHE] source=local_disk_hit path=%s", local_path)
+        return local_path, "local_disk_hit"
 
     if settings.STORAGE_BACKEND.lower() == "s3" and key and local_path:
         logger.info(
@@ -83,18 +120,22 @@ def resolve_whisper_model() -> str:
             if not ok:
                 logger.warning(
                     "[STT] Object storage download_prefix returned no files | bucket=%s key=%s. "
-                    "Falling back to HuggingFace Hub.",
+                    "Expected prefix to contain model.bin and config.json. Falling back to HuggingFace Hub.",
                     bucket,
                     key,
                 )
             elif _validate_whisper_model_dir(local_path):
-                logger.info("[STT] Object storage download complete — using %s", local_path)
-                return local_path
+                logger.info("[STT][CACHE] source=s3_hit path=%s", local_path)
+                return local_path, "s3_hit"
             else:
+                missing = _missing_required_files(local_path)
+                sampled = _sample_downloaded_files(local_path)
                 logger.warning(
                     "[STT] Object storage download finished but validation failed at %s "
-                    "(missing model.bin or config.json). Falling back to HuggingFace Hub.",
+                    "(missing=%s sampled_files=%s). Falling back to HuggingFace Hub.",
                     local_path,
+                    missing,
+                    sampled,
                 )
         except Exception as exc:
             logger.error("[STT] Object storage download failed: %s", exc)
@@ -113,7 +154,8 @@ def resolve_whisper_model() -> str:
         "Configure S3_MODELS_BUCKET + STT_MODEL_KEY + STT_MODEL_LOCAL_PATH to avoid this.",
         hf_name,
     )
-    return hf_name
+    logger.info("[STT][CACHE] source=hf_fallback model=%s", hf_name)
+    return hf_name, "hf_fallback"
 
 
 def clean_text(text: str) -> str:
@@ -180,17 +222,22 @@ class WhisperModelManager(Task):
     @property
     def model(self) -> WhisperModel:
         """Load the Whisper model once per worker process (lazy)."""
+        if WhisperModelManager._model is not None:
+            logger.info("[STT][CACHE] source=in_memory_hit")
+            return WhisperModelManager._model
+
         if WhisperModelManager._model is None:
             logger.info(
                 f"[STT] Loading Whisper | size={self.model_size} | "
                 f"device={self.device} | compute_type={self.compute_type}"
             )
-            resolved = resolve_whisper_model()
+            resolved, cache_source = resolve_whisper_model()
             local_cache = os.path.isdir(resolved)
             logger.info(
-                "[STT] Whisper model source: %s (%s)",
+                "[STT] Whisper model source: %s (%s) | cache_source=%s",
                 resolved,
                 "local directory" if local_cache else "HuggingFace Hub id — first load may take minutes",
+                cache_source,
             )
             if settings.HF_TOKEN:
                 os.environ["HF_TOKEN"] = settings.HF_TOKEN
