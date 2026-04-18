@@ -13,8 +13,6 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-      flower:
-        condition: service_started
     restart: unless-stopped
     volumes:
       - ./Caddyfile.minimal:/etc/caddy/Caddyfile:ro
