@@ -9,6 +9,7 @@ Parallel-chord approach:
                           combined DB record, updates VideoTask status.
 """
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -43,6 +44,7 @@ def _utcnow() -> datetime:
 def nmt_translate(
     self,
     job_id: Any,
+    enqueued_at: Optional[float] = None,
     *,
     source_lang: str = "auto",
     target_lang: str = "arb_Arab",
@@ -56,6 +58,14 @@ def nmt_translate(
     """
     if isinstance(job_id, dict):
         job_id = job_id.get("job_id")
+
+    orchestrator_started_at = time.time()
+    if enqueued_at:
+        logger.info(
+            "[NMT][TIMING] orchestrator_queue_wait_ms=%.1f | job=%s",
+            (orchestrator_started_at - enqueued_at) * 1000.0,
+            job_id,
+        )
 
     self._patch_job(
         job_id,
@@ -162,6 +172,7 @@ def nmt_translate(
             num_beams,
             english_ratio_threshold,
             tts_context,
+            time.time(),
         )
         for idx, seg in enumerate(stt_segments)
     ]
@@ -208,8 +219,18 @@ def nmt_translate_segment(
     num_beams: int = 5,
     english_ratio_threshold: float = 0.5,
     tts_context: Optional[dict] = None,
+    enqueued_at: Optional[float] = None,
 ) -> dict:
     """Translate a single segment, then immediately dispatch its TTS segment."""
+    segment_start = time.time()
+    if enqueued_at:
+        logger.info(
+            "[NMT][TIMING] segment_queue_wait_ms=%.1f | job=%s | segment_id=%s",
+            (segment_start - enqueued_at) * 1000.0,
+            job_id,
+            segment_id,
+        )
+
     actual_src_lang = None if (source_lang in {None, "auto"}) else source_lang
     try:
         translated_text = translator._translate_item(
@@ -222,6 +243,14 @@ def nmt_translate_segment(
         logger.error("[NMT] segment %d failed job=%s: %s", segment_id, job_id, exc)
         translated_text = text  # fall back to original
         status = "failed"
+
+    logger.info(
+        "[NMT][TIMING] segment_translate_ms=%.1f | job=%s | segment_id=%s | status=%s",
+        (time.time() - segment_start) * 1000.0,
+        job_id,
+        segment_id,
+        status,
+    )
 
     # ── Dispatch TTS for this segment immediately ────────────────────────────
     if tts_context:
@@ -242,6 +271,7 @@ def nmt_translate_segment(
                     "tts_metadata": tts_context.get("metadata"),
                     "output_type": tts_context.get("output_type", "fullDubbing"),
                     "video_id": tts_context.get("video_id"),
+                    "enqueued_at": time.time(),
                 },
                 queue="ai_tts",
             )

@@ -1,6 +1,7 @@
 """Celery application factory for DabljaAR async job processing."""
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ def _configure_device():
 _device_mode = _configure_device()
 
 from celery import Celery
+from celery.signals import worker_ready
 from app.config import settings
 from app.jobs.models import JobStatus
 
@@ -86,6 +88,97 @@ celery_app.conf.update(
     # Autodiscovery target packages (AI modules only when INSTALL_AI=true)
     imports=_base_imports + _ai_imports,
 )
+
+
+@worker_ready.connect
+def _log_worker_runtime_context(sender=None, **kwargs):
+    try:
+        logger.info(
+            "[CELERY][STARTUP] host=%s pid=%s install_ai=%s device_mode=%s",
+            getattr(sender, "hostname", "unknown"),
+            os.getpid(),
+            _INSTALL_AI,
+            _device_mode,
+        )
+        logger.info(
+            "[CELERY][STARTUP] prefetch=%s max_tasks_per_child=%s broker=%s backend=%s",
+            celery_app.conf.worker_prefetch_multiplier,
+            celery_app.conf.worker_max_tasks_per_child,
+            celery_app.conf.broker_url,
+            celery_app.conf.result_backend,
+        )
+        logger.info(
+            "[CELERY][STARTUP] env_concurrency=%s pool_hint=%s",
+            os.getenv("AI_WORKER_CONCURRENCY") or os.getenv("MEDIA_WORKER_CONCURRENCY") or "unset",
+            os.getenv("CELERY_POOL", "unset"),
+        )
+    except Exception as exc:
+        logger.warning("[CELERY][STARTUP] failed to log runtime context: %s", exc)
+
+
+def _is_enabled(name: str) -> bool:
+    return os.getenv(name, "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@worker_ready.connect
+def _optional_prewarm_models(sender=None, **kwargs):
+    if not _INSTALL_AI:
+        return
+
+    prewarm_stt = _is_enabled("PREWARM_STT_MODEL")
+    prewarm_nmt = _is_enabled("PREWARM_NMT_MODEL")
+    prewarm_tts = _is_enabled("PREWARM_TTS_MODEL")
+
+    if not any((prewarm_stt, prewarm_nmt, prewarm_tts)):
+        logger.info("[CELERY][PREWARM] disabled (all PREWARM_* flags false)")
+        return
+
+    logger.info(
+        "[CELERY][PREWARM] starting | stt=%s nmt=%s tts=%s",
+        prewarm_stt,
+        prewarm_nmt,
+        prewarm_tts,
+    )
+
+    if prewarm_stt:
+        t0 = time.perf_counter()
+        try:
+            from app.stt.models import WhisperModelManager
+
+            _ = WhisperModelManager().model
+            logger.info(
+                "[CELERY][PREWARM] STT ready in %.1fs",
+                time.perf_counter() - t0,
+            )
+        except Exception as exc:
+            logger.warning("[CELERY][PREWARM] STT prewarm failed: %s", exc)
+
+    if prewarm_nmt:
+        t0 = time.perf_counter()
+        try:
+            from app.nmt.service import translator
+
+            _ = translator.tokenizer
+            _ = translator.model
+            logger.info(
+                "[CELERY][PREWARM] NMT ready in %.1fs",
+                time.perf_counter() - t0,
+            )
+        except Exception as exc:
+            logger.warning("[CELERY][PREWARM] NMT prewarm failed: %s", exc)
+
+    if prewarm_tts:
+        t0 = time.perf_counter()
+        try:
+            from app.tts.models import SilmaTTSModelManager
+
+            _ = SilmaTTSModelManager()._load_model()
+            logger.info(
+                "[CELERY][PREWARM] TTS ready in %.1fs",
+                time.perf_counter() - t0,
+            )
+        except Exception as exc:
+            logger.warning("[CELERY][PREWARM] TTS prewarm failed: %s", exc)
 
 # Register TTS task (with graceful fallback if silma-tts not installed)
 synthesize_tts = None

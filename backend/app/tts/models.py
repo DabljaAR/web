@@ -16,6 +16,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -85,6 +86,10 @@ class SilmaTTSModelManager(Task):
 
     def _load_model(self):
         """Load SILMA-TTS model (lazy initialization)."""
+        if self._model is not None:
+            logger.info("[TTS][CACHE] source=in_memory_hit component=model")
+            return self._model
+
         if self._model is None:
             from app.config import settings
 
@@ -117,6 +122,7 @@ class SilmaTTSModelManager(Task):
             os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
             logger.info("Loading SILMA-TTS model...")
+            load_started_at = time.time()
             try:
                 self._model = SilmaTTS(
                     hf_cache_dir=settings.HF_HOME,
@@ -138,7 +144,10 @@ class SilmaTTSModelManager(Task):
                     f"uid={os.getuid()} paths={runtime_paths}. "
                     "Ensure these paths are writable in celery-worker-ai."
                 ) from e
-            logger.info("SILMA-TTS model loaded successfully.")
+            logger.info(
+                "SILMA-TTS model loaded successfully. [TTS][CACHE] source=runtime_cache_loaded load_ms=%.1f",
+                (time.time() - load_started_at) * 1000.0,
+            )
 
         return self._model
 

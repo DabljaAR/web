@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 _silma_ref_audio_cache: dict[str, str] = {}
 PIPELINE_SEGMENTS_MODE_ALLOWED = {"stt_focused", "single", "tts_focused"}
 PIPELINE_SEGMENTS_MODE_DEFAULT = "single"
+NMT_FALLBACK_MODE_ALLOWED = {"stage2_only", "stage3_updated"}
+NMT_FALLBACK_MODE_DEFAULT = "stage2_only"
 
 
 def _env_s3_media_bucket() -> str:
@@ -216,6 +218,11 @@ class Settings(BaseSettings):
     NMT_HF_FALLBACK: str = os.getenv(
         "NMT_HF_FALLBACK", "facebook/nllb-200-distilled-600M"
     )
+    # stage2_only: stop after stage-2 retry
+    # stage3_updated: continue to stage-3 only when updated Arabic/mixed-token score is high
+    NMT_FALLBACK_MODE: str = os.getenv(
+        "NMT_FALLBACK_MODE", NMT_FALLBACK_MODE_DEFAULT
+    )
 
     # ========== HUGGINGFACE AUTHENTICATION ==========
     HF_TOKEN: str = os.getenv(
@@ -275,6 +282,22 @@ class Settings(BaseSettings):
             raw_mode = PIPELINE_SEGMENTS_MODE_DEFAULT
 
         object.__setattr__(self, "PIPELINE_SEGMENTS_MODE", raw_mode)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_nmt_fallback_mode(self) -> "Settings":
+        """Normalize and validate NMT fallback mode."""
+        raw_mode = str(self.NMT_FALLBACK_MODE or "").strip().lower()
+        if raw_mode not in NMT_FALLBACK_MODE_ALLOWED:
+            logger.warning(
+                "Invalid NMT_FALLBACK_MODE=%r. Allowed=%s; falling back to %s.",
+                self.NMT_FALLBACK_MODE,
+                sorted(NMT_FALLBACK_MODE_ALLOWED),
+                NMT_FALLBACK_MODE_DEFAULT,
+            )
+            raw_mode = NMT_FALLBACK_MODE_DEFAULT
+
+        object.__setattr__(self, "NMT_FALLBACK_MODE", raw_mode)
         return self
 
     # ========== DUBBING / MERGE ==========

@@ -170,6 +170,7 @@ def stt_transcribe(
     from app.media.storage import get_storage_service
     from app.stt.models import WhisperModelManager
 
+    task_started_at = time.time()
     whisper = WhisperModelManager()
     storage = get_storage_service()
 
@@ -226,12 +227,21 @@ def stt_transcribe(
         suffix = Path(file_key).suffix or ".mp3"
         local_path = Path(tmp_dir) / f"audio{suffix}"
 
+        download_started_at = time.time()
         downloaded = self._run_sync(storage.download(file_key, str(local_path)))
+        download_ms = (time.time() - download_started_at) * 1000.0
         if downloaded:
             logger.info("[STT] downloaded %s → %s", file_key, local_path)
         else:
             # Fallback: local storage absolute path
             local_path = Path(storage.get_absolute_path(file_key))
+
+        logger.info(
+            "[STT][TIMING] input_download_ms=%.1f | job=%s | source=%s",
+            download_ms,
+            job_id,
+            "remote" if downloaded else "local_fallback",
+        )
 
         self.update_progress(job_id, 25.0)
 
@@ -310,6 +320,13 @@ def stt_transcribe(
                 "processing_mode": processing_mode,
             }
 
+            logger.info(
+                "[STT][TIMING] transcribe_ms=%.1f | job=%s | segments=%d",
+                processing_time * 1000.0,
+                job_id,
+                len(structured_segments),
+            )
+
         except Exception as exc:
             logger.error("[STT] transcription error job=%s: %s", job_id, exc)
             raise self.retry(exc=exc)
@@ -356,7 +373,11 @@ def stt_transcribe(
                     "output_type": output_type,
                 },
             )
-            nmt_translate.apply_async(args=[nmt_job_id], queue="ai_nmt")
+            nmt_translate.apply_async(
+                args=[nmt_job_id],
+                kwargs={"enqueued_at": time.time()},
+                queue="ai_nmt",
+            )
             logger.info(
                 "[STT] NMT job %s dispatched | job=%s | segments=%d | output_type=%s",
                 nmt_job_id, job_id, len(structured_segments), output_type,
@@ -373,6 +394,11 @@ def stt_transcribe(
             metadata.get("duration", 0),
             metadata.get("segment_count", 0),
             processing_mode,
+        )
+        logger.info(
+            "[STT][TIMING] total_task_ms=%.1f | job=%s",
+            (time.time() - task_started_at) * 1000.0,
+            job_id,
         )
 
         return output
@@ -405,6 +431,7 @@ def tts_synthesize_segment(
     tts_metadata: Optional[dict] = None,
     output_type: str = "fullDubbing",
     video_id: Optional[str] = None,
+    enqueued_at: Optional[float] = None,
 ) -> dict:
     """
     Synthesize one translated segment using the configured voice.
@@ -419,6 +446,15 @@ def tts_synthesize_segment(
     import shutil
     import tempfile
     from app.jobs.celery_app import synthesize_tts
+
+    task_started_at = time.time()
+    if enqueued_at:
+        logger.info(
+            "[TTS][TIMING] segment_queue_wait_ms=%.1f | tts_job=%s | segment_id=%s",
+            (task_started_at - enqueued_at) * 1000.0,
+            tts_job_id or job_id,
+            segment_id,
+        )
 
     result: dict = {
         "segment_id": segment_id, "start": start, "end": end,
@@ -445,29 +481,47 @@ def tts_synthesize_segment(
         ref_local = None
         _tmp_dir = tempfile.mkdtemp()
         try:
+            ref_download_ms = 0.0
             if ref_clip_minio_key:
                 from app.media.storage import get_storage_service
                 _ref_path = os.path.join(_tmp_dir, "ref_clip.wav")
                 _loop = asyncio.new_event_loop()
+                ref_download_started_at = time.time()
                 try:
                     ok = _loop.run_until_complete(
                         get_storage_service().download(ref_clip_minio_key, _ref_path)
                     )
                 finally:
                     _loop.close()
+                ref_download_ms = (time.time() - ref_download_started_at) * 1000.0
                 if ok and os.path.exists(_ref_path):
                     ref_local = _ref_path
+
+            if ref_clip_minio_key:
+                logger.info(
+                    "[TTS][TIMING] ref_download_ms=%.1f | tts_job=%s | segment_id=%s",
+                    ref_download_ms,
+                    tts_job_id or job_id,
+                    segment_id,
+                )
 
             if not ref_local:
                 from app.config import settings
                 ref_local = settings.get_silma_reference_audio() or None
 
+            synth_started_at = time.time()
             tts_result = synthesize_tts.run(
                 text=text.strip(),
                 ref_audio_path=ref_local,
                 job_id=f"{job_id}_seg_{segment_id}",
                 upload_to_minio=True,
                 minio_key=minio_segment_key,
+            )
+            logger.info(
+                "[TTS][TIMING] synth_and_upload_ms=%.1f | tts_job=%s | segment_id=%s",
+                (time.time() - synth_started_at) * 1000.0,
+                tts_job_id or job_id,
+                segment_id,
             )
             result["tts_key"] = tts_result.get("minio_key")
             result["audio_url"] = tts_result.get("audio_url")
@@ -486,6 +540,13 @@ def tts_synthesize_segment(
                 result["tts_error_code"] = "tts_tashkeel_init_mismatch"
         finally:
             shutil.rmtree(_tmp_dir, ignore_errors=True)
+
+    logger.info(
+        "[TTS][TIMING] total_segment_task_ms=%.1f | tts_job=%s | segment_id=%s",
+        (time.time() - task_started_at) * 1000.0,
+        tts_job_id or job_id,
+        segment_id,
+    )
 
     # ── Redis counter: detect when all segments are done ─────────────────────
     # celery_app.backend.client is a Redis client — requires Redis result backend.

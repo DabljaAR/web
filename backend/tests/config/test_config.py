@@ -215,3 +215,27 @@ class TestSettings:
         settings = Settings()
         assert settings.PIPELINE_SEGMENTS_MODE == "single"
         assert "Invalid PIPELINE_SEGMENTS_MODE" in caplog.text
+
+    def test_nmt_fallback_mode_default(self):
+        """NMT_FALLBACK_MODE defaults to stage2_only when unset."""
+        if "NMT_FALLBACK_MODE" in os.environ:
+            del os.environ["NMT_FALLBACK_MODE"]
+
+        settings = Settings()
+        assert settings.NMT_FALLBACK_MODE == "stage2_only"
+
+    @pytest.mark.parametrize("mode", ["stage2_only", "stage3_updated"])
+    def test_nmt_fallback_mode_accepts_valid_values(self, mode):
+        """NMT_FALLBACK_MODE accepts the canonical string values."""
+        os.environ["NMT_FALLBACK_MODE"] = mode
+
+        settings = Settings()
+        assert settings.NMT_FALLBACK_MODE == mode
+
+    def test_nmt_fallback_mode_invalid_warns_and_falls_back(self, caplog):
+        """Invalid NMT_FALLBACK_MODE should warn and fallback to stage2_only."""
+        os.environ["NMT_FALLBACK_MODE"] = "not_a_valid_mode"
+
+        settings = Settings()
+        assert settings.NMT_FALLBACK_MODE == "stage2_only"
+        assert "Invalid NMT_FALLBACK_MODE" in caplog.text

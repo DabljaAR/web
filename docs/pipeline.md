@@ -34,6 +34,18 @@ Benefits:
 - Better worker utilization
 - Faster first audio availability
 
+## NMT Fallback Mode
+
+NMT quality fallback depth is controlled by `NMT_FALLBACK_MODE`:
+
+- `stage2_only`: run stage-1 and stage-2 retry, then stop
+- `stage3_updated`: continue to stage-3 word-by-word only when updated quality score is high
+
+The updated stage-3 quality score combines:
+
+- Arabic script ratio: Arabic letters / all alphabetic letters
+- Mixed-token penalty: penalizes mixed-script tokens like `multi-النموذج`
+
 ## Validation Checklist
 
 1. Start stack and workers with fresh code
