@@ -212,6 +212,7 @@ jobs:
           fi
 
           docker run --rm \
+            --env-file "$APP_DIR/$ENV_FILE" \
             -v "$APP_DIR/Caddyfile.minimal:/etc/caddy/Caddyfile:ro" \
             caddy:2.10-alpine \
             caddy validate --config /etc/caddy/Caddyfile
