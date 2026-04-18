@@ -1,9 +1,11 @@
 import React, { memo } from 'react';
 import type { RecentJob } from '../../types/job';
+import { formatDateLongDMY } from '../../utils/formatters';
 
 interface HistoryItemProps {
   item: RecentJob;
   t: (key: string) => string;
+  language?: string;
   onPreview: (item: RecentJob) => void;
   onDownload: (item: RecentJob) => void;
   onDelete: (id: string) => void;
@@ -16,6 +18,7 @@ interface HistoryItemProps {
 const HistoryItem: React.FC<HistoryItemProps> = memo(({ 
   item, 
   t, 
+  language,
   onPreview, 
   onDownload, 
   onDelete,
@@ -55,6 +58,23 @@ const HistoryItem: React.FC<HistoryItemProps> = memo(({
   const isVideo = item.mediaType === 'VIDEO' || (!item.mediaType && /\.(mp4|mov|avi|mkv)$/i.test(nameForMatch));
   const isAudio = item.mediaType === 'AUDIO' || (!item.mediaType && /\.(mp3|wav|m4a)$/i.test(nameForMatch));
 
+  const resolvedLocale = language === 'ar'
+    ? 'ar-EG-u-nu-latn'
+    : (language === 'en' ? 'en-US' : (language || (typeof navigator !== 'undefined' ? navigator.language : 'en-US')));
+
+  const dateText = item.date && !Number.isNaN(new Date(item.date).getTime())
+    ? formatDateLongDMY(item.date, resolvedLocale)
+    : (t('history.noDate') || 'N/A');
+
+  const typeTextRaw = isVideo
+    ? (t('originalVideos.video') || 'Video')
+    : isAudio
+      ? (t('originalVideos.audio') || 'Audio')
+      : (t('originalVideos.text') || 'Text');
+  const typeText = language === 'en'
+    ? `${typeTextRaw}`.slice(0, 1).toUpperCase() + `${typeTextRaw}`.slice(1).toLowerCase()
+    : typeTextRaw;
+
   return (
     <div className="history-item">
       <div className="item-content">
@@ -78,12 +98,9 @@ const HistoryItem: React.FC<HistoryItemProps> = memo(({
           </div>
 
           <div className="item-info">
-            <span>
-              {item.date && !Number.isNaN(new Date(item.date).getTime())
-                ? new Date(item.date).toLocaleDateString()
-                : (t('history.noDate') || 'N/A')}
-            </span>
-            {item.mediaType && <span className="item-type-badge">{item.mediaType}</span>}
+            <span className="item-date">{dateText}</span>{' '}
+           <br />
+            <span className="item-type-inline">{typeText}</span>
           </div>
 
           <div className="item-actions">

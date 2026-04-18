@@ -69,7 +69,7 @@ const YoutubeModal = ({
               style={{ width: '100%' }}
             >
               <option value="video">🎬 {t('originalVideos.youtubeFormatVideo') || 'Video'}</option>
-              <option value="audio">🎵 {t('originalVideos.youtubeFormatAudio') || 'Audio'}</option>
+              <option value="audio">🎵 {t('originalVideos.youtubeFormatAudio') || 'Audio only'}</option>
             </select>
           </div>
           {youtubeFormat === 'video' && (
@@ -113,7 +113,7 @@ const YoutubeModal = ({
             disabled={!youtubeUrl.trim() || isYoutubeDownloading}
             style={{ height: '48px', justifyContent: 'center' }}
           >
-            {t('common.confirm') || 'Select for Dubbing'}
+            {t('originalVideos.youtubeDownloadBtn') || 'Download & Import'}
           </button>
         </div>
       </div>

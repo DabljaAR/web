@@ -24,7 +24,7 @@ import '../../styles/dashboard-job-item.css';
 
 
 const Dashboard = () => {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   usePageTitle('nav.dashboard');
   const tx = (key, fallback) => {
     const value = t(key);
@@ -274,7 +274,7 @@ const Dashboard = () => {
       
       const newJob = {
         id: response.id || 'temp-yt-id',
-        name: `Dubbing: YouTube Video`,
+        name: t('dashboard.youtubeJobName') || 'Dubbing: YouTube Video',
         status: 'queued',
         estTime: 'Processing...'
       };
@@ -282,11 +282,12 @@ const Dashboard = () => {
       setProcessingJobs(prev => [newJob, ...prev]);
       setIsPolling(true);
       setSelectedYoutubeInfo(null);
-      toast.success(t('dashboard.uploadSuccess') || 'YouTube import and dubbing started!');
+      toast.success(t('dashboard.youtubeDubbingStarted') || 'YouTube import and dubbing started!');
     } catch (error) {
       const errMsg = error.message || "Unknown error";
-      setUploadError("YouTube download failed: " + errMsg);
-      toast.error("YouTube download failed: " + errMsg);
+      const ytFailedPrefix = t('dashboard.youtubeDownloadFailed') || 'YouTube download failed';
+      setUploadError(`${ytFailedPrefix}: ${errMsg}`);
+      toast.error(`${ytFailedPrefix}: ${errMsg}`);
     } finally {
       setIsUploading(false);
     }
@@ -613,8 +614,8 @@ const Dashboard = () => {
                 >
                   <div className="upload-icon">▶️</div>
                   <div className="upload-text">
-                    <h3>YouTube</h3>
-                    <p>Import from YouTube URL</p>
+                    <h3>{t('originalVideos.youtubeCardTitle')}</h3>
+                    <p>{t('originalVideos.youtubeCardSubtitle')}</p>
                   </div>
                 </div>
               </div>
@@ -637,7 +638,7 @@ const Dashboard = () => {
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-light)' }}>
                     {selectedFile ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB` :
                       selectedLibraryFile ? t('dashboard.selectedFromLibrary') || 'Selected from library' :
-                        'YouTube Video'}
+                        (t('dashboard.youtubeSelectedLabel') || 'YouTube Video')}
                   </div>
                 </div>
               </div>
@@ -650,7 +651,7 @@ const Dashboard = () => {
                     setSelectedYoutubeInfo(null);
                     if (fileInputRef.current) fileInputRef.current.value = '';
                   }}
-                  title="Change selection"
+                  title={t('common.changeSelection') || 'Change selection'}
                 >
                   ✕
                 </button>
@@ -866,6 +867,7 @@ const Dashboard = () => {
         <JobList 
           recentJobs={recentJobs}
           t={t}
+          language={language}
           handlePreview={handlePreview}
           handleDownload={handleDownload}
           handleDelete={handleDelete}

@@ -3,10 +3,11 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from '../../hooks/useTranslation';
 import { mediaService } from '../../services/mediaService';
 import LoadingSpinner from '../common/LoadingSpinner';
+import { formatDateNumeric } from '../../utils/formatters';
 import './FileSelectorModal.css';
 
 const FileSelectorModal = ({ isOpen, onClose, onSelect, activeTab }) => {
-    const { t } = useTranslation();
+    const { t, language } = useTranslation();
     const [files, setFiles] = useState([]);
     const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState('');
@@ -59,11 +60,16 @@ const FileSelectorModal = ({ isOpen, onClose, onSelect, activeTab }) => {
         return `${mb.toFixed(1)} MB`;
     };
 
-    const formatDate = (dateString) => {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toLocaleDateString();
-    };
+    const resolvedLocale = language === 'ar'
+        ? 'ar'
+        : (language === 'en' ? 'en-US' : (language || (typeof navigator !== 'undefined' ? navigator.language : 'en-US')));
+
+    const typeTextRaw = activeTab === 'video'
+        ? (t('originalVideos.video') || 'Video')
+        : activeTab === 'audio'
+            ? (t('originalVideos.audio') || 'Audio')
+            : (t('originalVideos.text') || 'Text');
+    const typeText = language === 'en' ? typeTextRaw.toUpperCase() : typeTextRaw;
 
     const content = (
         <div className="file-selector-backdrop" onClick={handleBackdropClick}>
@@ -108,7 +114,7 @@ const FileSelectorModal = ({ isOpen, onClose, onSelect, activeTab }) => {
                                         <div className="file-meta">
                                             <span>{formatSize(file.size_bytes)}</span>
                                             <span>•</span>
-                                            <span>{formatDate(file.created_at)}</span>
+                                            <span>{`${formatDateNumeric(file.created_at, resolvedLocale)} ${typeText}`}</span>
                                         </div>
                                     </div>
                                 </div>

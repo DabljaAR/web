@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import BackgroundDecorations from '../../components/home/BackgroundDecorations';
 import Navbar from '../../components/layout/Navbar';
+import InstallAppButton from '../../components/common/InstallAppButton';
 import HeroSection from '../../components/home/HeroSection';
 import ProblemSection from '../../components/home/ProblemSection';
 import FeaturesSection from '../../components/home/FeaturesSection';
@@ -33,6 +34,9 @@ const Home = () => {
     <div>
       <BackgroundDecorations />
       <Navbar />
+      <div className="pwa-install-fab" aria-label="Install app">
+        <InstallAppButton className="pwa-install-fab-btn" />
+      </div>
       <HeroSection />
       <ProblemSection />
       <HowItWorksSection />

@@ -87,17 +87,36 @@
   background: transparent;
   border: none;
   color: var(--text-light);
-  font-size: 16px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.2s, color 0.2s, opacity 0.2s;
+}
+
+.vtm-ctrl-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .vtm-ctrl-btn:hover {
   background: rgba(0, 0, 0, 0.06);
   color: var(--text-dark);
+}
+
+.vtm-ctrl-btn.vtm-disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.vtm-ctrl-btn.vtm-disabled:hover {
+  background: transparent;
+  color: var(--text-light);
 }
 
 [data-theme="dark"] .vtm-ctrl-btn:hover {
@@ -314,6 +333,18 @@
   flex-wrap: wrap;
 }
 
+.vtm-srt-btns {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.vtm-srt-btn {
+  font-size: 0.78rem;
+  padding: 4px 10px;
+}
+
 .vtm-back-btn {
   font-size: 0.85rem;
   padding: 8px 16px;
@@ -425,6 +456,377 @@
     max-height: none;
     overflow: visible;
   }
+}
+
+/* ── Captioned video player ─────────────────────────────────────────────── */
+.vtm-video-wrapper {
+  background: #000;
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Isolated positioning context for video + caption */
+.vtm-video-area {
+  position: relative;
+  line-height: 0; /* collapse whitespace gap below video */
+}
+
+.vtm-video {
+  width: 100%;
+
+  display: block;
+  /* max-height: 360px; */
+  background: #000;
+  object-fit: contain;
+}
+
+.vtm-container.vtm-maximized .vtm-video {
+  max-height: calc(100vh - 200px);
+}
+
+/* YouTube-style caption overlay */
+.vtm-caption-overlay {
+  position: absolute;
+  /* keep captions above native controls + device safe-area */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 52px); /* ~44px controls + padding */
+  left: 0;
+  right: 0;
+  padding: 0 16px; /* prevent edge clipping in fullscreen */
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 10;
+  animation: vtm-caption-in 0.12s ease;
+}
+
+@keyframes vtm-caption-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.vtm-caption-text {
+  display: inline-block;
+  max-width: min(92vw, 980px);
+  background: rgba(8, 8, 8, 0.85);
+  color: #fff;
+  font-size: 1.15rem;
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  line-height: 1.9;
+  padding: 4px 10px;
+  border-radius: 4px;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  letter-spacing: 0.01em;
+  /* each wrapped line gets its own background — YouTube signature look */
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.vtm-caption-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.85);
+  flex-shrink: 0;
+}
+
+.vtm-caption-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  font-family: 'Inter', sans-serif;
+  margin-right: 4px;
+}
+
+.vtm-cc-btn {
+  padding: 3px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.75rem;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.vtm-cc-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.vtm-cc-btn.active {
+  background: var(--accent-blue, #3b82f6);
+  border-color: var(--accent-blue, #3b82f6);
+  color: #fff;
+}
+
+.vtm-bar-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.2);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+/* ── Floating settings widget (inline + fullscreen) ────────────────────── */
+.vtm-fs-widget {
+  position: absolute;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* Normal (not fullscreen): keep it at the TOP like a player overlay */
+.vtm-fs-widget.vtm-fs-widget--inline {
+  top: 12px;
+}
+
+/* Fullscreen: keep it near bottom-right above controls */
+.vtm-fs-widget.vtm-fs-widget--fs {
+  bottom: 72px;
+}
+
+.vtm-fs-settings-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.2s;
+  flex-shrink: 0;
+}
+.vtm-fs-settings-btn:hover   { background: rgba(0, 0, 0, 0.92); }
+.vtm-fs-settings-btn.open    { background: var(--accent-blue, #3b82f6); border-color: var(--accent-blue, #3b82f6); transform: rotate(45deg); }
+
+.vtm-fs-panel {
+  background: rgba(10, 10, 10, 0.88);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 180px;
+  animation: vtm-panel-in 0.15s ease;
+}
+
+@keyframes vtm-panel-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.vtm-fs-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vtm-fs-panel-label {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  font-family: 'Inter', sans-serif;
+}
+
+.vtm-fs-panel-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vtm-fs-option-btn {
+  padding: 4px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.78rem;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.vtm-fs-option-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.vtm-fs-option-btn.active {
+  background: var(--accent-blue, #3b82f6);
+  border-color: var(--accent-blue, #3b82f6);
+  color: #fff;
+}
+
+/* ── Bottom-bar fullscreen toggle button ────────────────────────────────── */
+.vtm-fs-toggle-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.vtm-fs-toggle-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+/* ── Fullscreen: match native player (no reserved black area) ───────────── */
+.vtm-video-area:-webkit-full-screen,
+.vtm-video-area:fullscreen {
+  /* Some browsers don't resolve 100% in fullscreen reliably; pin to viewport */
+  position: fixed;
+  inset: 0;
+  background: #000;
+  width: 100vw;
+  height: 100vh;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.vtm-video-area:-webkit-full-screen .vtm-video,
+.vtm-video-area:fullscreen .vtm-video {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+
+  /* Keep full frame visible (no cropping). If you want NO black bars, change to 'cover'. */
+  object-fit: contain;
+  background: #000;
+}
+
+/* hide native fullscreen button (Chrome/Safari) */
+.vtm-video::-webkit-media-controls-fullscreen-button { display: none !important; }
+
+/* Captions overlay on video (like your screenshot) */
+.vtm-video-area:-webkit-full-screen .vtm-caption-overlay,
+.vtm-video-area:fullscreen .vtm-caption-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding: 0 16px;
+
+  /* keep captions above native controls + device safe-area */
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 52px);
+
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+
+  pointer-events: none;
+  z-index: 20;
+  background: transparent;
+}
+
+.vtm-video-area:-webkit-full-screen .vtm-caption-text,
+.vtm-video-area:fullscreen .vtm-caption-text {
+  font-size: 1.4rem;
+  padding: 6px 14px;
+  max-width: min(94vw, 1100px);
+}
+
+/* Keep the fullscreen settings button visible above controls */
+.vtm-video-area:-webkit-full-screen .vtm-fs-widget,
+.vtm-video-area:fullscreen .vtm-fs-widget {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
+}
+
+/* ── Segments list ──────────────────────────────────────────────────────── */
+.vtm-segments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 200px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+
+.vtm-container.vtm-maximized .vtm-segments-list {
+  max-height: calc(100vh - 280px);
+}
+
+.vtm-segment-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--bg-primary);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 10px;
+  padding: 10px 14px;
+  transition: background 0.15s;
+}
+
+.vtm-segment-row:hover {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+[data-theme="dark"] .vtm-segment-row {
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.vtm-segment-time {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.08);
+  border-radius: 6px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.vtm-segment-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.vtm-segment-original {
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--text-dark);
+  font-family: 'Inter', sans-serif;
+}
+
+.vtm-segment-translation {
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-medium);
+  font-family: 'Inter', sans-serif;
+  font-style: italic;
+  padding-top: 2px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.1);
+  display: block;
+}
+
+[data-theme="dark"] .vtm-segment-translation {
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 /* ── Mobile — bottom sheet ──────────────────────────────────────────────── */
