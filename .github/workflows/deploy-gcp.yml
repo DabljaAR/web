@@ -12,9 +12,8 @@ on:
     paths:
       - backend/**
       - frontend/**
-      - docker-compose.yml
-      - docker-compose.prod.yml
-      - Caddyfile
+      - docker-compose.prod.minimal.yml
+      - Caddyfile.minimal
       - .github/workflows/deploy-gcp.yml
 
 permissions:
@@ -136,6 +135,12 @@ jobs:
 
           require_env DOMAIN
           require_env ACME_EMAIL
+          require_env FLOWER_BASIC_AUTH
+          require_env S3_ENDPOINT_URL
+          require_env S3_ACCESS_KEY_ID
+          require_env S3_SECRET_ACCESS_KEY
+          require_env S3_MEDIA_BUCKET
+          require_env S3_MODELS_BUCKET
 
           git fetch --prune origin
           git checkout "$TARGET_BRANCH"
@@ -186,19 +191,21 @@ jobs:
             exit 1
           fi
 
+          COMPOSE_FILES="-f docker-compose.prod.minimal.yml"
+
           # Start infra first so migrations can run cleanly.
-          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d postgres redis minio
+          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES up -d postgres redis
 
           # Run DB migrations before starting app services.
           # Use a direct entrypoint override to avoid the backend entrypoint running app startup command paths.
-          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml run --rm --entrypoint sh backend -lc "alembic upgrade head"
+          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES run --rm --entrypoint sh backend -lc "alembic upgrade head"
 
           # Start application services after schema is up to date.
-          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml up -d --build backend celery-worker-media celery-worker-ai flower caddy
-          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml ps
+          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES up -d --build backend celery-worker-ai flower caddy
+          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES ps
 
           # Ensure Caddy reloads after frontend dist + backend rollout.
-          $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml restart caddy
+          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES restart caddy
 
           backend_healthy=false
           for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -211,8 +218,8 @@ jobs:
 
           if [ "$backend_healthy" != "true" ]; then
             echo "Backend health check failed after deploy. Recent backend/caddy logs:"
-            $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml logs --tail=200 backend caddy || true
-            $COMPOSE_CMD --env-file "$ENV_FILE" -f docker-compose.yml -f docker-compose.prod.yml ps || true
+            $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES logs --tail=200 backend caddy || true
+            $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES ps || true
             exit 1
           fi
 
@@ -229,5 +236,5 @@ jobs:
             echo "- Repository SHA: ${{ github.sha }}"
             echo "- Target branch: ${{ env.TARGET_BRANCH }}"
             echo "- Target VM path: ${{ env.APP_DIR }}"
-            echo "- Compose profile: docker-compose.yml + docker-compose.prod.yml"
+            echo "- Compose profile: docker-compose.prod.minimal.yml"
           } >> "$GITHUB_STEP_SUMMARY"
