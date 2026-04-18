@@ -1,0 +1,221 @@
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: dabljaar_caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "127.0.0.1:2019:2019"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required for production}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required for production}
+    depends_on:
+      backend:
+        condition: service_healthy
+      flower:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile.minimal:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: dabljaar_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-dabljaar}
+    volumes:
+      - dabljaar_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-dabljaar}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: dabljaar_redis
+    volumes:
+      - dabljaar_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+      args:
+        INSTALL_AI: "true"
+    container_name: dabljaar_backend
+    ports: []
+    volumes: []
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+    environment:
+      INSTALL_AI: "true"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:?S3_MEDIA_BUCKET is required}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:?S3_MODELS_BUCKET is required}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?S3_ENDPOINT_URL is required}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_SECURE: ${S3_SECURE:-true}
+      PIPELINE_SEGMENTS_MODE: ${PIPELINE_SEGMENTS_MODE:-single}
+      ENVIRONMENT: production
+      DEBUG: "false"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  celery-worker-ai:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+      args:
+        INSTALL_AI: "true"
+    container_name: dabljaar_worker_ai
+    entrypoint: []
+    command: celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
+    volumes:
+      - nmt_model_cache:/model-cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
+      INSTALL_AI: "true"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:?S3_MEDIA_BUCKET is required}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:?S3_MODELS_BUCKET is required}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?S3_ENDPOINT_URL is required}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_SECURE: ${S3_SECURE:-true}
+      PIPELINE_SEGMENTS_MODE: ${PIPELINE_SEGMENTS_MODE:-single}
+      ENVIRONMENT: production
+      DEBUG: "false"
+      STT_DEVICE: ${STT_DEVICE:-cpu}
+      STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-auto}
+      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
+      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
+      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
+      SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
+      SILMA_REFERENCE_AUDIO: ${SILMA_REFERENCE_AUDIO:-}
+      SILMA_REFERENCE_TEXT: ${SILMA_REFERENCE_TEXT:-ويدقق النظر في القرآن الكريم وسائر الكتب السماوية ويتبع مسالك الرسل العظام عليهم الصلاة والسلام.}
+      TTS_DEFAULT_SPEED: ${TTS_DEFAULT_SPEED:-0.9}
+      TTS_DEFAULT_CFG_STRENGTH: ${TTS_DEFAULT_CFG_STRENGTH:-2.0}
+      TTS_DEFAULT_NFE_STEP: ${TTS_DEFAULT_NFE_STEP:-64}
+      TTS_DEFAULT_SWAY_COEF: ${TTS_DEFAULT_SWAY_COEF:--1.0}
+      TTS_DEFAULT_TARGET_RMS: ${TTS_DEFAULT_TARGET_RMS:-0.12}
+      TTS_ENABLE_NORMALIZER: ${TTS_ENABLE_NORMALIZER:-true}
+      TTS_FORCE_TASHKEEL: ${TTS_FORCE_TASHKEEL:-false}
+      DUBBING_MERGE_PATH: ${DUBBING_MERGE_PATH:-/tmp/dubbing_merge}
+      DUBBING_TEMP_DIR: ${DUBBING_TEMP_DIR:-/tmp/dubbing_merge}
+      DUBBING_MAX_STRETCH_RATIO: ${DUBBING_MAX_STRETCH_RATIO:-1.2}
+      DUBBING_MIN_STRETCH_RATIO: ${DUBBING_MIN_STRETCH_RATIO:-0.8}
+      DUBBING_SILENCE_THRESHOLD: ${DUBBING_SILENCE_THRESHOLD:-0.1}
+      NMT_MODEL_LOCAL_PATH: /model-cache/nmt-v4
+      NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
+      NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+      HF_HUB_DOWNLOAD_TIMEOUT: ${HF_HUB_DOWNLOAD_TIMEOUT:-120}
+      HF_HOME: ${HF_HOME:-/model-cache/hf}
+      HUGGINGFACE_HUB_CACHE: ${HUGGINGFACE_HUB_CACHE:-/model-cache/hf/hub}
+      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/model-cache/hf/transformers}
+      XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
+      TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
+      CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: dabljaar_flower
+    entrypoint: []
+    command: celery -A app.jobs.celery_app flower --port=5555
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery-worker-ai:
+        condition: service_started
+    environment:
+      FLOWER_BASIC_AUTH: ${FLOWER_BASIC_AUTH:?FLOWER_BASIC_AUTH is required}
+      FLOWER_INSPECT_TIMEOUT: ${FLOWER_INSPECT_TIMEOUT:-15000}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    ports: []
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+volumes:
+  dabljaar_postgres_data:
+  dabljaar_redis_data:
+  nmt_model_cache:
+  caddy_data:
+  caddy_config:
+
+networks:
+  dabljaar_network:
+    driver: bridge
