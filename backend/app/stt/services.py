@@ -28,6 +28,7 @@ from app.media.models import Video
 from app.media.storage import get_storage_service
 from app.stt.models import WhisperModelManager
 from app.stt.schema import TranscriptionResponse, TranscriptionMetadata, TranscriptionSegment
+from app.shared.processing_mode import resolve_processing_mode
 
 logger = logging.getLogger(__name__)
 
@@ -168,9 +169,7 @@ class TranscriptionService:
         # video_id is nullable on the Job model — fine to pass None
         output_type = "fullDubbing"
         processing_mode = (
-            "single_chunk"
-            if settings.PIPELINE_USE_SINGLE_CHUNK and output_type in CHUNK_ELIGIBLE_OUTPUT_TYPES
-            else "segmented"
+            resolve_processing_mode(output_type)
         )
         job = Job(
             id=str(uuid.uuid4()),

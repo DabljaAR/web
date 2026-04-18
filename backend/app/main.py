@@ -55,9 +55,9 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Application starting up...")
     logger.info(f"Environment: {settings.ENVIRONMENT} | Debug: {settings.DEBUG}")
     logger.info(
-        "Pipeline mode default: %s (PIPELINE_USE_SINGLE_CHUNK=%s)",
-        "single_chunk" if settings.PIPELINE_USE_SINGLE_CHUNK else "segmented",
-        settings.PIPELINE_USE_SINGLE_CHUNK,
+        "Pipeline mode default: %s (PIPELINE_SEGMENTS_MODE=%s)",
+        settings.PIPELINE_SEGMENTS_MODE,
+        settings.PIPELINE_SEGMENTS_MODE,
     )
     logger.info("=" * 80)
 

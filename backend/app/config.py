@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 # Cache S3-downloaded SILMA reference paths by object key (worker process lifetime).
 _silma_ref_audio_cache: dict[str, str] = {}
+PIPELINE_SEGMENTS_MODE_ALLOWED = {"stt_focused", "single", "tts_focused"}
+PIPELINE_SEGMENTS_MODE_DEFAULT = "single"
 
 
 def _env_s3_media_bucket() -> str:
@@ -51,7 +53,9 @@ def _download_silma_reference(s3_key: str) -> str:
         ok = _asyncio.run(get_storage_service().download(s3_key, dest))
         if ok and os.path.exists(dest):
             _silma_ref_audio_cache[s3_key] = dest
-            logger.info("[TTS] Downloaded SILMA reference audio key=%s → %s", s3_key, dest)
+            logger.info(
+                "[TTS] Downloaded SILMA reference audio key=%s → %s", s3_key, dest
+            )
             return dest
     except Exception as exc:
         logger.error("[TTS] S3 reference audio download failed: %s", exc)
@@ -60,25 +64,28 @@ def _download_silma_reference(s3_key: str) -> str:
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
-    
+
     model_config = ConfigDict(
         env_file=".env",
         case_sensitive=False,
-        extra="ignore"  # Ignore extra environment variables
+        extra="ignore",  # Ignore extra environment variables
     )
-    
+
     # ========== DATABASE ==========
     DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", 
-        "postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar"
+        "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar"
     )
-    
+
     # ========== AUTHENTICATION ==========
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
+    SECRET_KEY: str = os.getenv(
+        "SECRET_KEY", "your-secret-key-change-this-in-production"
+    )
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "300"))
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(
+        os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "300")
+    )
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
-    
+
     # Auth0 / Social configuration
     GOOGLE_REDIRECT_URL: str = os.getenv("GOOGLE_REDIRECT_URL", "")
     FACEBOOK_REDIRECT_URL: str = os.getenv("FACEBOOK_REDIRECT_URL", "")
@@ -107,19 +114,23 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY_ID: str = (os.getenv("S3_ACCESS_KEY_ID") or "").strip() or os.getenv(
         "MINIO_ACCESS_KEY", ""
     )
-    S3_SECRET_ACCESS_KEY: str = (os.getenv("S3_SECRET_ACCESS_KEY") or "").strip() or os.getenv(
-        "MINIO_SECRET_KEY", ""
-    )
+    S3_SECRET_ACCESS_KEY: str = (
+        os.getenv("S3_SECRET_ACCESS_KEY") or ""
+    ).strip() or os.getenv("MINIO_SECRET_KEY", "")
     # Media vs models buckets (may be the same name). Primary env: S3_MEDIA_BUCKET / S3_MODELS_BUCKET.
     S3_MEDIA_BUCKET: str = _env_s3_media_bucket()
-    S3_BUCKET_NAME: str = _env_s3_media_bucket()  # alias of S3_MEDIA_BUCKET for backward compatibility
+    S3_BUCKET_NAME: str = (
+        _env_s3_media_bucket()
+    )  # alias of S3_MEDIA_BUCKET for backward compatibility
     # NMT (and future STT/TTS weights in object storage) use this bucket + model-specific keys/prefixes.
     S3_MODELS_BUCKET: str = _env_s3_models_bucket()
-    NMT_MODEL_BUCKET: str = _env_s3_models_bucket()  # alias of S3_MODELS_BUCKET for backward compatibility
+    NMT_MODEL_BUCKET: str = (
+        _env_s3_models_bucket()
+    )  # alias of S3_MODELS_BUCKET for backward compatibility
     S3_REGION: str = os.getenv("S3_REGION", "")
     S3_SECURE: bool = (
-        (os.getenv("S3_SECURE") or os.getenv("MINIO_SECURE", "False")).lower() == "true"
-    )
+        os.getenv("S3_SECURE") or os.getenv("MINIO_SECURE", "False")
+    ).lower() == "true"
 
     @model_validator(mode="after")
     def _s3_empty_env_falls_back_to_minio(self) -> "Settings":
@@ -136,7 +147,7 @@ class Settings(BaseSettings):
     # Used when STORAGE_BACKEND=local (filesystem under LOCAL_STORAGE_DIR).
     LOCAL_STORAGE_DIR: str = os.getenv("LOCAL_STORAGE_DIR", "uploads")
     LOCAL_STORAGE_URL_PREFIX: str = os.getenv("LOCAL_STORAGE_URL_PREFIX", "/uploads")
-    
+
     # ========== LOGGING CONFIGURATION ==========
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     LOG_DIR: str = os.getenv("LOG_DIR", "logs")
@@ -144,10 +155,12 @@ class Settings(BaseSettings):
     LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
     LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
     LOG_ENABLE_CONSOLE: bool = os.getenv("LOG_ENABLE_CONSOLE", "True").lower() == "true"
-    LOG_TO_FILE: bool = os.getenv("LOG_TO_FILE", "True").lower() == "true"  # Set to False in production for stdout-only (12-factor app)
+    LOG_TO_FILE: bool = (
+        os.getenv("LOG_TO_FILE", "True").lower() == "true"
+    )  # Set to False in production for stdout-only (12-factor app)
     LOG_JSON_FORMAT: bool = os.getenv("LOG_JSON_FORMAT", "False").lower() == "true"
     LOG_ENABLE_SUCCESS: bool = os.getenv("LOG_ENABLE_SUCCESS", "True").lower() == "true"
-    
+
     # ========== SPEECH-TO-TEXT (STT) ==========
     STT_MODEL_SIZE: str = os.getenv("STT_MODEL_SIZE", "small")
     STT_DEVICE: str = os.getenv("STT_DEVICE", "auto")
@@ -155,43 +168,67 @@ class Settings(BaseSettings):
     STT_MAX_CONCURRENT: int = int(os.getenv("STT_MAX_CONCURRENT", "1"))
     STT_MAX_AUDIO_DURATION: int = int(os.getenv("STT_MAX_AUDIO_DURATION", "3600"))
     STT_MAX_FILE_SIZE_GB: float = float(os.getenv("STT_MAX_FILE_SIZE_GB", "5"))
-    STT_GPU_MEMORY_THRESHOLD: float = float(os.getenv("STT_GPU_MEMORY_THRESHOLD", "0.9"))
+    STT_GPU_MEMORY_THRESHOLD: float = float(
+        os.getenv("STT_GPU_MEMORY_THRESHOLD", "0.9")
+    )
     STT_RETRY_ATTEMPTS: int = int(os.getenv("STT_RETRY_ATTEMPTS", "3"))
     STT_RETRY_DELAY: int = int(os.getenv("STT_RETRY_DELAY", "2"))
     # Whisper (faster-whisper / CTranslate2): optional S3 prefix under S3_MODELS_BUCKET → STT_MODEL_LOCAL_PATH
     STT_MODEL_KEY: str = os.getenv("STT_MODEL_KEY", "")
     STT_MODEL_LOCAL_PATH: str = os.getenv("STT_MODEL_LOCAL_PATH", "")
-    
+
     # ========== TEXT-TO-SPEECH (TTS - SILMA) ==========
     SILMA_DEVICE: str = os.getenv("SILMA_DEVICE", "auto")  # "auto", "cpu", "cuda"
-    SILMA_REFERENCE_AUDIO: str = os.getenv("SILMA_REFERENCE_AUDIO", "")  # Path to reference audio for voice cloning
+    SILMA_REFERENCE_AUDIO: str = os.getenv(
+        "SILMA_REFERENCE_AUDIO", ""
+    )  # Path to reference audio for voice cloning
     # Default: transcript of the bundled ar.ref.24k.wav shipped with silma_tts
     SILMA_REFERENCE_TEXT: str = os.getenv(
         "SILMA_REFERENCE_TEXT",
         "ويدقق النظر في القرآن الكريم وسائر الكتب السماوية ويتبع مسالك الرسل العظام عليهم الصلاة والسلام.",
     )
-    TTS_DEFAULT_SPEED: float = float(os.getenv("TTS_DEFAULT_SPEED", "0.9"))  # Slightly slower = more natural Arabic pacing
-    TTS_DEFAULT_CFG_STRENGTH: float = float(os.getenv("TTS_DEFAULT_CFG_STRENGTH", "2.0"))  # F5-TTS paper default; 1.0 too weak
-    TTS_DEFAULT_NFE_STEP: int = int(os.getenv("TTS_DEFAULT_NFE_STEP", "64"))  # More diffusion steps = fewer robotic artifacts
-    TTS_DEFAULT_SWAY_COEF: float = float(os.getenv("TTS_DEFAULT_SWAY_COEF", "-1.0"))  # Sway sampling coefficient
-    TTS_DEFAULT_TARGET_RMS: float = float(os.getenv("TTS_DEFAULT_TARGET_RMS", "0.12"))  # Target RMS for audio normalization
-    TTS_ENABLE_NORMALIZER: bool = os.getenv("TTS_ENABLE_NORMALIZER", "True").lower() == "true"  # Enable text normalizer for better handling of numbers, dates, etc. in Arabic input text
-    TTS_FORCE_TASHKEEL: bool = os.getenv("TTS_FORCE_TASHKEEL", "False").lower() == "true"  # Force inclusion of Arabic diacritics (tashkeel) in input text for better pronunciation, at the cost of requiring properly formatted input
-    
+    TTS_DEFAULT_SPEED: float = float(
+        os.getenv("TTS_DEFAULT_SPEED", "0.9")
+    )  # Slightly slower = more natural Arabic pacing
+    TTS_DEFAULT_CFG_STRENGTH: float = float(
+        os.getenv("TTS_DEFAULT_CFG_STRENGTH", "2.0")
+    )  # F5-TTS paper default; 1.0 too weak
+    TTS_DEFAULT_NFE_STEP: int = int(
+        os.getenv("TTS_DEFAULT_NFE_STEP", "64")
+    )  # More diffusion steps = fewer robotic artifacts
+    TTS_DEFAULT_SWAY_COEF: float = float(
+        os.getenv("TTS_DEFAULT_SWAY_COEF", "-1.0")
+    )  # Sway sampling coefficient
+    TTS_DEFAULT_TARGET_RMS: float = float(
+        os.getenv("TTS_DEFAULT_TARGET_RMS", "0.12")
+    )  # Target RMS for audio normalization
+    TTS_ENABLE_NORMALIZER: bool = (
+        os.getenv("TTS_ENABLE_NORMALIZER", "True").lower() == "true"
+    )  # Enable text normalizer for better handling of numbers, dates, etc. in Arabic input text
+    TTS_FORCE_TASHKEEL: bool = (
+        os.getenv("TTS_FORCE_TASHKEEL", "False").lower() == "true"
+    )  # Force inclusion of Arabic diacritics (tashkeel) in input text for better pronunciation, at the cost of requiring properly formatted input
+
     # ========== NEURAL MACHINE TRANSLATION (NMT) ==========
     NMT_MODEL_LOCAL_PATH: str = os.getenv("NMT_MODEL_LOCAL_PATH", "/model-cache/nmt-v4")
     # Model object-storage prefix (bucket = S3_MODELS_BUCKET / NMT_MODEL_BUCKET above)
-    NMT_MODEL_KEY: str        = os.getenv("NMT_MODEL_KEY", "nmt-v4")
-    NMT_HF_FALLBACK: str      = os.getenv("NMT_HF_FALLBACK", "facebook/nllb-200-distilled-600M")
+    NMT_MODEL_KEY: str = os.getenv("NMT_MODEL_KEY", "nmt-v4")
+    NMT_HF_FALLBACK: str = os.getenv(
+        "NMT_HF_FALLBACK", "facebook/nllb-200-distilled-600M"
+    )
 
     # ========== HUGGINGFACE AUTHENTICATION ==========
-    HF_TOKEN: str = os.getenv("HF_TOKEN", "")  # HuggingFace access token for model downloads
-    HF_HOME: str = os.getenv("HF_HOME", os.path.expanduser("/model-cache/hf"))  # HuggingFace cache directory
+    HF_TOKEN: str = os.getenv(
+        "HF_TOKEN", ""
+    )  # HuggingFace access token for model downloads
+    HF_HOME: str = os.getenv(
+        "HF_HOME", os.path.expanduser("/model-cache/hf")
+    )  # HuggingFace cache directory
     # ========== SERVER ==========
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", "8000"))
     WORKERS: int = int(os.getenv("WORKERS", "1"))
-    
+
     # ========== CORS ==========
     CORS_ORIGINS: list = [
         "http://localhost:5173",
@@ -199,20 +236,46 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
     ]
-    
+
     # ========== ENVIRONMENT ==========
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
-    
+
     # ========== CELERY / REDIS ==========
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-    CELERY_RESULT_BACKEND: str = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+    CELERY_RESULT_BACKEND: str = os.getenv(
+        "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"
+    )
     WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", "2"))
 
     # ========== PIPELINE ==========
-    # Default-only switch: when enabled, selected output types run as a single
-    # chunk through STT -> NMT -> TTS while keeping response contracts stable.
-    PIPELINE_USE_SINGLE_CHUNK: bool = os.getenv("PIPELINE_USE_SINGLE_CHUNK", "false").lower() == "true"
+    # stt_focused: keep original segments generated by stt
+    # single: run all segments through the pipeline as a single chunk
+    # tts_focused: rebuild segments from words for better TTS output (experimental; may cause issues with timing and NMT)
+    PIPELINE_SEGMENTS_MODE: str = os.getenv(
+        "PIPELINE_SEGMENTS_MODE", PIPELINE_SEGMENTS_MODE_DEFAULT
+    )
+
+    @model_validator(mode="after")
+    def _validate_pipeline_segments_mode(self) -> "Settings":
+        """Normalize and validate pipeline mode, then warn-and-fallback on invalid values."""
+        raw_mode = str(self.PIPELINE_SEGMENTS_MODE or "").strip().lower()
+        if raw_mode in {"single_chunk", "true"}:
+            raw_mode = "single"
+        elif raw_mode in {"segmented", "false"}:
+            raw_mode = "stt_focused"
+
+        if raw_mode not in PIPELINE_SEGMENTS_MODE_ALLOWED:
+            logger.warning(
+                "Invalid PIPELINE_SEGMENTS_MODE=%r. Allowed=%s; falling back to %s.",
+                self.PIPELINE_SEGMENTS_MODE,
+                sorted(PIPELINE_SEGMENTS_MODE_ALLOWED),
+                PIPELINE_SEGMENTS_MODE_DEFAULT,
+            )
+            raw_mode = PIPELINE_SEGMENTS_MODE_DEFAULT
+
+        object.__setattr__(self, "PIPELINE_SEGMENTS_MODE", raw_mode)
+        return self
 
     # ========== DUBBING / MERGE ==========
     # Backward-compatible: older deployments use DUBBING_MERGE_PATH.
@@ -221,21 +284,28 @@ class Settings(BaseSettings):
     DUBBING_TEMP_DIR: str = os.getenv("DUBBING_TEMP_DIR", DUBBING_MERGE_PATH)
 
     # Audio timing controls (used during concat / stretching).
-    DUBBING_MAX_STRETCH_RATIO: float = float(os.getenv("DUBBING_MAX_STRETCH_RATIO", "1.2"))
-    DUBBING_MIN_STRETCH_RATIO: float = float(os.getenv("DUBBING_MIN_STRETCH_RATIO", "0.8"))
+    DUBBING_MAX_STRETCH_RATIO: float = float(
+        os.getenv("DUBBING_MAX_STRETCH_RATIO", "1.2")
+    )
+    DUBBING_MIN_STRETCH_RATIO: float = float(
+        os.getenv("DUBBING_MIN_STRETCH_RATIO", "0.8")
+    )
     # If the gap between segments is smaller than this (seconds), it will be treated as 0.
-    DUBBING_SILENCE_THRESHOLD: float = float(os.getenv("DUBBING_SILENCE_THRESHOLD", "0.1"))
+    DUBBING_SILENCE_THRESHOLD: float = float(
+        os.getenv("DUBBING_SILENCE_THRESHOLD", "0.1")
+    )
 
     def get_device(self) -> str:
         """Get the device (auto-detect if set to 'auto')."""
         if self.STT_DEVICE == "auto":
             try:
                 import torch
+
                 return "cuda" if torch.cuda.is_available() else "cpu"
             except:
                 return "cpu"
         return self.STT_DEVICE
-    
+
     def get_compute_type(self) -> str:
         """Get compute type (auto-select based on device and capability)."""
         if self.STT_COMPUTE_TYPE == "auto":
@@ -243,6 +313,7 @@ class Settings(BaseSettings):
             if device == "cuda":
                 try:
                     import torch
+
                     major, _ = torch.cuda.get_device_capability()
                     # Pascal (6.x) and older don't support efficient float16
                     if major >= 7:
@@ -252,7 +323,7 @@ class Settings(BaseSettings):
                     return "int8_float32"
             return "int8"
         return self.STT_COMPUTE_TYPE
-    
+
     def get_silma_reference_audio(self) -> str:
         """Return the SILMA reference audio path as a WAV file.
 
@@ -280,6 +351,7 @@ class Settings(BaseSettings):
 
         try:
             import importlib.util
+
             spec = importlib.util.find_spec("silma_tts")
             if spec:
                 pkg_root = (
@@ -288,7 +360,9 @@ class Settings(BaseSettings):
                     else (os.path.dirname(spec.origin) if spec.origin else None)
                 )
                 if pkg_root:
-                    bundled = os.path.join(pkg_root, "infer", "ref_audio_samples", "ar.ref.24k.wav")
+                    bundled = os.path.join(
+                        pkg_root, "infer", "ref_audio_samples", "ar.ref.24k.wav"
+                    )
                     if os.path.exists(bundled):
                         return bundled
         except Exception:
@@ -299,6 +373,7 @@ class Settings(BaseSettings):
         """Convert *src* to a 24 kHz mono WAV and return the new path. Falls back to *src* on error."""
         import subprocess
         import tempfile
+
         wav_path = os.path.join(
             tempfile.gettempdir(),
             os.path.splitext(os.path.basename(src))[0] + "_ref.wav",
@@ -308,7 +383,8 @@ class Settings(BaseSettings):
         try:
             subprocess.run(
                 ["ffmpeg", "-y", "-i", src, "-ar", "24000", "-ac", "1", wav_path],
-                check=True, capture_output=True,
+                check=True,
+                capture_output=True,
             )
             return wav_path
         except Exception:
@@ -318,7 +394,7 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """Check if running in production."""
         return self.ENVIRONMENT == "production"
-    
+
     @property
     def is_development(self) -> bool:
         """Check if running in development."""
