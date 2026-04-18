@@ -162,7 +162,7 @@ services:
         INSTALL_AI: "true"
     container_name: dabljaar_worker_ai
     entrypoint: []
-    command: celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
+    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
     environment:
       AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
       INSTALL_AI: "true"

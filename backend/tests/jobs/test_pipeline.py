@@ -179,6 +179,38 @@ class TestTtsCombineResults:
         assert "Permission denied" in (patched_task_calls[-1][1].get("error_message") or "")
 
 
+class TestTtsSynthesizeSegment:
+    def test_segment_marks_tashkeel_mismatch_error_code(self):
+        """do_tashkeel NoneType crashes should be tagged for incident triage."""
+        from app.jobs.tasks.pipeline import tts_synthesize_segment
+
+        with patch("app.jobs.tasks.pipeline.BaseJobTask._patch_job"), \
+             patch("app.jobs.tasks.pipeline.BaseJobTask._patch_task"), \
+             patch("app.jobs.celery_app.synthesize_tts") as mock_synthesize:
+            mock_synthesize.run.side_effect = AttributeError(
+                "'NoneType' object has no attribute 'do_tashkeel'"
+            )
+
+            result = tts_synthesize_segment.run(
+                segment_id=2,
+                job_id="job-tts-err",
+                text="مرحبا بالعالم",
+                start=0.0,
+                end=1.0,
+                minio_segment_key="tts/job-tts-err/seg_2.wav",
+                ref_clip_minio_key=None,
+                tts_job_id=None,
+                total_segments=None,
+                task_id=None,
+                tts_metadata=None,
+                output_type="fullDubbing",
+                video_id="vid-001",
+            )
+
+        assert "do_tashkeel" in result.get("tts_error", "")
+        assert result.get("tts_error_code") == "tts_tashkeel_init_mismatch"
+
+
 class TestProcessingModeHelpers:
     def test_apply_processing_mode_returns_single_chunk(self):
         """single mode should collapse segments to one transcript chunk."""
