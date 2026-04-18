@@ -550,8 +550,14 @@ class VideoService:
         background_tasks: BackgroundTasks,
         options: dict = None,
     ) -> Video:
-        import yt_dlp
         import asyncio
+        try:
+            import yt_dlp
+        except ModuleNotFoundError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="YouTube upload is not available: missing dependency 'yt-dlp'.",
+            ) from exc
         # logger.info(f"Options: test {options}")
         # Validate the video exists before creating any DB record
         ydl_opts = {"quiet": True, "skip_download": True, "noplaylist": True}
