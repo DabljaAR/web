@@ -482,6 +482,8 @@ def tts_synthesize_segment(
         except Exception as exc:
             logger.exception("[TTS] segment %d failed | job=%s: %s", segment_id, job_id, exc)
             result["tts_error"] = str(exc)
+            if isinstance(exc, AttributeError) and "do_tashkeel" in str(exc):
+                result["tts_error_code"] = "tts_tashkeel_init_mismatch"
         finally:
             shutil.rmtree(_tmp_dir, ignore_errors=True)
 
@@ -581,6 +583,7 @@ def tts_combine_results(
             "tts_key": r.get("tts_key"),
             "audio_url": r.get("audio_url"),
             **({"tts_error": r["tts_error"]} if r.get("tts_error") else {}),
+            **({"tts_error_code": r["tts_error_code"]} if r.get("tts_error_code") else {}),
         }
         for r in sorted_results
     ]

@@ -468,19 +468,35 @@ class SilmaTTSModelManager(Task):
             tmp_path = tmp_file.name
 
         try:
+            infer_kwargs = {
+                "ref_file": _ref_audio,
+                "ref_text": _ref_text,
+                "gen_text": clean_text,
+                "file_wave": tmp_path,
+                "seed": seed,
+                "speed": _speed,
+                "cfg_strength": _cfg,
+                "nfe_step": _nfe_step,
+                "sway_sampling_coef": _sway,
+                "target_rms": _rms,
+                # Keep infer-time behavior in sync with model initialization.
+                "force_tashkeel": settings.TTS_FORCE_TASHKEEL,
+            }
+
             # Run SILMA inference
-            wav, sr, spec = model.infer(
-                ref_file=_ref_audio,
-                ref_text=_ref_text,
-                gen_text=clean_text,
-                file_wave=tmp_path,
-                seed=seed,
-                speed=_speed,
-                cfg_strength=_cfg,
-                nfe_step=_nfe_step,
-                sway_sampling_coef=_sway,
-                target_rms=_rms,
-            )
+            try:
+                wav, sr, spec = model.infer(**infer_kwargs)
+            except AttributeError as exc:
+                # Defensive fallback for silma_tts internal tashkeel state issues.
+                is_tashkeel_none_error = "do_tashkeel" in str(exc)
+                if infer_kwargs["force_tashkeel"] and is_tashkeel_none_error:
+                    logger.warning(
+                        "SILMA infer hit tashkeel initialization error; retrying with force_tashkeel=False"
+                    )
+                    infer_kwargs["force_tashkeel"] = False
+                    wav, sr, spec = model.infer(**infer_kwargs)
+                else:
+                    raise
 
             # Read the generated audio file
             with open(tmp_path, "rb") as f:
