@@ -13,18 +13,10 @@ from app.media.ffmpeg_service import FFmpegService, MediaProcessingError
 from app.core.db import AsyncSessionLocal
 from app.jobs.models import Job, JobStatus, JobType
 from app.tasks.models import VideoTask
-from app.config import settings
+from app.shared.processing_mode import resolve_processing_mode
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-
-CHUNK_ELIGIBLE_OUTPUT_TYPES = {
-    "captionsOnly",
-    "captionsAndTranslation",
-    "translationAndTTS",
-    "fullDubbing",
-}
 
 
 def _utcnow() -> datetime:
@@ -32,9 +24,8 @@ def _utcnow() -> datetime:
 
 
 def _resolve_processing_mode(output_type: str) -> str:
-    if settings.PIPELINE_USE_SINGLE_CHUNK and output_type in CHUNK_ELIGIBLE_OUTPUT_TYPES:
-        return "single_chunk"
-    return "segmented"
+    """Backward-compatible wrapper around shared processing-mode resolution."""
+    return resolve_processing_mode(output_type)
 
 
 async def process_video_task(video_id: str, file_path_key: str, options: dict = None):
