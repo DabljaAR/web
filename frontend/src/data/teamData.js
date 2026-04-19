@@ -4,72 +4,72 @@
  * { initials, name, role, gradient, accentColor, bio, highlights, skills, github?, linkedin?, cvUrl? }
  */
 
-export const teamMembers = [
+export const teamMembers =  [
   {
     id: 1,
-    initials: 'AA',
-    name: 'Abdallah Aladdin',
-    role: 'Lead Developer & Founder',
+    initials: 'AI',
+    name: 'Abdallah Ibrahim',
+    role: 'Software Engineer & Project Team Lead',
     gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
     accentColor: '#667eea',
-    bio: 'Full-stack engineer passionate about AI, video processing, and building scalable solutions. Leads architecture and backend development.',
+    bio: 'Project team lead and software engineer driving the vision and coordination of the team. Oversees architecture decisions and ensures seamless collaboration across all workstreams.',
     highlights: [
-      { icon: '🚀', label: 'AI & ML Integration' },
+      { icon: '🚀', label: 'Project Leadership' },
       { icon: '⚙️', label: 'System Architecture' },
-      { icon: '🎯', label: 'Backend Development' }
+      { icon: '🎯', label: 'Software Engineering' }
     ],
     skills: ['Python', 'FastAPI', 'PostgreSQL', 'Docker', 'AWS', 'LLMs', 'PyTorch', 'NLP'],
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
-    cvUrl: '/cv/abdallah.pdf',
-    avatarImage: null
+    cvUrl: null,
+    avatarImage: '../public/team/abdallah.jpeg'
   },
   {
     id: 2,
-    initials: 'FE',
-    name: 'Frontend Engineer',
-    role: 'UI/UX Developer',
+    initials: 'MM',
+    name: 'Moustafa Magdy',
+    role: 'Software Engineer — Full Stack',
     gradient: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
     accentColor: '#f093fb',
-    bio: 'Creates beautiful, responsive user interfaces with React and modern web technologies. Focuses on user experience and performance.',
+    bio: 'Full-stack software engineer with a passion for building robust, scalable web applications. Bridges the gap between intuitive frontends and powerful backend systems.',
     highlights: [
       { icon: '✨', label: 'React & Modern JS' },
       { icon: '🎨', label: 'UI/UX Design' },
       { icon: '📱', label: 'Responsive Design' }
     ],
-    skills: ['React', 'TypeScript', 'Tailwind', 'CSS', 'JavaScript', 'Vite', 'Vitest'],
+    skills: ['React', 'TypeScript', 'Tailwind', 'CSS', 'JavaScript', 'Node.js', 'REST APIs'],
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
     cvUrl: null,
-    avatarImage: null
+    avatarImage: '../public/team/moustafa.jpeg'
   },
   {
     id: 3,
-    initials: 'DE',
-    name: 'DevOps Engineer',
-    role: 'Infrastructure & Deployment',
+    initials: 'EA',
+    name: 'Eslam Amr',
+    role: 'Software Engineer — Full Stack',
     gradient: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
     accentColor: '#4facfe',
-    bio: 'Manages deployment pipelines, infrastructure as code, and cloud operations. Ensures reliability and scalability.',
+    bio: 'Full-stack engineer focused on delivering clean, performant code across the entire stack. Passionate about developer experience and building features that users love.',
     highlights: [
-      { icon: '🐳', label: 'Docker & Kubernetes' },
-      { icon: '☁️', label: 'Cloud Infrastructure' },
-      { icon: '🔧', label: 'CI/CD Pipelines' }
+      { icon: '🖥️', label: 'Full Stack Development' },
+      { icon: '🔧', label: 'API Design' },
+      { icon: '⚡', label: 'Performance Optimization' }
     ],
-    skills: ['Docker', 'Kubernetes', 'GCP', 'Terraform', 'Linux', 'CI/CD', 'AWS'],
+    skills: ['React', 'Node.js', 'PostgreSQL', 'Docker', 'TypeScript', 'GraphQL', 'CI/CD'],
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
     cvUrl: null,
-    avatarImage: null
+    avatarImage: '../public/team/eslam.jpeg'
   },
   {
     id: 4,
-    initials: 'ML',
-    name: 'ML Engineer',
-    role: 'AI & Model Development',
+    initials: 'OM',
+    name: 'Omar Mohamed',
+    role: 'AI Engineer',
     gradient: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
     accentColor: '#fa709a',
-    bio: 'Develops and fine-tunes machine learning models for video processing, NMT, and speech synthesis tasks.',
+    bio: 'AI engineer specializing in developing and integrating intelligent models into real-world applications. Focuses on NLP, computer vision, and production-ready ML pipelines.',
     highlights: [
       { icon: '🤖', label: 'Machine Learning' },
       { icon: '🗣️', label: 'Speech Processing' },
@@ -79,6 +79,44 @@ export const teamMembers = [
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
     cvUrl: null,
-    avatarImage: null
+    avatarImage: '../public/team/omar.jpeg'
+  },
+  {
+    id: 5,
+    initials: 'AO',
+    name: 'Abdalrahman Omran',
+    role: 'AI Engineer',
+    gradient: 'linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)',
+    accentColor: '#43e97b',
+    bio: 'AI engineer with a strong foundation in deep learning and model fine-tuning. Works on building intelligent systems that push the boundaries of what automated video processing can achieve.',
+    highlights: [
+      { icon: '🧠', label: 'Deep Learning' },
+      { icon: '🎬', label: 'Video AI' },
+      { icon: '📊', label: 'Model Fine-tuning' }
+    ],
+    skills: ['Python', 'PyTorch', 'TensorFlow', 'LLMs', 'MLOps', 'HuggingFace', 'ONNX'],
+    github: 'https://github.com',
+    linkedin: 'https://linkedin.com',
+    cvUrl: null,
+    avatarImage: '../public/team/omran.jpeg'
+  },
+  {
+    id: 6,
+    initials: 'AB',
+    name: 'Ali Bassam',
+    role: 'AI Engineer',
+    gradient: 'linear-gradient(135deg, #f7971e 0%, #ffd200 100%)',
+    accentColor: '#f7971e',
+    bio: 'AI engineer passionate about speech synthesis, neural machine translation, and the future of multilingual AI. Brings cutting-edge research into practical, deployable solutions.',
+    highlights: [
+      { icon: '🔬', label: 'AI Research' },
+      { icon: '🌍', label: 'Multilingual NLP' },
+      { icon: '🎙️', label: 'Speech Synthesis' }
+    ],
+    skills: ['Python', 'PyTorch', 'NLP', 'TTS', 'NMT', 'LLMs', 'Transformers'],
+    github: 'https://github.com',
+    linkedin: 'https://linkedin.com',
+    cvUrl: null,
+    avatarImage: '../public/team/ali.jpeg'
   }
 ];
