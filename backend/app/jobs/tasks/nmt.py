@@ -15,9 +15,11 @@ from typing import Any, Optional
 
 from celery import chord, group
 
+from app.config import settings
 from app.jobs.celery_app import celery_app
 from app.jobs.models import Job, JobStatus, JobType
 from app.jobs.tasks.base import BaseJobTask
+from app.nmt.length_adjuster import adjust_ar
 from app.nmt.service import translator
 
 logger = logging.getLogger(__name__)
@@ -251,6 +253,23 @@ def nmt_translate_segment(
         segment_id,
         status,
     )
+
+    # ── Length adjustment (adjust Arabic text to match English speaking duration) ─
+    if status == "completed" and settings.NMT_LENGTH_ADJUST_ENABLED:
+        try:
+            translated_text = adjust_ar(
+                translated_text,
+                text,
+                scale=settings.NMT_LENGTH_ADJUST_SCALE,
+                max_iters=settings.NMT_LENGTH_ADJUST_MAX_ITERS,
+                groq_api_key=settings.GROQ_API_KEY,
+                groq_model=settings.GROQ_MODEL,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[NMT] length adjustment failed for segment %d job=%s: %s — using raw translation",
+                segment_id, job_id, exc,
+            )
 
     # ── Dispatch TTS for this segment immediately ────────────────────────────
     if tts_context:

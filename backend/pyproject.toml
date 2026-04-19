@@ -30,6 +30,7 @@ dependencies = [
 [dependency-groups]
 ai = [
     "faster-whisper>=1.2.1",
+    "groq>=0.28.0",
     "langdetect>=1.0.9",
     "silma-tts>=1.0.5",
     "soundfile>=0.13.1",

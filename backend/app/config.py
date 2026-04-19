@@ -224,6 +224,20 @@ class Settings(BaseSettings):
         "NMT_FALLBACK_MODE", NMT_FALLBACK_MODE_DEFAULT
     )
 
+    # ========== GROQ (NMT length adjustment) ==========
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    # ── NMT length adjustment knobs ──────────────────────────────────────────
+    # Enabled: adjusts Arabic translation length to match English speaking duration.
+    # Scale: target AR-letter count = EN-syllable count × scale (0.9 = 90 %).
+    # MaxIters: max Groq rewrite rounds per segment.
+    NMT_LENGTH_ADJUST_ENABLED: bool = (
+        os.getenv("NMT_LENGTH_ADJUST_ENABLED", "true").lower() == "true"
+    )
+    NMT_LENGTH_ADJUST_SCALE: float = float(os.getenv("NMT_LENGTH_ADJUST_SCALE", "0.9"))
+    NMT_LENGTH_ADJUST_MAX_ITERS: int = int(os.getenv("NMT_LENGTH_ADJUST_MAX_ITERS", "5"))
+
     # ========== HUGGINGFACE AUTHENTICATION ==========
     HF_TOKEN: str = os.getenv(
         "HF_TOKEN", ""
