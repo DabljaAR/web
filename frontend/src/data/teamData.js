@@ -22,7 +22,7 @@ export const teamMembers =  [
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
     cvUrl: null,
-    avatarImage: '../public/team/abdallah.jpeg'
+    avatarImage: '/team/abdallah.jpeg'
   },
   {
     id: 2,
@@ -41,7 +41,7 @@ export const teamMembers =  [
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
     cvUrl: null,
-    avatarImage: '../public/team/moustafa.jpeg'
+    avatarImage: '/team/moustafa.jpeg'
   },
   {
     id: 3,
@@ -60,7 +60,7 @@ export const teamMembers =  [
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
     cvUrl: null,
-    avatarImage: '../public/team/eslam.jpeg'
+    avatarImage: '/team/eslam.jpeg'
   },
   {
     id: 4,
@@ -79,7 +79,7 @@ export const teamMembers =  [
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
     cvUrl: null,
-    avatarImage: '../public/team/omar.jpeg'
+    avatarImage: '/team/omar.jpeg'
   },
   {
     id: 5,
@@ -98,7 +98,7 @@ export const teamMembers =  [
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
     cvUrl: null,
-    avatarImage: '../public/team/omran.jpeg'
+    avatarImage: '/team/omran.jpeg'
   },
   {
     id: 6,
@@ -117,6 +117,6 @@ export const teamMembers =  [
     github: 'https://github.com',
     linkedin: 'https://linkedin.com',
     cvUrl: null,
-    avatarImage: '../public/team/ali.jpeg'
+    avatarImage: '/team/ali.jpeg'
   }
 ];
