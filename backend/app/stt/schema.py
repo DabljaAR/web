@@ -21,7 +21,7 @@ class TranscriptionRequest(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "language": "en"
             }
@@ -37,7 +37,7 @@ class TranscriptionAsyncRequest(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "language": "en"
             }
@@ -54,7 +54,7 @@ class TranscriptionSegment(BaseModel):
     text: str = Field(..., description="Transcribed text for this segment")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "start": 0.0,
                 "end": 2.5,
@@ -74,7 +74,7 @@ class TranscriptionMetadata(BaseModel):
     segment_count: int = Field(..., description="Number of segments")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "language": "en",
                 "duration": 125.5,
@@ -94,7 +94,7 @@ class TranscriptionResponse(BaseModel):
     metadata: TranscriptionMetadata = Field(..., description="Transcription metadata")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "transcript": "Welcome to this presentation. Today we will discuss...",
                 "segments": [
@@ -131,7 +131,7 @@ class AsyncJobResponse(BaseModel):
     message: str = Field(..., description="Status message")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "task_id": "550e8400-e29b-41d4-a716-446655440000",
                 "status": "queued",
@@ -159,7 +159,7 @@ class JobStatusResponse(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "task_id": "550e8400-e29b-41d4-a716-446655440000",
                 "status": "success",
@@ -191,7 +191,7 @@ class MetricsResponse(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "total_requests": 42,
                 "successful_transcriptions": 40,
@@ -215,7 +215,7 @@ class ErrorResponse(BaseModel):
     detail: Optional[str] = Field(default=None, description="Additional error details")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "status": "error",
                 "error": "File not found",
@@ -232,7 +232,7 @@ class ValidationErrorResponse(BaseModel):
     details: List[dict] = Field(..., description="List of validation errors")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "status": "error",
                 "error": "Validation error",
@@ -257,7 +257,7 @@ class HealthCheckResponse(BaseModel):
     version: str = Field(default="1.0.0", description="API version")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "status": "healthy",
                 "model_loaded": True,

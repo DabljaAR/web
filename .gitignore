@@ -153,3 +153,10 @@ infra/terraform/override.tf
 infra/terraform/override.tf.json
 infra/terraform/*.tfvars
 !infra/terraform/*.tfvars.example
+
+
+#orchestrator
+orchestrator/
+backend/go1.22.5.linux-amd64.tar.gz
+backend/sys
+frontend/package-lock.json

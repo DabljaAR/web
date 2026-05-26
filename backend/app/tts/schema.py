@@ -60,7 +60,7 @@ class TTSRequest(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "text": "مرحباً بكم في منصة دبلجة عربية",
                 "speed": 1.0,
@@ -79,7 +79,7 @@ class TTSJobRequest(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "video_id": 123,
                 "target_lang": "arb_Arab"
@@ -96,7 +96,7 @@ class TTSResponse(BaseModel):
     status: str = Field(default="queued", description="Task status")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "task_id": "550e8400-e29b-41d4-a716-446655440000",
                 "status": "queued"
@@ -116,7 +116,7 @@ class TTSJobResponse(BaseModel):
     completed_at: Optional[str] = Field(default=None, description="Job completion time")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "job_id": "550e8400-e29b-41d4-a716-446655440000",
                 "status": "completed",
@@ -141,7 +141,7 @@ class TTSStatusResponse(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "task_id": "550e8400-e29b-41d4-a716-446655440000",
                 "status": "success",
@@ -163,7 +163,7 @@ class TTSErrorResponse(BaseModel):
     detail: Optional[str] = Field(default=None, description="Additional error details")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "status": "error",
                 "error": "Synthesis failed",
@@ -184,7 +184,7 @@ class TTSHealthResponse(BaseModel):
     version: str = Field(default="1.0.0", description="API version")
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "status": "healthy",
                 "model_loaded": True,
