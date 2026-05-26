@@ -554,9 +554,25 @@ run_migrations_if_enabled() {
     log_info "Running Alembic migrations (upgrade head)..."
     pushd "$BACKEND_DIR" >/dev/null
     
-    if ! uv run alembic upgrade head; then
+    local alembic_output
+    if ! alembic_output="$(uv run alembic upgrade head 2>&1)"; then
+        printf '%s\n' "$alembic_output"
+
+        if grep -q "Can't locate revision identified by" <<<"$alembic_output"; then
+            local missing_rev
+            missing_rev="$(sed -n "s/.*Can't locate revision identified by '\([^']*\)'.*/\1/p" <<<"$alembic_output")"
+            if [[ -z "$missing_rev" ]]; then
+                missing_rev="unknown"
+            fi
+            log_err "Alembic can't find revision '$missing_rev'. Your database points to a migration missing from this repo."
+            log_err "Local dev fix: cd backend && uv run alembic stamp head && uv run alembic upgrade head"
+            log_err "Or drop/recreate the database and re-run ./start.sh setup."
+        else
+            log_err "Database migrations failed. Check your .env file and database connection."
+        fi
+
         popd >/dev/null
-        die "Database migrations failed. Check your .env file and database connection."
+        exit 1
     fi
     
     popd >/dev/null
