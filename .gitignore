@@ -156,7 +156,7 @@ infra/terraform/*.tfvars
 
 
 #orchestrator
-orchestrator/
+
 backend/go1.22.5.linux-amd64.tar.gz
 backend/sys
 frontend/package-lock.json

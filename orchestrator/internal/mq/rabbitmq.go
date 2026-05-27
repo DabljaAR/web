@@ -55,3 +55,7 @@ func (r *RabbitMQ) Close() {
 		r.Conn.Close()
 	}
 }
+
+func (r *RabbitMQ) IsConnected() bool {
+	return r.Conn != nil && !r.Conn.IsClosed()
+}

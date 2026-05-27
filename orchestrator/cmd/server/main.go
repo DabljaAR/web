@@ -1,54 +1,101 @@
 package main
 
 import (
-	"log"
+	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/dabljaar/orchestrator/internal/db"
+	"github.com/dabljaar/orchestrator/internal/health"
 	"github.com/dabljaar/orchestrator/internal/mq"
 	"github.com/dabljaar/orchestrator/internal/pipeline"
 )
 
 func main() {
-	
-	log.Println("Starting DabljaAR Orchestrator...")
+	// ─── 1. Structured Logging ────────────────────────────────────────────────
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+	slog.SetDefault(logger)
 
-	// 1. Initializing Configurations
+	logger.Info("Starting DabljaAR Orchestrator")
+
+	// ─── 2. Load Config ───────────────────────────────────────────────────────
 	rabbitURL := os.Getenv("RABBITMQ_URL")
 	if rabbitURL == "" {
-		log.Fatal("FATAL: RABBITMQ_URL environment variable is not set")
+		logger.Error("RABBITMQ_URL environment variable is not set")
+		os.Exit(1)
 	}
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		log.Fatal("FATAL: DATABASE_URL environment variable is not set")
+		logger.Error("DATABASE_URL environment variable is not set")
+		os.Exit(1)
 	}
 
-	// 2. Initialize Infrastructure
+	healthPort := os.Getenv("HEALTH_PORT")
+	if healthPort == "" {
+		healthPort = "8081"
+	}
+
+	// ─── 3. Initialize Infrastructure ────────────────────────────────────────
 	rabbitClient, err := mq.NewRabbitMQ(rabbitURL)
 	if err != nil {
-		log.Fatalf("RabbitMQ initialization failed: %v", err)
+		logger.Error("RabbitMQ initialization failed", "error", err)
+		os.Exit(1)
 	}
-	defer rabbitClient.Close() // Ensure connection is closed when main exits
+	defer rabbitClient.Close()
 
 	database, err := db.ConnectDB(dbURL)
 	if err != nil {
-		log.Fatalf("Database initialization failed: %v", err)
+		logger.Error("Database initialization failed", "error", err)
+		os.Exit(1)
 	}
-	log.Println("Successfully connected to PostgreSQL Database!")
+	logger.Info("Connected to PostgreSQL")
 
-	// 3. Dependency Injection: Pass dependencies into the Pipeline Manager
-	orchestratorManager := pipeline.NewManager(rabbitClient, database)
-	// Start the manager asynchronously if needed, or register handlers
-	orchestratorManager.Start()
+	// Ensure the underlying connection pool is closed on exit.
+	defer func() {
+		if sqlDB, err := database.DB(); err == nil {
+			sqlDB.Close()
+		}
+	}()
 
-	// 4. Graceful Shutdown & Thread Blocking
-	// Block the main thread until the OS tells the service to shut down
+	// ─── 4. Root Context (drives graceful shutdown of all goroutines) ─────────
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// ─── 5. Start Pipeline Manager ────────────────────────────────────────────
+	manager := pipeline.NewManager(rabbitClient, database, logger)
+	if err := manager.Start(ctx); err != nil {
+		logger.Error("Pipeline manager failed to start", "error", err)
+		os.Exit(1)
+	}
+
+	// ─── 6. Start Health / Readiness HTTP Server ──────────────────────────────
+	healthSrv := health.NewServer(healthPort, rabbitClient, database, logger)
+	go func() {
+		if err := healthSrv.ListenAndServe(); err != nil {
+			logger.Error("Health server error", "error", err)
+		}
+	}()
+
+	// ─── 7. Block Until OS Signal ─────────────────────────────────────────────
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	sig := <-quit
 
-	log.Println("Shutting down DabljaAR Orchestrator gracefully...")
+	logger.Info("Shutdown signal received", "signal", sig.String())
+
+	// Cancel root context → consumers stop accepting new messages.
+	cancel()
+
+	// Give active message handlers up to 30 seconds to finish.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	manager.Wait(shutdownCtx)
+	logger.Info("DabljaAR Orchestrator stopped gracefully")
 }
