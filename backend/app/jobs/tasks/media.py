@@ -31,7 +31,7 @@ def process_video(self, job_id: str, video_id: str, file_path_key: str) -> dict:
     Returns:
         dict with ``video_id`` and ``status`` on success.
     """
-    from app.media.service import process_video_task  # lazy to avoid import loop
+    from app.jobs.tasks.processing import process_video_task  # lazy to avoid import loop
 
     # Mark as started
     self._run_sync(
@@ -73,7 +73,7 @@ def process_video_hls(self, job_id: str, video_id: str, file_path_key: str) -> d
     Returns:
         dict with ``video_id`` and ``status`` on success.
     """
-    from app.media.service import process_video_hls_task  # lazy import
+    from app.jobs.tasks.processing import process_video_hls_task  # lazy import
 
     self._run_sync(
         self._patch_job(

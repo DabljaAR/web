@@ -24,8 +24,7 @@ from sqlalchemy import select
 from app.jobs.models import Job, JobType, JobStatus
 from app.jobs.schemas import JobCreate
 from app.config import settings
-from app.media.models import Video
-from app.media.storage import get_storage_service
+from app.media_service.client import MediaServiceClient
 from app.stt.models import WhisperModelManager
 from app.stt.schema import TranscriptionResponse, TranscriptionMetadata, TranscriptionSegment
 from app.shared.processing_mode import resolve_processing_mode
@@ -53,7 +52,6 @@ class TranscriptionService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.storage = get_storage_service()
         self._model_manager: Optional[WhisperModelManager] = None  # lazy
 
     # ------------------------------------------------------------------
@@ -138,17 +136,14 @@ class TranscriptionService:
         """
         # If a video_id is provided, verify it exists and belongs to this user
         if video_id:
-            from sqlalchemy import select
-            result = await self.db.execute(select(Video).where(Video.id == video_id))
-            video: Optional[Video] = result.scalar_one_or_none()
-            if not video:
-                from fastapi import HTTPException
+            from fastapi import HTTPException
+            video_data = await MediaServiceClient().get_video(video_id)
+            if not video_data:
                 raise HTTPException(status_code=404, detail=f"Video {video_id} not found.")
-            if video.user_id != user_id:
-                from fastapi import HTTPException
+            if video_data["user_id"] != user_id:
                 raise HTTPException(status_code=403, detail="Access denied.")
             # Prefer extracted audio track if available
-            file_key = video.audio_path or video.file_path
+            file_key = video_data.get("audio_path") or video_data.get("file_path") or file_key
 
         # 1. Check for existing active job first (prevent duplicates)
         existing_query = select(Job).where(

@@ -10,6 +10,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /uvx /bin/
 # Install system dependencies (minimal, only what's needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    g++ \
     libc6-dev \
     postgresql-client \
     ffmpeg \

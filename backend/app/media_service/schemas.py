@@ -1,31 +1,37 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional, List
+from enum import Enum
+from typing import List, Optional
+
 from pydantic import BaseModel, ConfigDict
-from app.media.models import VideoStatus, MediaType
 
-class VideoBase(BaseModel):
-    title: str
 
-class VideoCreate(VideoBase):
-    pass
+class VideoStatus(str, Enum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
 
-class VideoUpdate(BaseModel):
-    title: Optional[str] = None
-    status: Optional[VideoStatus] = None
-    error_message: Optional[str] = None
 
-    model_config = ConfigDict(from_attributes=True)
+class MediaType(str, Enum):
+    VIDEO = "VIDEO"
+    AUDIO = "AUDIO"
+    TEXT = "TEXT"
+
 
 class VideoUploadResponse(BaseModel):
     id: str
     message: str = "The media is being processed"
     status: VideoStatus
-    
+
     model_config = ConfigDict(from_attributes=True)
 
-class VideoResponse(VideoBase):
+
+class VideoResponse(BaseModel):
     id: str
     user_id: int
+    title: str
     original_filename: str
     file_path: str
     thumbnail_path: Optional[str] = None
@@ -44,8 +50,8 @@ class VideoResponse(VideoBase):
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-    
-    url: Optional[str] = None # Added for convenience to return full URL
+
+    url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     audio_url: Optional[str] = None
     dubbed_video_url: Optional[str] = None
@@ -57,6 +63,7 @@ class VideoResponse(VideoBase):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class PaginatedVideoResponse(BaseModel):
     items: List[VideoResponse]
     total: int
@@ -66,6 +73,8 @@ class PaginatedVideoResponse(BaseModel):
     total_completed: int
     total_failed: int
 
+
 class DashboardResponse(BaseModel):
     active: List[dict]
     recent: List[dict]
+

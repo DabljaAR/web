@@ -74,15 +74,18 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000}
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      MEDIA_SERVICE_URL: http://media-service:8001
     ports:
-      - "8000:8000"
+      - "8080:8000"
     volumes:
       - ./backend:/app
       - /app/__pycache__
@@ -98,19 +101,45 @@ services:
       - dabljaar_network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # Media Microservice (Rust + Axum)
+  media-service:
+    build:
+      context: ./media-service
+      dockerfile: Dockerfile
+    container_name: dabljaar_media_service
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/dabljaar
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_DEFAULT_REGION: us-east-1
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      PORT: "8001"
+      RUST_LOG: info
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
   # Frontend (React/Vite)
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api}
     container_name: dabljaar_frontend
     ports:
-      - "5173:5173"
+      - "5174:5173"
     depends_on:
       - backend
     restart: unless-stopped
-    environment:
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://136.112.92.233:8000/api}
     networks:
       - dabljaar_network
 
@@ -133,9 +162,11 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      MEDIA_SERVICE_URL: http://media-service:8001
     volumes:
       - ./backend:/app
       - /app/__pycache__
@@ -146,25 +177,23 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      media-service:
+        condition: service_started
     restart: unless-stopped
     networks:
       - dabljaar_network
 
-  # Celery worker — AI queues (STT, NMT, TTS, pipeline)
-  # STT: populate MinIO bucket S3_MODELS_BUCKET (default: model) under STT_MODEL_KEY (e.g. whisper-small/)
-  # with CTranslate2 files (model.bin, config.json, …) to avoid Hugging Face on cold start.
-  # Optional env (not set by default): HF_HOME=/model-cache/hf HF_HUB_DISABLE_XET=1 HF_HUB_ENABLE_HF_TRANSFER=1
-  celery-worker-ai:
+  # Celery worker — STT + pipeline orchestration (fast, non-blocking)
+  celery-worker-stt:
     build:
       context: ./backend
       dockerfile: Dockerfile
       args:
         INSTALL_AI: "true"
-    container_name: dabljaar_worker_ai
+    container_name: dabljaar_worker_stt
     entrypoint: []
-    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
+    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_stt,pipeline --concurrency=1 --hostname=worker-stt@%h
     environment:
-      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
       INSTALL_AI: "true"
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
@@ -175,6 +204,62 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: ${HF_HOME:-/model-cache/hf}
+      HUGGINGFACE_HUB_CACHE: ${HUGGINGFACE_HUB_CACHE:-/model-cache/hf/hub}
+      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/model-cache/hf/transformers}
+      XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
+      TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
+      CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
+      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
+      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
+      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
+      MEDIA_SERVICE_URL: http://media-service:8001
+      STT_DEVICE: cpu
+      STT_COMPUTE_TYPE: int8
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+      - nmt_model_cache:/model-cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      media-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
+  # Celery worker — NMT + TTS (slow, model-heavy, separate so it never blocks STT)
+  celery-worker-ai:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        INSTALL_AI: "true"
+    container_name: dabljaar_worker_ai
+    entrypoint: []
+    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_nmt,ai_tts --concurrency=1 --hostname=worker-ai@%h
+    environment:
+      INSTALL_AI: "true"
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: dablaja-videos
+      MINIO_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
@@ -194,9 +279,8 @@ services:
       XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
       TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
       CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
-      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
-      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
-      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
+      MEDIA_SERVICE_URL: http://media-service:8001
+      SILMA_DEVICE: cpu
     volumes:
       - ./backend:/app
       - /app/__pycache__
@@ -207,6 +291,8 @@ services:
       redis:
         condition: service_healthy
       minio:
+        condition: service_started
+      media-service:
         condition: service_started
     restart: unless-stopped
     networks:

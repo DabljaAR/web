@@ -18,7 +18,7 @@ sys.path.insert(0, str(backend_dir))
 from app.config import settings
 from app.core.db import Base
 from app.core.models import User, Role, SubscriptionPlan, UserSubscription, Payment
-from app.media.models import Video
+from app.core.video_model import Video  # noqa: F401 — registers videos table for autogenerate
 from app.jobs.models import Job  # noqa: F401 — registers jobs table for autogenerate
 from app.tasks.models import VideoTask  # noqa: F401 — registers video_tasks table for autogenerate
 

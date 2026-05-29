@@ -16,7 +16,7 @@ from sqlalchemy.pool import StaticPool
 # ── must import all models before create_all ──────────────────────────────
 from app.core.db import Base
 import app.core.models  # noqa: F401
-import app.media.models  # noqa: F401
+import app.core.video_model  # noqa: F401
 import app.jobs.models  # noqa: F401
 # ──────────────────────────────────────────────────────────────────────────
 

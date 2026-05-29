@@ -96,6 +96,15 @@ const Profile = () => {
 
 
 
+  const getAvatarDisplayUrl = (avatarUrl) => {
+    if (!avatarUrl) return null;
+    // Old records stored presigned URLs (contain X-Amz-* params) — they expire, treat as empty
+    if (avatarUrl.includes('X-Amz-') || avatarUrl.includes('AWSAccessKeyId')) return null;
+    if (avatarUrl.startsWith('http')) return avatarUrl;
+    const base = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+    return `${base}/avatar/${avatarUrl}`;
+  };
+
   const handleChangePhoto = () => {
     fileInputRef.current?.click();
   };
@@ -321,9 +330,9 @@ const Profile = () => {
               onChange={handleAvatarChange}
               style={{ display: 'none' }}
             />
-            {(avatarPreview || user?.avatar_url) ? (
+            {(avatarPreview || getAvatarDisplayUrl(user?.avatar_url)) ? (
               <div className="profile-picture" style={{
-                backgroundImage: `url(${avatarPreview || user.avatar_url})`,
+                backgroundImage: `url(${avatarPreview || getAvatarDisplayUrl(user.avatar_url)})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center'
               }}>

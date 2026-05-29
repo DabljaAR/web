@@ -3,7 +3,7 @@ from typing import List
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 import logging
-from app.media.storage import get_storage_service, StorageService
+from app.media_service.client import MediaServiceClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schema import (
@@ -37,21 +37,9 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 def get_user_service(
     db: AsyncSession = Depends(get_db),
     auth_service: AuthService = Depends(get_auth_service),
-    storage_service: StorageService = Depends(get_storage_service)
 ) -> UserService:
-    """
-    Dependency injection factory for UserService.
-    
-    Args:
-        db: Database session (injected)
-        auth_service: AuthService instance (injected)
-        storage_service: StorageService instance (injected)
-        
-    Returns:
-        UserService instance with injected dependencies
-    """
     user_repo = UserRepository(db, User)
-    return UserService(user_repo, auth_service, storage_service)
+    return UserService(user_repo, auth_service)
 
 def get_subscription_plan_service(
     db: AsyncSession = Depends(get_db)
@@ -316,7 +304,6 @@ async def delete_user(
 @router.post("/upload/avatar", tags=["upload"])
 async def upload_avatar(
     file: UploadFile = File(...),
-    storage: StorageService = Depends(get_storage_service)
 ):
     """
     Upload an avatar image.
@@ -336,7 +323,7 @@ async def upload_avatar(
     # Read file content to check size
     contents = await file.read()
     file_size = len(contents)
-    await file.seek(0)  # Reset file pointer for storage service
+    await file.seek(0)
     
     # Validate file size
     if file_size > MAX_FILE_SIZE:
@@ -346,13 +333,13 @@ async def upload_avatar(
         )
     
     try:
-        # Save file using storage service
-        file_key = await storage.save(file, directory="avatars")
-        
-        # Get URL for the uploaded file
-        file_url = await storage.get_url(file_key)
-        
-        return {"url": file_url, "filename": Path(file_key).name}
+        import uuid
+
+        client = MediaServiceClient()
+        file_key = f"avatars/{uuid.uuid4()}{file_ext}"
+        content_type = file.content_type or "application/octet-stream"
+        await client.upload_bytes(contents, key=file_key, content_type=content_type)
+        return {"url": file_key, "key": file_key, "filename": Path(file_key).name}
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
@@ -361,6 +348,33 @@ async def upload_avatar(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error uploading file to storage server"
         )
+
+
+@router.get("/avatar/{key:path}", tags=["upload"])
+async def get_avatar(key: str):
+    """Proxy avatar images through the backend so internal MinIO URLs are never exposed to the browser."""
+    import httpx
+    from fastapi.responses import Response
+    try:
+        client = MediaServiceClient()
+        # presign_url points to the internal Docker hostname (minio:9000) — fetch it
+        # server-side and stream the bytes back to the browser.
+        url = await client.presign_url(key, method="GET", expires_secs=300)
+        async with httpx.AsyncClient(timeout=30.0) as http_client:
+            resp = await http_client.get(url)
+            if resp.status_code == 404:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Avatar not found")
+            resp.raise_for_status()
+            return Response(
+                content=resp.content,
+                media_type=resp.headers.get("content-type", "image/jpeg"),
+                headers={"Cache-Control": "public, max-age=300"},
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error proxying avatar for key {key}: {e}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Avatar not found")
 
 
 @router.get("/health", tags=["health"])

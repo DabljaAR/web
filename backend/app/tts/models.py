@@ -626,31 +626,28 @@ def register_tts_task(celery_app):
         # Upload to MinIO if requested
         if upload_to_minio:
             try:
-                from app.media.storage import get_storage_service
+                from app.media_service.client import MediaServiceClient
 
-                storage = get_storage_service()
+                client = MediaServiceClient()
                 final_minio_key = minio_key or f"tts/{job_id}/output.wav"
 
-                # Run async upload in sync context
                 import asyncio
 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     loop.run_until_complete(
-                        storage.upload_bytes(audio_bytes, final_minio_key, "audio/wav")
+                        client.upload_bytes(audio_bytes, key=final_minio_key, content_type="audio/wav")
                     )
-
-                    # Get presigned URL
                     audio_url = loop.run_until_complete(
-                        storage.get_url(final_minio_key)
+                        client.presign_url(final_minio_key, method="GET")
                     )
                 finally:
                     loop.close()
 
-                logger.info("TTS output uploaded to MinIO: %s", final_minio_key)
+                logger.info("TTS output uploaded via media-service: %s", final_minio_key)
             except Exception as e:
-                logger.warning("Failed to upload TTS to MinIO: %s", e)
+                logger.warning("Failed to upload TTS via media-service: %s", e)
 
         return {
             "status": "success",

@@ -29,6 +29,7 @@ FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 FRONTEND_NODE_MAJOR="${FRONTEND_NODE_MAJOR:-24}"
 FLOWER_PORT="${FLOWER_PORT:-5555}"
 MINIO_PORT="${MINIO_PORT:-9000}"
+MEDIA_SERVICE_PORT="${MEDIA_SERVICE_PORT:-8001}"
 MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9001}"
 NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
@@ -231,7 +232,8 @@ install_apt_packages_if_missing() {
         postgresql-client
         lsof
         psmisc
-          iproute2
+        iproute2
+        libfst-dev
     )
 
     local -a missing=()
@@ -492,23 +494,41 @@ ensure_frontend_deps() {
 
 ensure_system_services() {
     log_info "Ensuring Redis and PostgreSQL are enabled and running."
-    
-    if ! run_with_sudo systemctl enable --now redis-server; then
-        die "Failed to enable/start Redis. Check: sudo systemctl status redis-server"
+
+    # Redis: try systemd, accept already-running, fall back to Docker Compose
+    if systemctl is-active --quiet redis-server 2>/dev/null; then
+        log_ok "Redis already active via systemd."
+    elif ss -tlnp 2>/dev/null | grep -q ':6379'; then
+        log_ok "Redis already listening on port 6379 (external process)."
+    elif run_with_sudo systemctl enable --now redis-server 2>/dev/null; then
+        log_ok "Redis started via systemd."
+    elif command -v docker >/dev/null 2>&1 && docker compose -f "$ROOT_DIR/docker-compose.yml" up -d redis >/dev/null 2>&1; then
+        log_ok "Redis started via Docker Compose."
+    else
+        log_warn "redis-server unavailable via systemd or Docker; checking port 6379..."
     fi
-    
-    if ! run_with_sudo systemctl enable --now postgresql; then
-        die "Failed to enable/start PostgreSQL. Check: sudo systemctl status postgresql"
+
+    # PostgreSQL: try systemd, accept already-running, fall back to Docker Compose
+    if systemctl is-active --quiet postgresql 2>/dev/null; then
+        log_ok "PostgreSQL already active via systemd."
+    elif ss -tlnp 2>/dev/null | grep -q ':5432'; then
+        log_ok "PostgreSQL already listening on port 5432 (external process)."
+    elif run_with_sudo systemctl enable --now postgresql 2>/dev/null; then
+        log_ok "PostgreSQL started via systemd."
+    elif command -v docker >/dev/null 2>&1 && docker compose -f "$ROOT_DIR/docker-compose.yml" up -d postgres >/dev/null 2>&1; then
+        log_ok "PostgreSQL started via Docker Compose."
+    else
+        log_warn "postgresql unavailable via systemd or Docker; checking port 5432..."
     fi
 
     if ! wait_for_port 6379 30 1; then
-        die "Redis failed to become ready on port 6379 after 30 seconds. Check logs: sudo journalctl -u redis-server"
+        die "Redis failed to become ready on port 6379 after 30 seconds. Start Redis manually or run: docker compose up -d redis"
     fi
-    
+
     if ! wait_for_port 5432 30 1; then
-        die "PostgreSQL failed to become ready on port 5432 after 30 seconds. Check logs: sudo journalctl -u postgresql"
+        die "PostgreSQL failed to become ready on port 5432 after 30 seconds. Run: sudo systemctl start postgresql  OR  docker compose up -d postgres"
     fi
-    
+
     log_ok "Redis and PostgreSQL are running."
 }
 
@@ -633,9 +653,20 @@ stop_managed_process() {
 
 kill_port_orphans() {
     local port="$1"
-    local pids=""
 
-    # Extract unique listeners on the requested TCP port.
+    # Stop any Docker containers mapped to this port (they bind as root and don't appear in ss pids).
+    if command -v docker >/dev/null 2>&1; then
+        local container_ids
+        container_ids="$(docker ps --format '{{.ID}} {{.Ports}}' 2>/dev/null | awk -v p=":$port->" '$0 ~ p {print $1}' | tr '\n' ' ' | xargs || true)"
+        if [[ -n "$container_ids" ]]; then
+            log_warn "Port $port occupied by Docker container(s): $container_ids. Stopping."
+            docker stop $container_ids >/dev/null 2>&1 || true
+            sleep 1
+        fi
+    fi
+
+    # Also kill any native processes bound to the port.
+    local pids=""
     pids="$(ss -tlnp "( sport = :$port )" 2>/dev/null | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | sort -u | tr '\n' ' ' | xargs || true)"
 
     if [[ -z "$pids" ]]; then
@@ -654,6 +685,7 @@ ${GREEN}Development stack started.${NC}
 
     Frontend:       http://localhost:${FRONTEND_PORT}
     Backend Docs:   http://localhost:${BACKEND_PORT}/docs
+    Media Service:  http://localhost:${MEDIA_SERVICE_PORT}
     Flower:         http://localhost:${FLOWER_PORT}
     MinIO API:      http://localhost:${MINIO_PORT}
     MinIO Console:  http://localhost:${MINIO_CONSOLE_PORT}
@@ -693,13 +725,19 @@ cmd_setup() {
 }
 
 cmd_run() {
-    ensure_sudo_access
     ensure_runtime_dirs
     ensure_system_services
 
     install_uv_if_needed
 
+    local need_sync=0
     if ! venv_healthy; then
+        need_sync=1
+    elif [[ "${INSTALL_AI:-true}" == "true" ]] && ! "$BACKEND_VENV/bin/python" -c "import torch" >/dev/null 2>&1; then
+        log_warn "AI dependencies (torch) not installed. Running uv sync --group ai..."
+        need_sync=1
+    fi
+    if [[ "$need_sync" -eq 1 ]]; then
         log_warn "Backend virtualenv missing or invalid. Running uv sync now."
         ensure_python_env
     fi
@@ -725,15 +763,22 @@ cmd_run() {
         die "MinIO failed to become ready on port $MINIO_PORT. Check log: $LOG_DIR/minio.log"
     fi
 
+    kill_port_orphans "$MEDIA_SERVICE_PORT"
+    start_managed_process "media_service" "$ROOT_DIR/media-service" \
+        "DATABASE_URL='postgresql://postgres:postgres@localhost:5432/dabljaar' AWS_ENDPOINT_URL='http://localhost:$MINIO_PORT' AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin AWS_DEFAULT_REGION=us-east-1 S3_MEDIA_BUCKET=dablaja-videos PORT='$MEDIA_SERVICE_PORT' ./target/debug/media-service"
+    if ! wait_for_port "$MEDIA_SERVICE_PORT" 15 1; then
+        die "Media service failed to become ready on port $MEDIA_SERVICE_PORT. Check log: $LOG_DIR/media_service.log"
+    fi
+
     kill_port_orphans "$BACKEND_PORT"
     start_managed_process "backend" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' uv run uvicorn app.main:app --host '$BACKEND_HOST' --port '$BACKEND_PORT'"
-    if ! wait_for_port "$BACKEND_PORT" 30 1; then
+    if ! wait_for_port "$BACKEND_PORT" 90 1; then
         die "Backend failed to become ready on port $BACKEND_PORT. Check log: $LOG_DIR/backend.log"
     fi
 
     start_managed_process "worker_media" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' uv run celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-media@%h"
-    start_managed_process "worker_stt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' STT_MODEL_LOCAL_PATH='$stt_local_path' uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
-    start_managed_process "worker_nmt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' NMT_MODEL_LOCAL_PATH='$nmt_local_path' uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_nmt,ai_tts,pipeline --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
+    start_managed_process "worker_stt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True STT_DEVICE=cuda STT_COMPUTE_TYPE=auto HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' STT_MODEL_LOCAL_PATH='$stt_local_path' uv run celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_stt,pipeline --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
+    start_managed_process "worker_nmt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True SILMA_DEVICE=cuda HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' NMT_MODEL_LOCAL_PATH='$nmt_local_path' uv run celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_nmt,ai_tts --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
 
     if [[ "$ENABLE_FLOWER" -eq 1 ]]; then
         if uv run python -c "import flower" >/dev/null 2>&1; then
@@ -768,6 +813,7 @@ cmd_stop() {
     stop_managed_process "worker_stt"
     stop_managed_process "worker_media"
     stop_managed_process "backend"
+    stop_managed_process "media_service"
     stop_managed_process "minio"
     log_ok "Stop command completed."
 }
@@ -788,6 +834,7 @@ print_service_status() {
 cmd_status() {
     echo "Managed processes:"
     print_service_status "minio"
+    print_service_status "media_service"
     print_service_status "backend"
     print_service_status "worker_media"
     print_service_status "worker_stt"
@@ -827,14 +874,14 @@ cmd_logs() {
             fi
             tail -n 100 -f "${files[@]}"
             ;;
-        backend|minio|worker_media|worker_stt|worker_nmt|flower|frontend)
+        backend|minio|media_service|worker_media|worker_stt|worker_nmt|flower|frontend)
             local file
             file="$(log_file_for "$target")"
             [[ -f "$file" ]] || die "Log file not found: $file"
             tail -n 100 -f "$file"
             ;;
         *)
-            die "Unknown log target '$target'. Use: all, backend, minio, worker_media, worker_stt, worker_nmt, flower, frontend"
+            die "Unknown log target '$target'. Use: all, backend, minio, media_service, worker_media, worker_stt, worker_nmt, flower, frontend"
             ;;
     esac
 }

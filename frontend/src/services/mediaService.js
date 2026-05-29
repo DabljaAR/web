@@ -50,8 +50,8 @@ export const mediaService = {
         if (query.search) queryParams.append('search', query.search);
         if (query.sortBy) queryParams.append('sortBy', query.sortBy);
         if (query.dateRange) queryParams.append('dateRange', query.dateRange);
-        if (query.status) queryParams.append('status', query.status);
-        if (query.mediaType) queryParams.append('mediaType', query.mediaType);
+        if (query.status && query.status !== 'all') queryParams.append('status', query.status);
+        if (query.mediaType && query.mediaType !== 'all') queryParams.append('mediaType', query.mediaType);
 
         const qs = queryParams.toString();
         const endpoint = qs ? `/videos/?${qs}` : '/videos/';

@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import os
+from pathlib import Path
 from pydantic import ConfigDict, model_validator
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
@@ -43,7 +44,7 @@ def _download_silma_reference(s3_key: str) -> str:
     import asyncio as _asyncio
     import tempfile as _tmp
 
-    from app.media.storage import get_storage_service
+    from app.media_service.client import MediaServiceClient
 
     digest = hashlib.sha256(s3_key.encode("utf-8")).hexdigest()[:16]
     ext = os.path.splitext(s3_key)[1] or ".wav"
@@ -52,7 +53,7 @@ def _download_silma_reference(s3_key: str) -> str:
     dest = os.path.join(dest_dir, f"ref_{digest}{ext}")
 
     try:
-        ok = _asyncio.run(get_storage_service().download(s3_key, dest))
+        ok = _asyncio.run(MediaServiceClient().download_file(s3_key, Path(dest)))
         if ok and os.path.exists(dest):
             _silma_ref_audio_cache[s3_key] = dest
             logger.info(
@@ -78,6 +79,9 @@ class Settings(BaseSettings):
         "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/dabljaar"
     )
 
+    # ========== MEDIA SERVICE ==========
+    MEDIA_SERVICE_URL: str = os.getenv("MEDIA_SERVICE_URL", "http://media-service:8001")
+
     # ========== AUTHENTICATION ==========
     SECRET_KEY: str = os.getenv(
         "SECRET_KEY", "your-secret-key-change-this-in-production"
@@ -102,6 +106,9 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
     MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "dablaja-videos")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "False").lower() == "true"
+    # Public-facing URL for presigned URLs returned to browsers. When set, the internal
+    # endpoint in signed URLs is rewritten to this value (e.g. minio:9000 → localhost:9000).
+    MINIO_PUBLIC_URL: str = os.getenv("MINIO_PUBLIC_URL", "")
 
     # ========== STORAGE BACKEND (S3-compatible: MinIO, GCP interop, AWS S3) ==========
     # Choices: "local" | "s3". Default: s3 if MINIO_ENDPOINT is set in the environment.

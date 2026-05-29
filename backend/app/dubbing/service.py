@@ -29,8 +29,8 @@ from typing import List, Optional, Tuple
 
 from app.config import settings
 from app.dubbing.schemas import DubbingMergeResponse, SegmentTimingInfo, TimingWarning
-from app.media.ffmpeg_service import FFmpegService
-from app.media.storage import get_storage_service
+from app.ffmpeg_service import FFmpegService
+from app.media_service.client import MediaServiceClient
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class DubbingMergeService:
 
     def __init__(self):
         self.ffmpeg = FFmpegService()
-        self.storage = get_storage_service()
+        self.media_client = MediaServiceClient()
         self.temp_dir = Path(settings.DUBBING_TEMP_DIR)
         self.max_stretch = settings.DUBBING_MAX_STRETCH_RATIO
         self.min_stretch = settings.DUBBING_MIN_STRETCH_RATIO
@@ -257,7 +257,7 @@ class DubbingMergeService:
         for idx, seg in enumerate(segments):
             local_path = audio_dir / f"segment_{seg.segment_id}.wav"
             try:
-                ok = await self.storage.download(seg.tts_audio_key, str(local_path))
+                ok = await self.media_client.download_file(seg.tts_audio_key, local_path)
                 if not ok or not local_path.exists():
                     logger.error(
                         "[DubbingMerge] Failed to download segment %s from %s",
@@ -627,7 +627,7 @@ class DubbingMergeService:
 
         # Download original video
         local_video = session_dir / "original_video.mp4"
-        ok = await self.storage.download(video_key, str(local_video))
+        ok = await self.media_client.download_file(video_key, local_video)
         if not ok or not local_video.exists():
             raise RuntimeError(f"Failed to download original video: {video_key}")
 
@@ -694,21 +694,10 @@ class DubbingMergeService:
         to supply original_media_key.  Creates a fresh async engine with
         NullPool to avoid reusing FastAPI's asyncpg pool.
         """
-        from app.media.models import Video
-        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-        from sqlalchemy.orm import sessionmaker
-        from sqlalchemy.pool import NullPool
-
-        engine = create_async_engine(settings.ASYNC_DATABASE_URL, poolclass=NullPool)
-        Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        try:
-            async with Session() as db:
-                video = await db.get(Video, video_id)
-                if not video:
-                    raise ValueError(f"Video {video_id} not found in DB")
-                return video.file_path
-        finally:
-            await engine.dispose()
+        video_data = await self.media_client.get_video(video_id)
+        if not video_data:
+            raise ValueError(f"Video {video_id} not found in DB")
+        return video_data["file_path"]
 
     # ------------------------------------------------------------------ #
     # Upload helper                                                        #
@@ -720,8 +709,8 @@ class DubbingMergeService:
         """Upload a local file to MinIO and return its presigned URL."""
         with open(local_path, "rb") as fh:
             data = fh.read()
-        await self.storage.upload_bytes(data, minio_key, content_type)
-        return await self.storage.get_url(minio_key)
+        await self.media_client.upload_bytes(data, key=minio_key, content_type=content_type)
+        return await self.media_client.presign_url(minio_key, method="GET")
 
     # ------------------------------------------------------------------ #
     # Cleanup                                                              #

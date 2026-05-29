@@ -1,10 +1,9 @@
 from datetime import datetime
 from sqlalchemy import true, select
-from app.media.models import Video
 from typing import Optional, List
 from fastapi import HTTPException, status
 from app.core.models import User, Payment, UserSubscription
-from app.media.storage import StorageService
+from app.media_service.client import MediaServiceClient
 from app.core.schema import (
     UserCreate,
     UserUpdate,
@@ -36,7 +35,6 @@ class UserService:
         self,
         user_repo: UserRepository,
         auth_service: AuthService,
-        storage_service: Optional[StorageService] = None
     ):
         """
         Initialize UserService with repository and auth service dependencies.
@@ -47,7 +45,7 @@ class UserService:
         """
         self.user_repo = user_repo
         self.auth_service = auth_service
-        self.storage_service = storage_service
+        self.media_client = MediaServiceClient()
     
     async def signup(self, user_data: UserCreate) -> UserLoginResponse:
         """
@@ -235,23 +233,34 @@ class UserService:
         
         # Prepare update data
         update_data = user_data.model_dump(exclude_unset=True, exclude={'password'})
-        
+
         # Hash password if provided
         if user_data.password:
             update_data['password'] = self.auth_service.get_password_hash(user_data.password)
-        
+
+        # Capture old avatar key before overwriting so we can delete it from storage
+        old_avatar_key = user.avatar_url if 'avatar_url' in update_data else None
+
         # Update user fields
         for field, value in update_data.items():
             setattr(user, field, value)
-        
+
         # Update timestamp
         user.updated_at = datetime.utcnow()
-        
+
         # Save changes
         self.user_repo.db.add(user)
         await self.user_repo.db.commit()
         await self.user_repo.db.refresh(user)
-        
+
+        # Delete the old avatar from object storage if it changed
+        new_avatar_key = update_data.get('avatar_url')
+        if old_avatar_key and old_avatar_key != new_avatar_key and not old_avatar_key.startswith('http'):
+            try:
+                await self.media_client.delete_file(old_avatar_key)
+            except Exception as e:
+                logger.warning("Failed to delete old avatar %s: %s", old_avatar_key, e)
+
         return UserResponse.model_validate(user)
     
     async def change_password(self, user_id: int, old_password: str, new_password: str) -> dict:
@@ -317,31 +326,22 @@ class UserService:
         
         # 1. Cleanup all media files from storage
         # We delete by prefix for user-specific directories which is efficient
-        if self.storage_service:
-            try:
-                logger.info(f"Cleaning up storage for user {user_id} before account deletion")
-                # Delete user-specific directories
-                await self.storage_service.delete_prefix(f"videos/{user_id}")
-                await self.storage_service.delete_prefix(f"audio/{user_id}")
-                await self.storage_service.delete_prefix(f"thumbnails/{user_id}")
-                await self.storage_service.delete_prefix(f"text/{user_id}")
-                
-                # Cleanup avatar (individual file since avatars dir is shared)
-                if avatar_url:
-                    key = None
-                    if 'avatars/' in avatar_url:
-                        key = avatar_url.split('avatars/')[-1].split('?')[0]
-                        key = f"avatars/{key}"
-                    else:
-                        key = avatar_url.split('?')[0].split('/')[-1]
-                        if 'avatars' not in key:
-                             key = f"avatars/{key}"
-                    
-                    if key:
-                        logger.info(f"Deleting user avatar: {key}")
-                        await self.storage_service.delete(key)
-            except Exception as e:
-                logger.error(f"Failed to cleanup storage for user {user_id}: {e}")
+        try:
+            logger.info("Cleaning up media for user %s before account deletion", user_id)
+            # Delete all videos for this user through media-service (also removes storage).
+            page = 1
+            while True:
+                payload = await self.media_client.list_videos(user_id=user_id, page=page, limit=50)
+                items = payload.get("items", [])
+                for video in items:
+                    video_id = video.get("id")
+                    if video_id:
+                        await self.media_client.delete_video(video_id)
+                if len(items) < 50:
+                    break
+                page += 1
+        except Exception as e:
+            logger.error("Failed to cleanup media for user %s: %s", user_id, e)
 
         # 2. Delete from DB (will cascade to videos, subscriptions, payments due to DB constraints)
 

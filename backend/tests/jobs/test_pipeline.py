@@ -64,16 +64,14 @@ class TestTtsCombineResults:
             {"segment_id": 1, "start": 1.0, "end": 2.0, "tts_key": "k1", "audio_url": None},
         ]
 
-        mock_storage = MagicMock()
-        mock_storage.download = AsyncMock(return_value=False)
-
-        # get_storage_service is imported locally inside tts_combine_results
-        with patch("app.media.storage.get_storage_service", return_value=mock_storage), \
-             patch("app.jobs.tasks.pipeline.BaseJobTask._patch_job"), \
+        with patch("app.jobs.tasks.pipeline.BaseJobTask._patch_job"), \
              patch("app.jobs.tasks.pipeline.BaseJobTask._patch_task"), \
              patch("app.jobs.tasks.pipeline.BaseJobTask._make_db") as mock_make_db, \
+             patch("httpx.Client") as mock_httpx_client, \
              patch("subprocess.run") as mock_subprocess, \
              patch("asyncio.new_event_loop") as mock_loop_factory:
+            mock_httpx_client.return_value.__enter__ = MagicMock(return_value=MagicMock(status_code=404))
+            mock_httpx_client.return_value.__exit__ = MagicMock(return_value=False)
             mock_make_db.return_value = (MagicMock(), MagicMock(return_value=MagicMock()))
             mock_subprocess.return_value.returncode = 1  # force skip ffmpeg merge
             mock_loop = MagicMock()
@@ -157,7 +155,9 @@ class TestTtsCombineResults:
              patch("app.jobs.tasks.pipeline.BaseJobTask._patch_task", side_effect=capture_task_patch), \
              patch("app.jobs.tasks.pipeline.BaseJobTask._make_db") as mock_make_db, \
              patch("app.dubbing.service.DubbingMergeService.merge_segments", new=AsyncMock(side_effect=PermissionError("Permission denied: 'uploads'"))), \
-             patch("asyncio.new_event_loop"):
+             patch("httpx.Client") as mock_httpx_client:
+            mock_httpx_client.return_value.__enter__ = MagicMock(return_value=MagicMock())
+            mock_httpx_client.return_value.__exit__ = MagicMock(return_value=False)
             mock_make_db.return_value = (MagicMock(), MagicMock(return_value=mock_session))
 
             tts_combine_results.run(
@@ -303,12 +303,8 @@ class TestTtsProgressPatches:
         with patch("app.jobs.tasks.pipeline.BaseJobTask._patch_job") as patch_job, \
              patch("app.jobs.tasks.pipeline.BaseJobTask._patch_task") as patch_task, \
              patch("app.jobs.celery_app.synthesize_tts") as mock_tts, \
-             patch("app.media.storage.get_storage_service") as mock_storage_service, \
              patch("asyncio.new_event_loop") as mock_loop_factory:
             mock_tts.run.return_value = mock_result
-            mock_storage = MagicMock()
-            mock_storage.download = AsyncMock(return_value=True)
-            mock_storage_service.return_value = mock_storage
 
             mock_loop = MagicMock()
             mock_loop.run_until_complete = MagicMock(return_value=True)

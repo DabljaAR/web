@@ -12,7 +12,7 @@ from app.core.repository import UserRepository
 from app.core.auth import AuthService
 from app.shared.enums import languageEnum
 from app.core.exceptions import UserAlreadyExistsException
-import app.media.models  # Register Video model for SQLAlchemy mappers
+import app.core.video_model  # Register Video model for SQLAlchemy mappers
 
 
 @pytest.fixture

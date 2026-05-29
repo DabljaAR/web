@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from fastapi import HTTPException, status
 
 from app.core.models import User, SubscriptionPlan, UserSubscription, Payment
-import app.media.models # Ensure all mappers are initialized
+import app.core.video_model  # Ensure all mappers are initialized
 from app.core.schema import (
     SubscriptionPlanCreate, SubscriptionPlanUpdate, SubscriptionPlanResponse,
     UserSubscriptionCreate, UserSubscriptionUpdate, UserSubscriptionResponse,

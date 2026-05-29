@@ -21,7 +21,7 @@ from celery import Task
 from faster_whisper import WhisperModel
 
 from app.config import settings
-from app.media.storage import get_storage_service
+from app.object_storage import get_storage_service
 from app.shared.enums import AudioVideoExtension
 
 logger = logging.getLogger(__name__)

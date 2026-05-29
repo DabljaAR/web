@@ -14,9 +14,6 @@ from app.shared.enums import (
     languageEnum,
     SubscriptionStatusEnum,
 )
-from app.media.models import Video
-
-# Import Video to avoid SQLAlchemy mapper errors when resolving User.videos
 
 class Role(Base):
     __tablename__ = "roles"
@@ -90,7 +87,6 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False) #online
     role: Mapped[Optional["Role"]] = relationship("Role", back_populates="users")
     subscriptions: Mapped[List["UserSubscription"]] = relationship("UserSubscription", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
-    videos: Mapped[List["Video"]] = relationship("Video", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
 
     def __repr__(self):
         return f"<User {self.username} (id={self.user_id})>"

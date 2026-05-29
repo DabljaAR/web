@@ -167,12 +167,12 @@ def stt_transcribe(
             "metadata":   dict,
         }
     """
-    from app.media.storage import get_storage_service
+    from app.media_service.client import MediaServiceClient
     from app.stt.models import WhisperModelManager
 
     task_started_at = time.time()
     whisper = WhisperModelManager()
-    storage = get_storage_service()
+    media_client = MediaServiceClient()
 
     # ── 1. Mark PROCESSING ───────────────────────────────────────────────────
     self._patch_job(
@@ -197,19 +197,13 @@ def stt_transcribe(
     task_id = _input_data.get("task_id")
 
     # ── 2. Resolve the storage key ───────────────────────────────────────────
-    def _get_file_key() -> str:
-        from app.media.models import Video  # noqa: F401 — needed for SQLAlchemy mapper resolution
-        _engine, _SessionLocal = self._make_db()
-        try:
-            with _SessionLocal() as db:
-                video = db.get(Video, video_id)
-                if not video:
-                    raise ValueError(f"Video {video_id} not found.")
-                return video.audio_path or video.file_path
-        finally:
-            _engine.dispose()
+    async def _get_file_key() -> str:
+        video = await media_client.get_video(video_id)
+        if not video:
+            raise ValueError(f"Video {video_id} not found.")
+        return video.get("audio_path") or video.get("file_path")
 
-    file_key: str = _get_file_key()
+    file_key: str = self._run_sync(_get_file_key())
     logger.info(
         "[STT] job=%s video=%s file_key=%s output_type=%s processing_mode=%s source=%s",
         job_id,
@@ -228,19 +222,18 @@ def stt_transcribe(
         local_path = Path(tmp_dir) / f"audio{suffix}"
 
         download_started_at = time.time()
-        downloaded = self._run_sync(storage.download(file_key, str(local_path)))
+        downloaded = self._run_sync(media_client.download_file(file_key, local_path))
         download_ms = (time.time() - download_started_at) * 1000.0
         if downloaded:
             logger.info("[STT] downloaded %s → %s", file_key, local_path)
         else:
-            # Fallback: local storage absolute path
-            local_path = Path(storage.get_absolute_path(file_key))
+            raise ValueError(f"Failed to download media key {file_key} via media-service")
 
         logger.info(
             "[STT][TIMING] input_download_ms=%.1f | job=%s | source=%s",
             download_ms,
             job_id,
-            "remote" if downloaded else "local_fallback",
+            "remote" if downloaded else "missing",
         )
 
         self.update_progress(job_id, 25.0)
@@ -483,13 +476,14 @@ def tts_synthesize_segment(
         try:
             ref_download_ms = 0.0
             if ref_clip_minio_key:
-                from app.media.storage import get_storage_service
+                from app.media_service.client import MediaServiceClient
+
                 _ref_path = os.path.join(_tmp_dir, "ref_clip.wav")
                 _loop = asyncio.new_event_loop()
                 ref_download_started_at = time.time()
                 try:
                     ok = _loop.run_until_complete(
-                        get_storage_service().download(ref_clip_minio_key, _ref_path)
+                        MediaServiceClient().download_file(ref_clip_minio_key, Path(_ref_path))
                     )
                 finally:
                     _loop.close()
@@ -632,8 +626,6 @@ def tts_combine_results(
 
     from app.dubbing.schemas import SegmentTimingInfo
     from app.dubbing.service import DubbingMergeService
-    from app.media.models import MediaType, Video as MediaVideo
-    from app.media.storage import get_storage_service
 
     sorted_results = sorted(segment_results, key=lambda r: r["segment_id"])
 
@@ -691,22 +683,18 @@ def tts_combine_results(
         try:
             original_media_key: Optional[str] = None
 
-            engine_v, SessionLocal_v = BaseJobTask._make_db()
-            try:
-                with SessionLocal_v() as db:
-                    video_row = db.get(MediaVideo, video_id)
-                    if video_row is not None:
-                        media_type_value = (
-                            video_row.media_type.value.lower()
-                            if isinstance(video_row.media_type, MediaType)
-                            else str(video_row.media_type).lower()
-                        )
-                        if media_type_value == "video":
-                            original_media_key = video_row.file_path
-                        else:
-                            original_media_key = video_row.audio_path or video_row.file_path
-            finally:
-                engine_v.dispose()
+            import httpx as _httpx
+            import os as _os
+            _media_svc_url = _os.getenv("MEDIA_SERVICE_URL", "http://media-service:8001")
+            with _httpx.Client(timeout=10.0) as _c:
+                _vr = _c.get(f"{_media_svc_url}/videos/{video_id}")
+            if _vr.status_code == 200:
+                _vdata = _vr.json()
+                media_type_value = str(_vdata.get("media_type", "VIDEO")).lower()
+                if media_type_value == "video":
+                    original_media_key = _vdata.get("file_path")
+                else:
+                    original_media_key = _vdata.get("audio_path") or _vdata.get("file_path")
 
             segment_infos: list[SegmentTimingInfo] = []
             for idx, row in enumerate(sorted_results):
@@ -753,31 +741,40 @@ def tts_combine_results(
                     dubbed_video_key = merge_response.output_key
                     dubbed_video_url = merge_response.output_url
 
-                engine_u, SessionLocal_u = BaseJobTask._make_db()
+                import httpx as _httpx
+                import os as _os
+                _media_svc_url = _os.getenv(
+                    "MEDIA_SERVICE_URL", "http://media-service:8001"
+                )
+                _patch_payload = {}
+                if dubbed_video_key:
+                    _patch_payload["dubbed_video_path"] = dubbed_video_key
+                _patch_payload["dubbing_metadata"] = {
+                    "tts_job_id": job_id,
+                    "media_type": media_type_value,
+                    "combined_audio_key": combined_minio_key,
+                    "combined_audio_url": combined_audio_url,
+                    "dubbed_video_key": dubbed_video_key,
+                    "dubbed_video_url": dubbed_video_url,
+                    "updated_at": _utcnow().isoformat(),
+                }
                 try:
-                    with SessionLocal_u() as db:
-                        up_video = db.get(MediaVideo, video_id)
-                        if up_video is not None:
-                            if dubbed_video_key:
-                                up_video.dubbed_video_path = dubbed_video_key
-                            existing_meta = (
-                                dict(up_video.dubbing_metadata)
-                                if up_video.dubbing_metadata
-                                else {}
-                            )
-                            up_video.dubbing_metadata = {
-                                **existing_meta,
-                                "tts_job_id": job_id,
-                                "media_type": media_type_value,
-                                "combined_audio_key": combined_minio_key,
-                                "combined_audio_url": combined_audio_url,
-                                "dubbed_video_key": dubbed_video_key,
-                                "dubbed_video_url": dubbed_video_url,
-                                "updated_at": _utcnow().isoformat(),
-                            }
-                            db.commit()
-                finally:
-                    engine_u.dispose()
+                    with _httpx.Client(timeout=10.0) as _client:
+                        _resp = _client.patch(
+                            f"{_media_svc_url}/videos/{video_id}/paths",
+                            json=_patch_payload,
+                        )
+                        _resp.raise_for_status()
+                        logger.info(
+                            "[TTS] media-service PATCH /videos/%s/paths → %s",
+                            video_id, _resp.status_code,
+                        )
+                except Exception as _http_exc:
+                    logger.error(
+                        "[TTS] Failed to PATCH media-service for video %s: %s",
+                        video_id, _http_exc,
+                    )
+                    raise
         except Exception as _exc:
             merge_error_message = str(_exc)
             logger.error("[TTS] merge step failed | job=%s: %s", job_id, _exc, exc_info=True)
@@ -802,7 +799,11 @@ def tts_combine_results(
     # ── Clean up shared ref clip ─────────────────────────────────────────────
     if ref_clip_minio_key:
         try:
-            asyncio.run(get_storage_service().delete(ref_clip_minio_key))
+            import httpx as _httpx
+            import os as _os
+            _media_svc_url = _os.getenv("MEDIA_SERVICE_URL", "http://media-service:8001")
+            with _httpx.Client(timeout=10.0) as _c:
+                _c.delete(f"{_media_svc_url}/storage/{ref_clip_minio_key}")
         except Exception as _exc:
             logger.warning("[TTS] could not delete ref clip %s: %s", ref_clip_minio_key, _exc)
 

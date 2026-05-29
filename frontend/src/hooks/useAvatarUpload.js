@@ -60,8 +60,8 @@ export const useAvatarUpload = (onUploadSuccess, onError) => {
       }
 
       const data = await response.json();
-      if (onUploadSuccess) onUploadSuccess(data.url);
-      return data.url;
+      if (onUploadSuccess) onUploadSuccess(data.key);
+      return data.key;
     } catch (error) {
       if (onError) onError(error.message);
       throw error;

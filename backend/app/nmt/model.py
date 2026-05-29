@@ -8,7 +8,7 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from langdetect import detect, DetectorFactory
 
 from pathlib import Path
-from app.media.storage import get_storage_service
+from app.object_storage import get_storage_service
 from app.config import settings
 
 # Seed for consistent langdetect results

@@ -168,48 +168,49 @@ async def get_task(
 
     # Best-effort presigned URL generation — failures are logged but do not break the response
     try:
-        from app.media.storage import get_storage_service
-        from app.media.models import Video
-        storage = get_storage_service()
+        from app.media_service.client import MediaServiceClient
+        client = MediaServiceClient()
 
-        video = await db.get(Video, task.video_id)
-        if video:
-            audio_key = video.audio_path or video.file_path
+        video_data = await client.get_video(task.video_id)
+        if video_data:
+            audio_key = video_data.get("audio_path") or video_data.get("file_path")
             if audio_key:
                 try:
-                    original_audio_url = await storage.get_url(audio_key)
+                    original_audio_url = await client.presign_url(audio_key)
                 except Exception as e:
                     logger.warning(
                         "Failed to generate presigned URL for original audio key %s: %s",
                         audio_key, e,
                     )
-            if video.file_path and video.media_type and video.media_type.value == "VIDEO":
+            file_path = video_data.get("file_path")
+            if file_path and video_data.get("media_type") == "VIDEO":
                 try:
-                    original_video_url = await storage.get_url(video.file_path)
+                    original_video_url = await client.presign_url(file_path)
                 except Exception as e:
                     logger.warning(
                         "Failed to generate presigned URL for original video key %s: %s",
-                        video.file_path, e,
+                        file_path, e,
                     )
-            if getattr(video, "dubbed_video_path", None):
+            dubbed_path = video_data.get("dubbed_video_path")
+            if dubbed_path:
                 try:
-                    dubbed_video_url = await storage.get_url(video.dubbed_video_path)
+                    dubbed_video_url = await client.presign_url(dubbed_path)
                 except Exception as e:
                     logger.warning(
                         "Failed to generate presigned URL for dubbed video key %s: %s",
-                        video.dubbed_video_path, e,
+                        dubbed_path, e,
                     )
 
         if task.combined_audio_key:
             try:
-                combined_audio_url = await storage.get_url(task.combined_audio_key)
+                combined_audio_url = await client.presign_url(task.combined_audio_key)
             except Exception as e:
                 logger.warning(
                     "Failed to generate presigned URL for combined audio key %s: %s",
                     task.combined_audio_key, e,
                 )
     except Exception as e:
-        logger.warning("Could not initialise storage service for task %s: %s", task_id, e)
+        logger.warning("Could not resolve URLs for task %s: %s", task_id, e)
 
     return VideoTaskDetail(
         id=task.id,

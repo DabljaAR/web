@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.db import Base
 # Import all models so Base.metadata knows about every FK-referenced table
 import app.core.models  # noqa: F401
-import app.media.models  # noqa: F401
+import app.core.video_model  # noqa: F401
 from app.jobs.models import JobType, JobStatus
 from app.jobs.schemas import JobCreate, JobUpdate
 from app.jobs.service import JobService
