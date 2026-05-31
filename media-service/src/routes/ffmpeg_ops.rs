@@ -118,6 +118,11 @@ pub struct PresignRequest {
     pub content_type: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct ListPrefixQuery {
+    pub prefix: String,
+}
+
 pub async fn get_presigned_url_handler(
     State(state): State<Arc<AppState>>,
     Json(req): Json<PresignRequest>,
@@ -134,6 +139,16 @@ pub async fn get_presigned_url_handler(
         .await
     {
         Ok(url) => (StatusCode::OK, Json(json!({"url": url}))),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
+    }
+}
+
+pub async fn list_prefix_handler(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<ListPrefixQuery>,
+) -> (StatusCode, Json<Value>) {
+    match state.storage.list_prefix(&params.prefix).await {
+        Ok(keys) => (StatusCode::OK, Json(json!({"keys": keys}))),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": e.to_string()}))),
     }
 }

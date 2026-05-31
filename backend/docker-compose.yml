@@ -25,7 +25,7 @@ services:
     image: redis:7-alpine
     container_name: dabljaar_redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
     volumes:
       - dabljaar_redis_data:/data
     healthcheck:
@@ -93,7 +93,7 @@ services:
       dockerfile: Dockerfile
     container_name: dabljaar_worker_media
     entrypoint: []
-    command: celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=2 --hostname=worker-media@%h
+    command: celery -A app.jobs.celery_app worker -E --loglevel=info -Q media --concurrency=2 --hostname=worker-media@%h
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
@@ -127,7 +127,7 @@ services:
         INSTALL_AI: "true"
     container_name: dabljaar_worker_ai
     entrypoint: []
-    command: celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=1 --hostname=worker-ai@%h
+    command: celery -A app.jobs.celery_app worker -E --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=1 --hostname=worker-ai@%h
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}

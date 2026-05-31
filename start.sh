@@ -433,6 +433,17 @@ bootstrap_env_file() {
     log_ok "Created $(basename "$target_file") from example."
 }
 
+ensure_backend_media_service_url() {
+    [[ -f "$BACKEND_ENV_FILE" ]] || return
+
+    if grep -q '^MEDIA_SERVICE_URL=' "$BACKEND_ENV_FILE"; then
+        return
+    fi
+
+    echo "MEDIA_SERVICE_URL=http://localhost:${MEDIA_SERVICE_PORT}" >> "$BACKEND_ENV_FILE"
+    log_ok "Added MEDIA_SERVICE_URL to backend .env"
+}
+
 normalize_frontend_env_key() {
     [[ -f "$FRONTEND_ENV_FILE" ]] || return
 
@@ -463,6 +474,23 @@ ensure_python_env() {
     popd >/dev/null
 
     log_ok "Backend Python environment ready."
+}
+
+ensure_media_service_built() {
+    local binary="$ROOT_DIR/media-service/target/debug/media-service"
+    if [[ -x "$binary" ]]; then
+        log_ok "media-service binary already built."
+        return
+    fi
+
+    log_info "Building Rust media-service..."
+    pushd "$ROOT_DIR/media-service" >/dev/null
+    if ! cargo build; then
+        popd >/dev/null
+        die "Failed to build media-service. Check the Rust toolchain and dependencies."
+    fi
+    popd >/dev/null
+    log_ok "media-service built successfully."
 }
 
 ensure_frontend_deps() {
@@ -502,10 +530,21 @@ ensure_system_services() {
         log_ok "Redis already listening on port 6379 (external process)."
     elif run_with_sudo systemctl enable --now redis-server 2>/dev/null; then
         log_ok "Redis started via systemd."
-    elif command -v docker >/dev/null 2>&1 && docker compose -f "$ROOT_DIR/docker-compose.yml" up -d redis >/dev/null 2>&1; then
-        log_ok "Redis started via Docker Compose."
     else
-        log_warn "redis-server unavailable via systemd or Docker; checking port 6379..."
+        if command -v redis-server >/dev/null 2>&1; then
+            log_info "Attempting to start Redis via local redis-server..."
+            mkdir -p "$RUNTIME_DIR/redis"
+            start_managed_process "redis" "$ROOT_DIR" "redis-server --port 6379 --bind 127.0.0.1 --dir '$RUNTIME_DIR/redis'"
+        elif command -v docker >/dev/null 2>&1; then
+            log_info "Attempting to start Redis via Docker Compose..."
+            if docker compose -f "$ROOT_DIR/docker-compose.yml" up -d redis 2>/dev/null; then
+                log_ok "Redis started via Docker Compose."
+            else
+                log_warn "Failed to start Redis via Docker Compose."
+            fi
+        else
+            log_warn "Neither redis-server nor Docker is available; cannot start Redis automatically."
+        fi
     fi
 
     # PostgreSQL: try systemd, accept already-running, fall back to Docker Compose
@@ -515,18 +554,25 @@ ensure_system_services() {
         log_ok "PostgreSQL already listening on port 5432 (external process)."
     elif run_with_sudo systemctl enable --now postgresql 2>/dev/null; then
         log_ok "PostgreSQL started via systemd."
-    elif command -v docker >/dev/null 2>&1 && docker compose -f "$ROOT_DIR/docker-compose.yml" up -d postgres >/dev/null 2>&1; then
-        log_ok "PostgreSQL started via Docker Compose."
     else
-        log_warn "postgresql unavailable via systemd or Docker; checking port 5432..."
+        if command -v docker >/dev/null 2>&1; then
+            log_info "Attempting to start PostgreSQL via Docker Compose..."
+            if docker compose -f "$ROOT_DIR/docker-compose.yml" up -d postgres 2>/dev/null; then
+                log_ok "PostgreSQL started via Docker Compose."
+            else
+                log_warn "Failed to start PostgreSQL via Docker Compose."
+            fi
+        else
+            log_warn "Docker not available; cannot start PostgreSQL via Compose."
+        fi
     fi
 
     if ! wait_for_port 6379 30 1; then
-        die "Redis failed to become ready on port 6379 after 30 seconds. Start Redis manually or run: docker compose up -d redis"
+        die "Redis failed to become ready on port 6379 after 30 seconds. Start Redis manually: redis-server  OR  docker compose up -d redis"
     fi
 
     if ! wait_for_port 5432 30 1; then
-        die "PostgreSQL failed to become ready on port 5432 after 30 seconds. Run: sudo systemctl start postgresql  OR  docker compose up -d postgres"
+        die "PostgreSQL failed to become ready on port 5432 after 30 seconds. Start PostgreSQL manually: sudo systemctl start postgresql  OR  docker compose up -d postgres"
     fi
 
     log_ok "Redis and PostgreSQL are running."
@@ -679,8 +725,7 @@ kill_port_orphans() {
 }
 
 print_runtime_summary() {
-    cat <<EOF
-
+    echo -e "
 ${GREEN}Development stack started.${NC}
 
     Frontend:       http://localhost:${FRONTEND_PORT}
@@ -697,7 +742,7 @@ Use:
     ./start.sh status
     ./start.sh logs <service>
     ./start.sh stop
-EOF
+"
 }
 
 cmd_setup() {
@@ -715,6 +760,7 @@ cmd_setup() {
 
     bootstrap_env_file "$BACKEND_ENV_EXAMPLE" "$BACKEND_ENV_FILE"
     bootstrap_env_file "$FRONTEND_ENV_EXAMPLE" "$FRONTEND_ENV_FILE"
+    ensure_backend_media_service_url
     normalize_frontend_env_key
 
     ensure_python_env
@@ -729,6 +775,7 @@ cmd_run() {
     ensure_system_services
 
     install_uv_if_needed
+    ensure_media_service_built
 
     local need_sync=0
     if ! venv_healthy; then
@@ -776,16 +823,15 @@ cmd_run() {
         die "Backend failed to become ready on port $BACKEND_PORT. Check log: $LOG_DIR/backend.log"
     fi
 
-    start_managed_process "worker_media" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' uv run celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-media@%h"
-    start_managed_process "worker_stt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True STT_DEVICE=cuda STT_COMPUTE_TYPE=auto HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' STT_MODEL_LOCAL_PATH='$stt_local_path' uv run celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_stt,pipeline --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
-    start_managed_process "worker_nmt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True SILMA_DEVICE=cuda HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' NMT_MODEL_LOCAL_PATH='$nmt_local_path' uv run celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_nmt,ai_tts --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
+    start_managed_process "worker_media" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' uv run celery -A app.jobs.celery_app worker -E --loglevel=info -Q media --concurrency=2 --max-tasks-per-child=1000 --hostname=worker-media@%h"
+    start_managed_process "worker_stt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} SILMA_DEVICE=cpu CUDA_VISIBLE_DEVICES= STT_DEVICE=cpu STT_COMPUTE_TYPE=int8 HF_HUB_DISABLE_XET=1 HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' STT_MODEL_LOCAL_PATH='$stt_local_path' uv run celery -A app.jobs.celery_app worker -E --pool=solo --loglevel=info -Q ai_stt,pipeline --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-stt@%h"
+    start_managed_process "worker_nmt" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} HF_HUB_DISABLE_XET=1 SILMA_DEVICE=cpu HF_HOME='$hf_home' HUGGINGFACE_HUB_CACHE='$hf_hub_cache' TRANSFORMERS_CACHE='$transformers_cache' XDG_CACHE_HOME='$xdg_cache' TORCH_HOME='$torch_home' NMT_MODEL_LOCAL_PATH='$nmt_local_path' uv run celery -A app.jobs.celery_app worker -E --pool=solo --loglevel=info -Q ai_nmt,ai_tts --concurrency=1 --max-tasks-per-child=1000 --hostname=worker-nmt@%h"
 
     if [[ "$ENABLE_FLOWER" -eq 1 ]]; then
-        if uv run python -c "import flower" >/dev/null 2>&1; then
-            start_managed_process "flower" "$BACKEND_DIR" "INSTALL_AI=${INSTALL_AI:-true} FLOWER_UNAUTHENTICATED_API=true uv run celery -A app.jobs.celery_app flower --port='$FLOWER_PORT'"
+        if "$BACKEND_VENV/bin/python" -c "import flower" >/dev/null 2>&1; then
+            start_managed_process "flower" "$BACKEND_DIR" "INSTALL_AI=true FLOWER_UNAUTHENTICATED_API=true '$BACKEND_VENV/bin/python' -m celery -A app.jobs.celery_app flower --port='$FLOWER_PORT'"
         else
-            log_warn "Flower is not installed in the backend environment. Skipping Flower startup."
-            log_warn "To enable Flower, run: cd backend && uv sync --group dev"
+            log_warn "Flower is not installed. Run: cd backend && uv sync --group ai --group dev"
             log_warn "Or run without Flower: ./start.sh run --no-flower"
         fi
     fi
@@ -807,6 +853,7 @@ cmd_run() {
 }
 
 cmd_stop() {
+    stop_managed_process "redis"
     stop_managed_process "frontend"
     stop_managed_process "flower"
     stop_managed_process "worker_nmt"

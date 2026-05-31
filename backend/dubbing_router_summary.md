@@ -122,8 +122,8 @@
 - FK validation (video → user, job → video)
 
 ### Storage Integration
-- Uses `get_storage_service()` for MinIO/S3 operations
-- Generates presigned URLs with custom filename
+- Uses the Rust `media-service` client for MinIO/S3 operations
+- Generates presigned URLs through Rust storage endpoints
 - 1-hour expiration on presigned URLs
 
 ### Logging

@@ -380,6 +380,15 @@ def stt_transcribe(
                 logger.info("[STT] output_type=%s — skipping NMT/TTS | job=%s", output_type, job_id)
             else:
                 logger.info("[STT] No segments to translate; pipeline ends here | job=%s", job_id)
+            # Pipeline ends here — mark VideoTask COMPLETED so it doesn't stay in PROCESSING
+            if task_id and output_type != "captionsOnly":
+                from app.tasks.models import TaskStatus
+                self._patch_task(
+                    task_id,
+                    TaskStatus.COMPLETED,
+                    progress=100.0,
+                    completed_at=_utcnow(),
+                )
 
         logger.info(
             "[STT] done | job=%s | duration=%.1fs | segments=%d | processing_mode=%s",

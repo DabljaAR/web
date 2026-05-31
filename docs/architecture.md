@@ -74,7 +74,7 @@ The platform is a **modular monolith**: a single deployable FastAPI application 
 | Message broker / cache | **Redis 7** | Celery broker + result backend |
 | Containers | **Docker + Docker Compose** | Multi-service orchestration |
 | Worker monitoring | **Flower** | Celery dashboard on port 5555 |
-| File storage | **Local FS / S3-compatible** | Configurable via `get_storage_service()` |
+| File storage | **Rust `media-service` + S3-compatible backend** | Storage and presign flow are owned by Rust for media paths |
 
 ---
 
@@ -144,13 +144,12 @@ backend/
 │   │   ├── rate_limiter.py   # slowapi Limiter singleton
 │   │   └── db.py             # SQLAlchemy engine, Base, AsyncSessionLocal, get_db
 │   │
-│   ├── media/                # Domain: video/audio upload & processing
+│   ├── media/                # Domain: video/audio upload & orchestration
 │   │   ├── models.py         # Video, AudioTrack (planned)
 │   │   ├── schema.py         # VideoResponse, UploadResponse
 │   │   ├── service.py        # VideoService: upload → dispatch Celery job
 │   │   ├── router.py         # /api/videos/* endpoints
-│   │   ├── storage.py        # StorageService abstraction (local FS / S3)
-│   │   └── ffmpeg_service.py # FFmpegService: metadata, thumbnail, HLS, audio
+│   │   └── client.py         # Rust media-service client for media/storage ops
 │   │
 │   ├── jobs/                 # Domain: async job processing
 │   │   ├── celery_app.py     # Celery instance, broker config, queue topology

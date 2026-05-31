@@ -73,14 +73,14 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 Media worker:
 
 ```bash
-uv run celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=2 --hostname=worker-media@%h
+uv run celery -A app.jobs.celery_app worker -E --loglevel=info -Q media --concurrency=2 --hostname=worker-media@%h
 ```
 
 AI worker:
 
 ```bash
 uv sync --group ai
-uv run celery -A app.jobs.celery_app worker --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=1 --hostname=worker-ai@%h
+uv run celery -A app.jobs.celery_app worker -E --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=1 --hostname=worker-ai@%h
 ```
 
 Flower:

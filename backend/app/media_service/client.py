@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from io import BytesIO
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
@@ -78,14 +77,8 @@ class MediaServiceClient:
             return True
 
     # ------------------------------------------------------------------
-    # Storage operations — use Python S3StorageService directly to avoid
-    # the Rust SDK presign bug (PUT presigns return x-id=GetObject with
-    # the aws-sdk-s3 v1.x + MinIO combination).
+    # Storage operations — use Rust media-service presign + HTTP PUT/GET
     # ------------------------------------------------------------------
-
-    def _s3(self):
-        from app.object_storage import S3StorageService
-        return S3StorageService()
 
     async def presign_url(
         self,
@@ -95,36 +88,23 @@ class MediaServiceClient:
         method: str = "GET",
         content_type: Optional[str] = None,
     ) -> str:
-        s3 = self._s3()
-        if method.upper() == "GET":
-            return await s3.get_url(key)
-        # For PUT presigns fall back to direct aioboto3
-        import aioboto3
-        from botocore.config import Config
-        session = aioboto3.Session()
-        cfg = Config(
-            signature_version="s3v4",
-            s3={"addressing_style": "path"},
-            request_checksum_calculation="when_required",
-            response_checksum_validation="when_required",
-        )
-        params: dict = {"Bucket": s3.bucket_name, "Key": key}
-        if content_type:
-            params["ContentType"] = content_type
-        async with session.client(
-            "s3",
-            endpoint_url=s3.endpoint_url,
-            aws_access_key_id=s3.access_key,
-            aws_secret_access_key=s3.secret_key,
-            config=cfg,
-        ) as s3c:
-            url = await s3c.generate_presigned_url(
-                "put_object", Params=params, ExpiresIn=expires_secs
-            )
-        return s3._rewrite_presigned_url(url)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            payload = {
+                "key": key,
+                "expires_secs": int(expires_secs),
+                "method": method.upper(),
+            }
+            if content_type:
+                payload["content_type"] = content_type
+            r = await client.post(f"{self.base_url}/storage/presign", json=payload)
+            r.raise_for_status()
+            data = r.json()
+            return data.get("url")
 
     async def upload_file(self, local_path: Path, *, key: str, content_type: str) -> None:
-        await self._s3().upload_file(str(local_path), key, content_type)
+        with open(local_path, "rb") as fh:
+            data = fh.read()
+        await self.upload_bytes(data, key=key, content_type=content_type)
 
     async def upload_stream(
         self,
@@ -137,16 +117,70 @@ class MediaServiceClient:
         async for chunk in file_iter:
             chunks.append(chunk)
         data = b"".join(chunks)
-        await self._s3().upload_bytes(data, key, content_type)
+        await self.upload_bytes(data, key=key, content_type=content_type)
 
     async def upload_bytes(self, data: bytes, *, key: str, content_type: str) -> None:
-        await self._s3().upload_bytes(data, key, content_type)
+        # Get PUT presigned URL from media-service and PUT the bytes there.
+        url = await self.presign_url(key, method="PUT", content_type=content_type)
+        headers = {}
+        if content_type:
+            headers["Content-Type"] = content_type
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.put(url, content=data, headers=headers)
+            resp.raise_for_status()
 
     async def delete_file(self, key: str) -> bool:
-        return await self._s3().delete(key)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.delete(f"{self.base_url}/storage/{key}")
+            if resp.status_code == 200:
+                return True
+            if resp.status_code == 404:
+                return False
+            resp.raise_for_status()
+            return True
+
+    async def list_prefix(self, prefix: str) -> list[str]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(f"{self.base_url}/storage/list", params={"prefix": prefix})
+            resp.raise_for_status()
+            data = resp.json()
+            return list(data.get("keys", []))
+
+    async def download_prefix(self, prefix: str, local_dir: Path) -> bool:
+        keys = await self.list_prefix(prefix)
+        if not keys:
+            return False
+
+        local_dir.mkdir(parents=True, exist_ok=True)
+        success = False
+        for key in keys:
+            relative = key[len(prefix):].lstrip("/") if key.startswith(prefix) else Path(key).name
+            target = local_dir / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            ok = await self.download_file(key, target)
+            success = success or ok
+        return success
 
     async def download_file(self, key: str, local_path: Path) -> bool:
-        return await self._s3().download(key, str(local_path))
+        url = await self.presign_url(key, method="GET")
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.get(url)
+            if resp.status_code == 404:
+                return False
+            resp.raise_for_status()
+            with open(local_path, "wb") as fh:
+                fh.write(resp.content)
+            return True
+
+    async def dub(self, payload: dict) -> dict:
+        """Call the Rust media-service /ffmpeg/dub endpoint.
+
+        Payload must follow the Rust DubRequest shape. Returns the JSON response.
+        """
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            response = await client.post(f"{self.base_url}/ffmpeg/dub", json=payload)
+            response.raise_for_status()
+            return response.json()
 
 
 async def iter_upload_file(file_obj, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:

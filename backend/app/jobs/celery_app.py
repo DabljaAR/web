@@ -53,11 +53,16 @@ celery_app.conf.update(
     broker_url=settings.CELERY_BROKER_URL,
     result_backend=settings.CELERY_RESULT_BACKEND,
 
+    # Flower/monitoring needs events enabled even when workers are launched
+    # without an explicit -E flag (for example in docker-compose overrides).
+    worker_send_task_events=True,
+    task_send_sent_event=True,
+
     # Reliability
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
-    worker_max_tasks_per_child=4,
+    worker_max_tasks_per_child=500,
     broker_transport_options={
         'visibility_timeout': 3600,  # 1 hour to allow long-running AI tasks
     },

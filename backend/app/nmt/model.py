@@ -8,7 +8,7 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from langdetect import detect, DetectorFactory
 
 from pathlib import Path
-from app.object_storage import get_storage_service
+from app.media_service.client import MediaServiceClient
 from app.config import settings
 
 # Seed for consistent langdetect results
@@ -99,18 +99,18 @@ def resolve_default_model() -> tuple[str, str]:
         )
         try:
             os.makedirs(local_path, exist_ok=True)
-            storage = get_storage_service()
-            _download_model_files(storage, key, Path(local_path), bucket_name=bucket)
+            client = MediaServiceClient()
+            _download_model_files(client, key, Path(local_path), bucket_name=bucket)
             if _validate_model_dir(local_path):
                 logger.info("[NMT][CACHE] source=s3_hit path=%s", local_path)
                 return local_path, "s3_hit"
             logger.warning(
-                "[NMT] Object storage download finished but model validation failed at %s "
+                "[NMT] Rust media-service download finished but model validation failed at %s "
                 "(missing weight or tokenizer files). Falling back to HF Hub.",
                 local_path,
             )
         except Exception as exc:
-            logger.error("[NMT] Object storage download failed: %s", exc)
+            logger.error("[NMT] Rust media-service download failed: %s", exc)
     else:
         logger.warning(
             "[NMT] Skipping object-storage download (STORAGE_BACKEND=%r, NMT_MODEL_KEY=%r). "

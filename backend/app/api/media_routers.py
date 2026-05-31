@@ -555,7 +555,10 @@ async def get_dashboard_data(
             "progress": j.progress,
             "created_at": j.created_at,
         })
-    active_items.sort(key=lambda x: x["created_at"] or "", reverse=True)
+    active_items.sort(
+        key=lambda x: (x["created_at"].isoformat() if hasattr(x["created_at"], "isoformat") else (x["created_at"] or "")),
+        reverse=True,
+    )
 
     # Recent completed/failed videos
     recent_raw = await client.list_videos(

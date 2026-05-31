@@ -68,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/ffmpeg/hls",           post(routes::ffmpeg_ops::hls_handler))
         .route("/ffmpeg/dub",           post(routes::ffmpeg_ops::dub_handler))
         .route("/storage/presign",      post(routes::ffmpeg_ops::get_presigned_url_handler))
+        .route("/storage/list",         get(routes::ffmpeg_ops::list_prefix_handler))
         .route("/storage/*key",         delete(routes::storage_ops::delete_file_handler))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())

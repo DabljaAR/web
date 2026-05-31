@@ -15,6 +15,7 @@ use crate::config::AppConfig;
 pub trait StorageBackend: Send + Sync {
     async fn upload_file(&self, local_path: &Path, key: &str, content_type: &str) -> Result<String>;
     async fn download_file(&self, key: &str, local_path: &Path) -> Result<bool>;
+    async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>>;
     async fn delete_object(&self, key: &str) -> Result<bool>;
     async fn delete_prefix(&self, prefix: &str) -> Result<u64>;
     async fn get_presigned_url(
@@ -124,6 +125,42 @@ impl StorageBackend for S3Storage {
 
         tracing::info!("S3Storage: downloaded {} → {:?}", key, local_path);
         Ok(true)
+    }
+
+    async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>> {
+        let mut keys = Vec::new();
+        let mut continuation: Option<String> = None;
+
+        loop {
+            let mut req = self
+                .client
+                .list_objects_v2()
+                .bucket(&self.bucket)
+                .prefix(prefix);
+
+            if let Some(token) = continuation.as_ref() {
+                req = req.continuation_token(token);
+            }
+
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("S3 list_objects_v2 failed for prefix '{}': {}", prefix, e))?;
+
+            for obj in resp.contents() {
+                if let Some(key) = obj.key() {
+                    keys.push(key.to_string());
+                }
+            }
+
+            if resp.is_truncated().unwrap_or(false) {
+                continuation = resp.next_continuation_token().map(|s| s.to_string());
+            } else {
+                break;
+            }
+        }
+
+        Ok(keys)
     }
 
     async fn delete_object(&self, key: &str) -> Result<bool> {

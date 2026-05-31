@@ -1387,8 +1387,8 @@ grep -i "httpx" /home/eslam-amr/Documents/web-main/backend/pyproject.toml
 
 ### 7c — Do NOT touch `app/dubbing/service.py`
 
-`dubbing/service.py` still uses `FFmpegService` and `get_storage_service()` directly.
-These stay in Python for this phase. No changes now.
+`dubbing/service.py` now delegates dubbing/media assembly to Rust `media-service`.
+The old Python `FFmpegService` and `get_storage_service()` media path have been removed.
 
 ### 7d — Do NOT touch `app/stt/router.py`
 

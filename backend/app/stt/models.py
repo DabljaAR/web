@@ -21,7 +21,7 @@ from celery import Task
 from faster_whisper import WhisperModel
 
 from app.config import settings
-from app.object_storage import get_storage_service
+from app.media_service.client import MediaServiceClient
 from app.shared.enums import AudioVideoExtension
 
 logger = logging.getLogger(__name__)
@@ -112,14 +112,11 @@ def resolve_whisper_model() -> tuple[str, str]:
         )
         try:
             os.makedirs(local_path, exist_ok=True)
-            storage = get_storage_service()
-
-            ok = asyncio.run(
-                storage.download_prefix(key, local_path, bucket_name=bucket)
-            )
+            client = MediaServiceClient()
+            ok = asyncio.run(client.download_prefix(key, Path(local_path)))
             if not ok:
                 logger.warning(
-                    "[STT] Object storage download_prefix returned no files | bucket=%s key=%s. "
+                    "[STT] Rust media-service download_prefix returned no files | bucket=%s key=%s. "
                     "Expected prefix to contain model.bin and config.json. Falling back to HuggingFace Hub.",
                     bucket,
                     key,
@@ -131,14 +128,14 @@ def resolve_whisper_model() -> tuple[str, str]:
                 missing = _missing_required_files(local_path)
                 sampled = _sample_downloaded_files(local_path)
                 logger.warning(
-                    "[STT] Object storage download finished but validation failed at %s "
+                    "[STT] Rust media-service download finished but validation failed at %s "
                     "(missing=%s sampled_files=%s). Falling back to HuggingFace Hub.",
                     local_path,
                     missing,
                     sampled,
                 )
         except Exception as exc:
-            logger.error("[STT] Object storage download failed: %s", exc)
+            logger.error("[STT] Rust media-service download failed: %s", exc)
     elif key and not local_path:
         logger.warning(
             "[STT] STT_MODEL_KEY is set but STT_MODEL_LOCAL_PATH is empty; "

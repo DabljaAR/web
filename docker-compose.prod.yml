@@ -138,7 +138,7 @@ services:
         INSTALL_AI: "true"
     volumes:
       - nmt_model_cache:/model-cache
-    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
+    command: celery -A app.jobs.celery_app worker -E --pool=solo --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
     environment:
       MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
       AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}

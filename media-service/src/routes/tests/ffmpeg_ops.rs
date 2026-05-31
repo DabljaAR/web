@@ -86,6 +86,10 @@ impl StorageBackend for MockStorage {
         Ok(self.download_ok)
     }
 
+    async fn list_prefix(&self, _prefix: &str) -> Result<Vec<String>> {
+        Ok(vec![])
+    }
+
     async fn delete_object(&self, _key: &str) -> Result<bool> {
         Ok(true)
     }
