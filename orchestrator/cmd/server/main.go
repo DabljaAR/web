@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -41,6 +42,15 @@ func main() {
 		healthPort = "8081"
 	}
 
+	workerPoolSize := 10
+	if v := os.Getenv("WORKER_POOL_SIZE"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			workerPoolSize = parsed
+		} else {
+			logger.Warn("Invalid WORKER_POOL_SIZE, using default", "value", v, "default", 10)
+		}
+	}
+
 	// ─── 3. Initialize Infrastructure ────────────────────────────────────────
 	rabbitClient, err := mq.NewRabbitMQ(rabbitURL)
 	if err != nil {
@@ -68,7 +78,7 @@ func main() {
 	defer cancel()
 
 	// ─── 5. Start Pipeline Manager ────────────────────────────────────────────
-	manager := pipeline.NewManager(rabbitClient, database, logger)
+	manager := pipeline.NewManager(rabbitClient, database, logger, workerPoolSize)
 	if err := manager.Start(ctx); err != nil {
 		logger.Error("Pipeline manager failed to start", "error", err)
 		os.Exit(1)
