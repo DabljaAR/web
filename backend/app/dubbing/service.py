@@ -29,8 +29,8 @@ from typing import List, Optional, Tuple
 
 from app.config import settings
 from app.dubbing.schemas import DubbingMergeResponse, SegmentTimingInfo, TimingWarning
-from app.media.ffmpeg_service import FFmpegService
-from app.media.storage import get_storage_service
+from app.shared.ffmpeg_service import FFmpegService
+from app.storage import get_storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -694,7 +694,7 @@ class DubbingMergeService:
         to supply original_media_key.  Creates a fresh async engine with
         NullPool to avoid reusing FastAPI's asyncpg pool.
         """
-        from app.media.models import Video
+        from app.videos.models import Video
         from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
         from sqlalchemy.orm import sessionmaker
         from sqlalchemy.pool import NullPool

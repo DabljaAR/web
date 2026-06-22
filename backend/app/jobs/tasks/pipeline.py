@@ -167,7 +167,7 @@ def stt_transcribe(
             "metadata":   dict,
         }
     """
-    from app.media.storage import get_storage_service
+    from app.storage import get_storage_service
     from app.stt.models import WhisperModelManager
 
     task_started_at = time.time()
@@ -198,7 +198,7 @@ def stt_transcribe(
 
     # ── 2. Resolve the storage key ───────────────────────────────────────────
     def _get_file_key() -> str:
-        from app.media.models import Video  # noqa: F401 — needed for SQLAlchemy mapper resolution
+        from app.videos.models import Video  # noqa: F401 — needed for SQLAlchemy mapper resolution
         _engine, _SessionLocal = self._make_db()
         try:
             with _SessionLocal() as db:
@@ -483,7 +483,7 @@ def tts_synthesize_segment(
         try:
             ref_download_ms = 0.0
             if ref_clip_minio_key:
-                from app.media.storage import get_storage_service
+                from app.storage import get_storage_service
                 _ref_path = os.path.join(_tmp_dir, "ref_clip.wav")
                 _loop = asyncio.new_event_loop()
                 ref_download_started_at = time.time()
@@ -632,8 +632,8 @@ def tts_combine_results(
 
     from app.dubbing.schemas import SegmentTimingInfo
     from app.dubbing.service import DubbingMergeService
-    from app.media.models import MediaType, Video as MediaVideo
-    from app.media.storage import get_storage_service
+    from app.videos.models import MediaType, Video as MediaVideo
+    from app.storage import get_storage_service
 
     sorted_results = sorted(segment_results, key=lambda r: r["segment_id"])
 
@@ -753,31 +753,38 @@ def tts_combine_results(
                     dubbed_video_key = merge_response.output_key
                     dubbed_video_url = merge_response.output_url
 
-                engine_u, SessionLocal_u = BaseJobTask._make_db()
+                import httpx as _httpx
+                import os as _os
+                _media_svc_url = _os.getenv("MEDIA_SERVICE_URL", "http://media-service:8001")
+                _patch_payload = {}
+                if dubbed_video_key:
+                    _patch_payload["dubbed_video_path"] = dubbed_video_key
+                _patch_payload["dubbing_metadata"] = {
+                    "tts_job_id": job_id,
+                    "media_type": media_type_value,
+                    "combined_audio_key": combined_minio_key,
+                    "combined_audio_url": combined_audio_url,
+                    "dubbed_video_key": dubbed_video_key,
+                    "dubbed_video_url": dubbed_video_url,
+                    "updated_at": _utcnow().isoformat(),
+                }
                 try:
-                    with SessionLocal_u() as db:
-                        up_video = db.get(MediaVideo, video_id)
-                        if up_video is not None:
-                            if dubbed_video_key:
-                                up_video.dubbed_video_path = dubbed_video_key
-                            existing_meta = (
-                                dict(up_video.dubbing_metadata)
-                                if up_video.dubbing_metadata
-                                else {}
-                            )
-                            up_video.dubbing_metadata = {
-                                **existing_meta,
-                                "tts_job_id": job_id,
-                                "media_type": media_type_value,
-                                "combined_audio_key": combined_minio_key,
-                                "combined_audio_url": combined_audio_url,
-                                "dubbed_video_key": dubbed_video_key,
-                                "dubbed_video_url": dubbed_video_url,
-                                "updated_at": _utcnow().isoformat(),
-                            }
-                            db.commit()
-                finally:
-                    engine_u.dispose()
+                    with _httpx.Client(timeout=10.0) as _client:
+                        _resp = _client.patch(
+                            f"{_media_svc_url}/videos/{video_id}/paths",
+                            json=_patch_payload,
+                        )
+                        _resp.raise_for_status()
+                        logger.info(
+                            "[TTS] media-service PATCH /videos/%s/paths → %s",
+                            video_id, _resp.status_code,
+                        )
+                except Exception as _http_exc:
+                    logger.error(
+                        "[TTS] Failed to PATCH media-service for video %s: %s",
+                        video_id, _http_exc,
+                    )
+                    raise
         except Exception as _exc:
             merge_error_message = str(_exc)
             logger.error("[TTS] merge step failed | job=%s: %s", job_id, _exc, exc_info=True)

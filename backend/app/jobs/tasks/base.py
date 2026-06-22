@@ -7,7 +7,7 @@ from typing import Any, Optional
 import celery
 
 from app.jobs.models import Job, JobStatus
-from app.media.models import Video  # noqa: F401 — needed for SQLAlchemy mapper resolution
+from app.videos.models import Video  # noqa: F401 — needed for SQLAlchemy mapper resolution
 
 logger = logging.getLogger(__name__)
 

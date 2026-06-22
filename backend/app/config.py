@@ -43,7 +43,7 @@ def _download_silma_reference(s3_key: str) -> str:
     import asyncio as _asyncio
     import tempfile as _tmp
 
-    from app.media.storage import get_storage_service
+    from app.storage import get_storage_service
 
     digest = hashlib.sha256(s3_key.encode("utf-8")).hexdigest()[:16]
     ext = os.path.splitext(s3_key)[1] or ".wav"

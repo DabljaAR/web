@@ -3,7 +3,7 @@ from typing import List
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 import logging
-from app.media.storage import get_storage_service, StorageService
+from app.storage import get_storage_service, StorageService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.schema import (

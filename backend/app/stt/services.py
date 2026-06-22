@@ -24,8 +24,8 @@ from sqlalchemy import select
 from app.jobs.models import Job, JobType, JobStatus
 from app.jobs.schemas import JobCreate
 from app.config import settings
-from app.media.models import Video
-from app.media.storage import get_storage_service
+from app.videos.models import Video
+from app.storage import get_storage_service
 from app.stt.models import WhisperModelManager
 from app.stt.schema import TranscriptionResponse, TranscriptionMetadata, TranscriptionSegment
 from app.shared.processing_mode import resolve_processing_mode

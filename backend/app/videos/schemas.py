@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
-from app.media.models import VideoStatus, MediaType
+from app.videos.models import VideoStatus, MediaType
 
 class VideoBase(BaseModel):
     title: str
