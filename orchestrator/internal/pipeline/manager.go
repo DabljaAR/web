@@ -14,11 +14,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// workerPoolSize caps the number of messages processed concurrently.
-// This prevents the orchestrator from opening thousands of DB connections
-// if a burst of messages arrives at once.
-const workerPoolSize = 10
-
 // nextStageRoutes is the pipeline state-machine transition table.
 // It maps a completed job type to the routing key for the next stage.
 // Using a map instead of a switch statement makes it easy to extend the
@@ -57,6 +52,11 @@ type Manager struct {
 	db     *gorm.DB
 	logger *slog.Logger
 
+	// workerPoolSize caps the number of messages processed concurrently.
+	// This prevents the orchestrator from opening thousands of DB connections
+	// if a burst of messages arrives at once.
+	workerPoolSize int
+
 	// sem acts as a semaphore: only workerPoolSize goroutines may handle
 	// messages simultaneously. Think of it as a ticket booth — workers
 	// must hold a ticket to proceed and return it when done.
@@ -67,13 +67,18 @@ type Manager struct {
 	wg sync.WaitGroup
 }
 
-// NewManager constructs a Manager with the given dependencies.
-func NewManager(rmq *mq.RabbitMQ, database *gorm.DB, logger *slog.Logger) *Manager {
+// NewManager constructs a Manager with the given dependencies and worker pool size.
+// workerPoolSize caps how many messages are handled concurrently.
+func NewManager(rmq *mq.RabbitMQ, database *gorm.DB, logger *slog.Logger, workerPoolSize int) *Manager {
+	if workerPoolSize < 1 {
+		workerPoolSize = 1
+	}
 	return &Manager{
-		rabbit: rmq,
-		db:     database,
-		logger: logger,
-		sem:    make(chan struct{}, workerPoolSize),
+		rabbit:         rmq,
+		db:             database,
+		logger:         logger,
+		workerPoolSize: workerPoolSize,
+		sem:            make(chan struct{}, workerPoolSize),
 	}
 }
 
@@ -140,7 +145,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.logger.Info("Dead Letter Queue ready", "queue", dlq.Name)
 
 	m.logger.Info("Pipeline Manager started",
-		"worker_pool_size", workerPoolSize,
+		"worker_pool_size", m.workerPoolSize,
 	)
 	return nil
 }
