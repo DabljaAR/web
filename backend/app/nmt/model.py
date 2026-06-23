@@ -317,7 +317,7 @@ class NLLBTranslatorWrapper:
             inputs = self.tokenizer(word, return_tensors="pt").to(self.device)
             outputs = self.model.generate(
                 **inputs,
-                forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(tgt_lang),
+                forced_bos_token_id=self.tokenizer.lang_code_to_id[tgt_lang],
                 max_length=20,
                 num_beams=1,
             )
@@ -341,7 +341,7 @@ class NLLBTranslatorWrapper:
         inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
         outputs = self.model.generate(
             **inputs,
-            forced_bos_token_id=self.tokenizer.convert_tokens_to_ids(tgt_lang),
+            forced_bos_token_id=self.tokenizer.lang_code_to_id[tgt_lang],
             max_length=max_length,
             num_beams=num_beams,
             early_stopping=True,

@@ -7,8 +7,6 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: dabljaar
-    ports:
-      - "5433:5432"
     volumes:
       - dabljaar_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +22,7 @@ services:
     image: redis:7-alpine
     container_name: dabljaar_redis
     ports:
-      - "6379:6379"
+      - "16379:6379"
     volumes:
       - dabljaar_redis_data:/data
     healthcheck:
@@ -42,14 +40,45 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
-    ports:
-      - "5672:5672"   # AMQP protocol port
-      - "15672:15672" # Management UI
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - dabljaar_network
+
+  # STT Microservice (Speech-to-Text via Faster-Whisper + RabbitMQ)
+  stt-service:
+    build:
+      context: ./stt-service
+      dockerfile: Dockerfile
+    container_name: dabljaar_stt_service
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/dabljaar"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
+      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
+      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
+      PORT: 8001
+    ports:
+      - "8001:8001"
+    volumes:
+      - nmt_model_cache:/model-cache
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
     networks:
       - dabljaar_network
 
@@ -109,11 +138,14 @@ services:
       REFRESH_TOKEN_EXPIRE_DAYS: 7
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      STT_SERVICE_URL: "http://stt-service:8001"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
@@ -129,6 +161,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - dabljaar_network
@@ -169,6 +203,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
@@ -186,9 +221,8 @@ services:
     networks:
       - dabljaar_network
 
-  # Celery worker — AI queues (STT, NMT, TTS, pipeline)
-  # STT: populate MinIO bucket S3_MODELS_BUCKET (default: model) under STT_MODEL_KEY (e.g. whisper-small/)
-  # with CTranslate2 files (model.bin, config.json, …) to avoid Hugging Face on cold start.
+  # Celery worker — AI queues (NMT, TTS, pipeline)
+  # STT is now handled by the stt-service microservice via RabbitMQ.
   # Optional env (not set by default): HF_HOME=/model-cache/hf HF_HUB_DISABLE_XET=1 HF_HUB_ENABLE_HF_TRANSFER=1
   celery-worker-ai:
     build:
@@ -198,7 +232,7 @@ services:
         INSTALL_AI: "true"
     container_name: dabljaar_worker_ai
     entrypoint: []
-    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_stt,pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
+    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
     environment:
       AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
       INSTALL_AI: "true"
@@ -211,6 +245,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
@@ -230,9 +265,6 @@ services:
       XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
       TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
       CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
-      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
-      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
-      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
     volumes:
       - ./backend:/app
       - /app/__pycache__

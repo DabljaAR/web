@@ -77,7 +77,11 @@ die() {
     exit 1
 }
 
+SKIP_SUDO=${SKIP_SUDO:-}
 ensure_sudo_access() {
+    if [[ -n "$SKIP_SUDO" ]]; then
+        return 0
+    fi
     if [[ "$EUID" -ne 0 ]]; then
         log_info "Checking sudo access (will prompt for password once if needed)..."
         if ! sudo -v; then
@@ -177,6 +181,10 @@ wait_for_port() {
 }
 
 run_with_sudo() {
+    if [[ -n "$SKIP_SUDO" ]]; then
+        "$@"
+        return $?
+    fi
     if [[ "$EUID" -eq 0 ]]; then
         "$@"
     else
@@ -491,6 +499,17 @@ ensure_frontend_deps() {
 }
 
 ensure_system_services() {
+    if [[ -n "$SKIP_SUDO" ]]; then
+        log_info "SKIP_SUDO set — assuming Redis and PostgreSQL are already running."
+        if ! wait_for_port 6379 5 1; then
+            die "Redis is not listening on port 6379. Start it manually or run without SKIP_SUDO."
+        fi
+        if ! wait_for_port 5432 5 1; then
+            die "PostgreSQL is not listening on port 5432. Start it manually or run without SKIP_SUDO."
+        fi
+        log_ok "Redis and PostgreSQL are reachable."
+        return 0
+    fi
     log_info "Ensuring Redis and PostgreSQL are enabled and running."
     
     if ! run_with_sudo systemctl enable --now redis-server; then

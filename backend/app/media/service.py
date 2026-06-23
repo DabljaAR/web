@@ -162,18 +162,9 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                     video_task.root_job_id = stt_job_id
                     await db.commit()
 
-                    # Enqueue the STT task directly
-                    from app.jobs.tasks.pipeline import stt_transcribe
-                    celery_result = stt_transcribe.apply_async(
-                        kwargs={
-                            "job_id": stt_job_id,
-                            "video_id": video_id,
-                            "target_lang": target_lang,
-                        },
-                        task_id=stt_job_id,
-                    )
-                    stt_job.celery_task_id = celery_result.id
-                    db.add(stt_job)
+                    # Publish job.created to RabbitMQ so the orchestrator dispatches to STT microservice
+                    from app.shared.rabbitmq import publish_job_created
+                    publish_job_created(stt_job_id)
                     await db.commit()
 
         except Exception as e:
@@ -642,18 +633,9 @@ class VideoService:
         await self.db.commit()
         await self.db.refresh(stt_job)
 
-        # Enqueue the STT task directly
-        from app.jobs.tasks.pipeline import stt_transcribe
-        celery_result = stt_transcribe.apply_async(
-            kwargs={
-                "job_id": stt_job.id,
-                "video_id": media.id,
-                "target_lang": target_lang,
-            },
-            task_id=stt_job.id,
-        )
-        stt_job.celery_task_id = celery_result.id
-        self.db.add(stt_job)
+        # Publish job.created to RabbitMQ so the orchestrator dispatches to STT microservice
+        from app.shared.rabbitmq import publish_job_created
+        publish_job_created(stt_job.id)
         await self.db.commit()
 
         return stt_job
@@ -921,10 +903,23 @@ class VideoService:
             Job.user_id == user_id,
             Job.status.in_([JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.RETRYING])
         ).order_by(Job.created_at.desc())
-        
+
         result_active_jobs = await self.db.execute(query_active_jobs)
         active_jobs = result_active_jobs.scalars().all()
-        
+
+        # Collect video_ids that have at least one active job, then fetch ALL jobs
+        # for those videos (including already-completed pipeline steps like STT).
+        active_video_ids = {j.video_id for j in active_jobs if j.video_id}
+        all_pipeline_jobs = list(active_jobs)
+        if active_video_ids:
+            query_pipeline_jobs = select(Job).where(
+                Job.user_id == user_id,
+                Job.video_id.in_(active_video_ids),
+                Job.status.in_([JobStatus.COMPLETED, JobStatus.FAILED]),
+            ).order_by(Job.created_at.desc())
+            result_pipeline = await self.db.execute(query_pipeline_jobs)
+            all_pipeline_jobs += result_pipeline.scalars().all()
+
         # Merge them for the "Processing" UI
         # We wrap them in a consistent format
         active_items = []
@@ -938,14 +933,16 @@ class VideoService:
                  "progress": 0.0,
                  "created_at": v.created_at
              })
-        
-        for j in active_jobs:
-             # Check if we already have this video as processing (Media Process is often followed by Jobs)
-             # but we want to show everything.
+
+        seen_job_ids: set = set()
+        for j in all_pipeline_jobs:
+             if j.id in seen_job_ids:
+                 continue
+             seen_job_ids.add(j.id)
              active_items.append({
                  "id": j.id,
                  "video_id": j.video_id,
-                 "name": f"{j.job_type.value}: {j.id[:8]}", # Simple label
+                 "name": f"{j.job_type.value}: {j.id[:8]}",
                  "status": j.status,
                  "type": j.job_type,
                  "progress": j.progress,
