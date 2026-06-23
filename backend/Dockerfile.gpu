@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1.7
+# GPU variant — targets Pascal (GTX 1080 Ti, sm_61) and newer via PyTorch 2.0.1+cu118.
+# CUDA 11.8 binaries run on any driver >= 11.8, including the host's CUDA 13.x driver.
+# Requires: NVIDIA Container Toolkit on the host + docker-compose.gpu.yml overlay.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /uvx /bin/
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    postgresql-client \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PROJECT_ENVIRONMENT=/usr/local \
+    UV_NO_DEV=1 \
+    UV_PYTHON_DOWNLOADS=0
+
+# Install all AI deps via uv (pulls torch>=2.11+cu130 as a side effect — overridden below)
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-install-project --group ai
+
+# Replace torch with cu118 build that supports Pascal (sm_61 / GTX 1080 Ti).
+# --force-reinstall overwrites the cu130 torch pulled in by uv above.
+RUN pip install --no-cache-dir \
+    "torch==2.2.0+cu118" \
+    "torchvision==0.17.0+cu118" \
+    "torchaudio==2.2.0+cu118" \
+    --index-url https://download.pytorch.org/whl/cu118 \
+    --force-reinstall
+
+COPY . .
+
+RUN useradd -m -u 1000 appuser \
+    && chown -R appuser:appuser /app \
+    && mkdir -p /model-cache \
+    && chown appuser:appuser /model-cache
+
+COPY --chown=appuser:appuser --chmod=755 entrypoint.sh /app/entrypoint.sh
+
+USER appuser
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONHASHSEED=random
+
+EXPOSE 8000
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

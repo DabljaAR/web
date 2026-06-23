@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -13,6 +14,18 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 	"gorm.io/gorm"
 )
+
+// errPermanent wraps an error that should NOT be requeued — retrying will never
+// succeed (e.g. job ID not in DB, malformed payload that survived the JSON check).
+// The startConsumer loop checks for this type to set requeue=false on Nack,
+// routing the message to the Dead Letter Queue instead of looping forever.
+type errPermanent struct{ err error }
+
+func (e errPermanent) Error() string { return e.err.Error() }
+func (e errPermanent) Unwrap() error { return e.err }
+
+// permanent wraps err as a non-retryable failure.
+func permanent(err error) error { return errPermanent{err} }
 
 // nextStageRoutes is the pipeline state-machine transition table.
 // It maps a completed job type to the routing key for the next stage.
@@ -226,16 +239,17 @@ func (m *Manager) startConsumer(
 					elapsed := time.Since(start)
 
 					if err != nil {
+						requeue := !errors.As(err, &errPermanent{})
 						m.logger.Error("Message handler failed — nacking",
 							"queue", queueName,
 							"error", err,
+							"requeue", requeue,
 							"elapsed_ms", elapsed.Milliseconds(),
 						)
-						// Nack with requeue=true so RabbitMQ retries the message.
-						// For permanent failures (e.g., bad JSON that will never
-						// parse), set requeue=false so the message goes to the DLQ
-						// instead of causing an infinite loop.
-						d.Nack(false, true)
+						// requeue=false sends to the Dead Letter Queue; the message
+						// will not spin in a retry loop. Use errPermanent for errors
+						// where retrying can never succeed (job missing, bad ID, etc.).
+						d.Nack(false, requeue)
 						return
 					}
 
@@ -270,7 +284,7 @@ func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
 
 	var job db.Job
 	if err := m.db.WithContext(ctx).Where("id = ?", payload.JobID).First(&job).Error; err != nil {
-		return fmt.Errorf("job %s not found: %w", payload.JobID, err)
+		return permanent(fmt.Errorf("job %s not found: %w", payload.JobID, err))
 	}
 
 	now := time.Now().UTC()
@@ -308,7 +322,7 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 
 	var job db.Job
 	if err := m.db.WithContext(ctx).Where("id = ?", payload.JobID).First(&job).Error; err != nil {
-		return fmt.Errorf("job %s not found: %w", payload.JobID, err)
+		return permanent(fmt.Errorf("job %s not found: %w", payload.JobID, err))
 	}
 
 	// ── Persist result ─────────────────────────────────────────────────────

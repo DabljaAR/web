@@ -1,0 +1,15 @@
+# Local dev override: exposes Docker infrastructure to host.
+# Use the Docker PostgreSQL, Redis, and RabbitMQ containers for everything.
+services:
+  postgres:
+    ports:
+      - "5433:5432"
+
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  orchestrator:
+    environment:
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/dabljaar?sslmode=disable"
