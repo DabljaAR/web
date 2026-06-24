@@ -4,6 +4,7 @@ Starts a RabbitMQ consumer (in a daemon thread) alongside a FastAPI server that
 exposes:
   POST /transcribe        — synchronous file-upload transcription
   GET  /health            — liveness check
+  GET  /readiness         — readiness check (consumer thread alive)
   GET  /health/model      — Whisper model load status
 """
 import logging
@@ -23,12 +24,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Module-level reference so /readiness can check is_alive().
+_consumer_thread: threading.Thread | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _consumer_thread
     logger.info("[STT] Starting RabbitMQ consumer thread")
-    t = threading.Thread(target=start_consumer, name="stt-consumer", daemon=True)
-    t.start()
+    _consumer_thread = threading.Thread(target=start_consumer, name="stt-consumer", daemon=True)
+    _consumer_thread.start()
     yield
     logger.info("[STT] Shutting down")
 
@@ -48,6 +53,16 @@ def health():
     return {"status": "healthy", "service": "stt", "version": "1.0.0"}
 
 
+@app.get("/readiness", summary="Readiness check")
+def readiness():
+    """Returns 200 when the consumer thread is alive, 503 otherwise."""
+    from fastapi import HTTPException
+    alive = _consumer_thread is not None and _consumer_thread.is_alive()
+    if not alive:
+        raise HTTPException(status_code=503, detail="Consumer thread is not running")
+    return {"status": "ready", "service": "stt", "consumer_alive": True}
+
+
 @app.get("/", include_in_schema=False)
 def root():
     return {
@@ -55,6 +70,7 @@ def root():
         "endpoints": {
             "POST /transcribe": "Synchronous transcription (file upload)",
             "GET  /health": "Liveness check",
+            "GET  /readiness": "Readiness check",
             "GET  /health/model": "Whisper model load status",
         },
     }
