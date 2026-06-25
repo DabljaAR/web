@@ -699,7 +699,7 @@ class DubbingMergeService:
         from sqlalchemy.orm import sessionmaker
         from sqlalchemy.pool import NullPool
 
-        engine = create_async_engine(settings.ASYNC_DATABASE_URL, poolclass=NullPool)
+        engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
         Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         try:
             async with Session() as db:

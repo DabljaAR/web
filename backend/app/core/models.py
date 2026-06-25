@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import enum
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, TYPE_CHECKING
 from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, Boolean, Float ,Numeric
 from decimal import Decimal
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -14,9 +16,9 @@ from app.shared.enums import (
     languageEnum,
     SubscriptionStatusEnum,
 )
-from app.media.models import Video
 
-# Import Video to avoid SQLAlchemy mapper errors when resolving User.videos
+if TYPE_CHECKING:
+    from app.media.models import Video
 
 class Role(Base):
     __tablename__ = "roles"

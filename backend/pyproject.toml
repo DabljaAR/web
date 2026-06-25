@@ -25,6 +25,7 @@ dependencies = [
     "python-multipart>=0.0.24",
     "bcrypt>=4.0.1,<4.1",
     "flower>=2.0.1",
+    "aio-pika>=9.4.0",
 ]
 
 [dependency-groups]
