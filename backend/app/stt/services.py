@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.jobs.models import Job, JobStatus, JobType
-from app.media.models import Video
+from app.videos.models import Video
 from app.shared.processing_mode import resolve_processing_mode
 from app.shared.rabbitmq import publish_job_created
 from app.stt.schema import (

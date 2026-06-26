@@ -7,9 +7,9 @@ from typing import Optional
 from fastapi import UploadFile, BackgroundTasks, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, exists, func
-from app.media.models import Video, VideoStatus, MediaType
-from app.media.storage import get_storage_service
-from app.media.ffmpeg_service import FFmpegService, MediaProcessingError
+from app.videos.models import Video, VideoStatus, MediaType
+from app.storage import get_storage_service
+from app.shared.ffmpeg_service import FFmpegService, MediaProcessingError
 from app.core.db import AsyncSessionLocal
 from app.jobs.models import Job, JobStatus, JobType
 from app.tasks.models import VideoTask
@@ -978,13 +978,55 @@ class VideoService:
              if j.id in seen_job_ids:
                  continue
              seen_job_ids.add(j.id)
+
+             # Fetch child jobs to build stage details for the progress bar
+             stages: list[dict] = []
+             if j.job_type == JobType.FULL_DUBBING_PIPELINE:
+                 q_child = select(Job).where(
+                     Job.parent_job_id == j.id
+                 ).order_by(Job.created_at.asc())
+                 r_child = await self.db.execute(q_child)
+                 child_jobs = r_child.scalars().all()
+
+                 stage_map = {
+                     JobType.STT_TRANSCRIBE: {"label": "STT", "order": 0},
+                     JobType.NMT_TRANSLATE: {"label": "NMT", "order": 1},
+                     JobType.TTS_SYNTHESIZE: {"label": "TTS", "order": 2},
+                     JobType.DUBBING_MERGE: {"label": "Merge", "order": 3},
+                 }
+
+                 for cj in child_jobs:
+                     info = stage_map.get(cj.job_type, {"label": cj.job_type.value, "order": 99})
+                     output_data = cj.output_data or {}
+                     stages.append({
+                         "type": cj.job_type.value,
+                         "label": info["label"],
+                         "order": info["order"],
+                         "status": cj.status.value,
+                         "progress": cj.progress,
+                         "segment_count": output_data.get("segment_count"),
+                         "error": cj.error_message,
+                     })
+
+                 stages.sort(key=lambda s: s["order"])
+
+             # Resolve job name from video title if available
+             job_name = f"{j.job_type.value}: {j.id[:8]}"
+             if j.video_id:
+                 q_vid = select(Video).where(Video.id == j.video_id)
+                 r_vid = await self.db.execute(q_vid)
+                 vid = r_vid.scalar_one_or_none()
+                 if vid and (vid.title or vid.original_filename):
+                     job_name = vid.title or vid.original_filename
+
              active_items.append({
                  "id": j.id,
                  "video_id": j.video_id,
-                 "name": f"{j.job_type.value}: {j.id[:8]}",
+                 "name": job_name,
                  "status": j.status,
                  "type": j.job_type,
                  "progress": j.progress,
+                 "stages": stages,
                  "created_at": j.created_at
              })
 

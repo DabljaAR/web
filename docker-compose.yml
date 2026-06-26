@@ -286,7 +286,7 @@ services:
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
-      MEDIA_SERVICE_URL: http://media-service:8001
+      MEDIA_SERVICE_URL: http://media-service:8003
     volumes:
       - ./backend:/app
       - /app/__pycache__

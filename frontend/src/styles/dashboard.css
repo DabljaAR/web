@@ -389,75 +389,191 @@ select.form-select:focus {
   margin-bottom: 32px;
 }
 
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.btn-refresh {
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .job-item {
   padding: 20px;
   background: var(--bg-primary);
   border-radius: 12px;
   margin-bottom: 16px;
+  border: 1px solid var(--border-light, #e5e7eb);
+  transition: box-shadow 0.2s ease;
+}
+
+.job-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .job-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+}
+
+.job-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
 }
 
 .job-name {
   font-weight: 700;
   color: var(--text-dark);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-segment-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-secondary, #f3f4f6);
+  color: var(--text-light);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .job-status {
-  font-size: 0.875rem;
-  color: var(--text-light);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent-blue);
+  flex-shrink: 0;
+  margin-left: 12px;
 }
 
-.progress-bar {
-  width: 100%;
-  height: 8px;
-  background: #e5e7eb;
+/* ---- Stage Progress Bar ---- */
+
+.stage-progress-wrapper {
+  margin-bottom: 10px;
+}
+
+.stage-progress-bar {
+  display: flex;
+  height: 10px;
   border-radius: 50px;
   overflow: hidden;
-  margin-bottom: 8px;
+  gap: 3px;
+  background: #e5e7eb;
+  margin-bottom: 10px;
 }
 
-[data-theme="dark"] .progress-bar {
+[data-theme="dark"] .stage-progress-bar {
   background: rgba(255, 255, 255, 0.1);
 }
 
-.progress-fill {
+.stage-segment {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));
-  border-radius: 50px;
-  transition: width 0.5s ease;
+  transition: background-color 0.6s ease, opacity 0.4s ease;
   position: relative;
-  overflow: hidden;
 }
 
-.progress-fill::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg,
-      transparent,
-      rgba(255, 255, 255, 0.3),
-      transparent);
-  animation: progressShimmer 2s infinite;
+.stage-segment:first-child {
+  border-radius: 50px 0 0 50px;
 }
 
-@keyframes progressShimmer {
-  0% {
-    left: -100%;
-  }
-
-  100% {
-    left: 100%;
-  }
+.stage-segment:last-child {
+  border-radius: 0 50px 50px 0;
 }
+
+.stage-segment:only-child {
+  border-radius: 50px;
+}
+
+.stage-active {
+  animation: stagePulse 1.8s ease-in-out infinite;
+}
+
+@keyframes stagePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
+}
+
+.stage-done {
+  opacity: 0.85;
+}
+
+.stage-failed {
+  opacity: 0.7;
+}
+
+/* ---- Stage Labels ---- */
+
+.stage-labels {
+  display: flex;
+  justify-content: space-between;
+}
+
+.stage-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.65rem;
+  color: #9ca3af;
+  text-align: center;
+  transition: color 0.3s ease;
+}
+
+.stage-label-active {
+  color: var(--accent-cyan);
+}
+
+.stage-label-active .stage-name {
+  font-weight: 700;
+}
+
+.stage-label-done {
+  color: var(--accent-blue);
+}
+
+.stage-label-failed {
+  color: #ef4444;
+}
+
+.stage-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.stage-label-active .stage-dot {
+  transform: scale(1.4);
+  box-shadow: 0 0 6px currentColor;
+}
+
+.stage-name {
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stage-segments {
+  font-size: 0.6rem;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+/* ---- Legacy single-bar fallback ---- */
 
 .progress-bar-container {
   width: 100%;
@@ -495,9 +611,72 @@ select.form-select:focus {
   animation: progressShimmer 2s infinite;
 }
 
+@keyframes progressShimmer {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* ---- Job Time / Status ---- */
+
 .job-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.75rem;
   color: var(--text-light);
+}
+
+.est-label {
+  opacity: 0.6;
+  font-weight: 500;
+}
+
+.est-value {
+  font-weight: 600;
+  color: var(--text-dark);
+}
+
+.no-jobs-msg {
+  color: var(--text-light);
+  text-align: center;
+  padding: 20px;
+}
+
+/* Keep legacy bar for compatibility */
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 50px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+[data-theme="dark"] .progress-bar {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan));
+  border-radius: 50px;
+  transition: width 0.5s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg,
+      transparent,
+      rgba(255, 255, 255, 0.3),
+      transparent);
+  animation: progressShimmer 2s infinite;
 }
 
 /* Recent Jobs */

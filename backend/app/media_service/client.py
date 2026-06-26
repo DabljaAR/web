@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class MediaServiceClient:
-    """HTTP client for the media microservice (http://media-service:8001)."""
+    """HTTP client for the media microservice (http://media-service:8003)."""
 
     def __init__(self) -> None:
         self._base_url: Optional[str] = None
@@ -16,7 +16,7 @@ class MediaServiceClient:
     @property
     def base_url(self) -> str:
         if self._base_url is None:
-            self._base_url = os.getenv("MEDIA_SERVICE_URL", "http://media-service:8001").rstrip("/")
+            self._base_url = os.getenv("MEDIA_SERVICE_URL", "http://media-service:8003").rstrip("/")
         return self._base_url
 
     async def get_metadata(self, s3_key: str) -> dict:

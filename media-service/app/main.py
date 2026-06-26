@@ -1,4 +1,5 @@
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,9 +18,17 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting media-service on port %d", settings.PORT)
-    db.init_db(settings.sqlalchemy_url())
+    db.init_db(settings.sqlalchemy_url)
     logger.info("Database pool created.")
+
+    # Start RabbitMQ consumer for merge stage
+    from app.worker import start_consumer
+    consumer_thread = threading.Thread(target=start_consumer, daemon=True)
+    consumer_thread.start()
+    logger.info("RabbitMQ merge consumer thread started")
+
     yield
+
     if db._engine:
         await db._engine.dispose()
         logger.info("Database pool closed.")

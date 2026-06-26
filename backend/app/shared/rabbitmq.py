@@ -48,10 +48,20 @@ def publish_job_created(job_id: str) -> bool:
 
 def publish_merge_result(job_id: str, status: str, output_data: dict, error: str | None = None) -> bool:
     """Publish job.results.merge so the orchestrator marks the pipeline complete."""
+    return _publish_result("job.results.merge", job_id, "DUBBING_MERGE", status, output_data, error)
+
+
+def publish_job_result(routing_key: str, job_id: str, job_type: str, status: str, output_data: dict, error: str | None = None) -> bool:
+    """Publish a generic job result to the given routing key."""
+    return _publish_result(routing_key, job_id, job_type, status, output_data, error)
+
+
+def _publish_result(routing_key: str, job_id: str, job_type: str, status: str, output_data: dict, error: str | None = None) -> bool:
+    """Core publisher — open a short-lived connection and fire one message."""
     try:
         payload: dict = {
             "job_id": job_id,
-            "job_type": "TTS_SYNTHESIZE",
+            "job_type": job_type,
             "status": status,
             "output_data": output_data or {},
         }
@@ -65,7 +75,7 @@ def publish_merge_result(job_id: str, status: str, output_data: dict, error: str
         channel.exchange_declare(EXCHANGE, exchange_type="topic", durable=True)
         channel.basic_publish(
             exchange=EXCHANGE,
-            routing_key="job.results.merge",
+            routing_key=routing_key,
             body=json.dumps(payload),
             properties=pika.BasicProperties(
                 content_type="application/json",
@@ -73,8 +83,8 @@ def publish_merge_result(job_id: str, status: str, output_data: dict, error: str
             ),
         )
         connection.close()
-        logger.info("[RabbitMQ] Published job.results.merge for job %s", job_id)
+        logger.info("[RabbitMQ] Published %s for job %s to %s", status, job_id, routing_key)
         return True
     except Exception as exc:
-        logger.error("[RabbitMQ] Failed to publish job.results.merge for %s: %s", job_id, exc)
+        logger.error("[RabbitMQ] Failed to publish to %s for %s: %s", routing_key, job_id, exc)
         return False

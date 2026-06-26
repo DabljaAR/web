@@ -211,7 +211,7 @@ def tts_synthesize_segment(
         try:
             ref_download_ms = 0.0
             if ref_clip_minio_key:
-                from app.media.storage import get_storage_service
+                from app.storage import get_storage_service
                 _ref_path = os.path.join(_tmp_dir, "ref_clip.wav")
                 _loop = asyncio.new_event_loop()
                 ref_download_started_at = time.time()
@@ -353,15 +353,15 @@ def tts_combine_results(
     output_type: str,
 ) -> dict:
     """
-    Sort segment results, run timing-aware merge, optionally mux with original
-    video audio replacement, then write combined output to DB.
+    Collect per-segment TTS results, write segments with tts_keys to video_tasks,
+    mark TTS job COMPLETED, and publish job.results.tts for the orchestrator.
+
+    The actual audio merge is delegated to the media-service merge worker
+    which consumes job.start.merge.
     """
     import asyncio
 
-    from app.dubbing.schemas import SegmentTimingInfo
-    from app.dubbing.service import DubbingMergeService
-    from app.media.models import MediaType, Video as MediaVideo
-    from app.media.storage import get_storage_service
+    from app.storage import get_storage_service
 
     sorted_results = sorted(segment_results, key=lambda r: r["segment_id"])
 
@@ -396,6 +396,7 @@ def tts_combine_results(
             "original_text": orig,
             "translated_text": tran,
             "tts_key": r.get("tts_key"),
+            "tts_audio_key": r.get("tts_key"),
             "audio_url": r.get("audio_url"),
             **({"tts_error": r["tts_error"]} if r.get("tts_error") else {}),
             **({"tts_error_code": r["tts_error_code"]} if r.get("tts_error_code") else {}),
@@ -406,124 +407,14 @@ def tts_combine_results(
 
     failed = sum(1 for r in sorted_results if r.get("tts_error"))
 
-    combined_minio_key: Optional[str] = None
-    combined_audio_url: Optional[str] = None
-    dubbed_video_key: Optional[str] = None
-    dubbed_video_url: Optional[str] = None
-    media_type_value = "audio"
-    merge_error_message: Optional[str] = None
-
-    segments_with_audio = [r for r in sorted_results if r.get("tts_key") and not r.get("tts_error")]
-
-    if segments_with_audio:
-        try:
-            original_media_key: Optional[str] = None
-
-            engine_v, SessionLocal_v = BaseJobTask._make_db()
-            try:
-                with SessionLocal_v() as db:
-                    video_row = db.get(MediaVideo, video_id)
-                    if video_row is not None:
-                        media_type_value = (
-                            video_row.media_type.value.lower()
-                            if isinstance(video_row.media_type, MediaType)
-                            else str(video_row.media_type).lower()
-                        )
-                        if media_type_value == "video":
-                            original_media_key = video_row.file_path
-                        else:
-                            original_media_key = video_row.audio_path or video_row.file_path
-            finally:
-                engine_v.dispose()
-
-            segment_infos: list[SegmentTimingInfo] = []
-            for idx, row in enumerate(sorted_results):
-                if not row.get("tts_key") or row.get("tts_error"):
-                    continue
-
-                start_val = float(row.get("start") or 0.0)
-                end_raw = float(row.get("end") or start_val)
-                end_val = end_raw if end_raw > start_val else start_val + 0.001
-                segment_infos.append(
-                    SegmentTimingInfo(
-                        segment_id=int(row.get("segment_id", idx)),
-                        start=start_val,
-                        end=end_val,
-                        duration=max(end_val - start_val, 0.001),
-                        translated_text=str(row.get("translated_text") or ""),
-                        tts_audio_key=row.get("tts_key"),
-                    )
-                )
-
-            if not segment_infos:
-                logger.error("[TTS] no usable segment infos for merge | job=%s", job_id)
-            else:
-                merge_service = DubbingMergeService()
-                preferred_audio_key = f"tts/{job_id}/combined_{job_id}.wav"
-
-                merge_response = asyncio.run(
-                    merge_service.merge_segments(
-                        video_id=str(video_id),
-                        segments=segment_infos,
-                        job_id=job_id,
-                        media_type=media_type_value,
-                        output_key_prefix=f"dubbed/{video_id}",
-                        original_media_key=original_media_key,
-                        combined_audio_key=preferred_audio_key,
-                    )
-                )
-
-                merged_meta = merge_response.metadata or {}
-                combined_minio_key = merged_meta.get("combined_audio_key")
-                combined_audio_url = merged_meta.get("combined_audio_url")
-
-                if media_type_value == "video":
-                    dubbed_video_key = merge_response.output_key
-                    dubbed_video_url = merge_response.output_url
-
-                engine_u, SessionLocal_u = BaseJobTask._make_db()
-                try:
-                    with SessionLocal_u() as db:
-                        up_video = db.get(MediaVideo, video_id)
-                        if up_video is not None:
-                            if dubbed_video_key:
-                                up_video.dubbed_video_path = dubbed_video_key
-                            existing_meta = (
-                                dict(up_video.dubbing_metadata)
-                                if up_video.dubbing_metadata
-                                else {}
-                            )
-                            up_video.dubbing_metadata = {
-                                **existing_meta,
-                                "tts_job_id": job_id,
-                                "media_type": media_type_value,
-                                "combined_audio_key": combined_minio_key,
-                                "combined_audio_url": combined_audio_url,
-                                "dubbed_video_key": dubbed_video_key,
-                                "dubbed_video_url": dubbed_video_url,
-                                "updated_at": _utcnow().isoformat(),
-                            }
-                            db.commit()
-                finally:
-                    engine_u.dispose()
-        except Exception as _exc:
-            merge_error_message = str(_exc)
-            logger.error("[TTS] merge step failed | job=%s: %s", job_id, _exc, exc_info=True)
-
     output = {
         "job_id": job_id,
         "video_id": video_id,
         "segments": result_segments,
-        "combined_audio_key": combined_minio_key,
-        "combined_audio_url": combined_audio_url,
-        "dubbed_video_key": dubbed_video_key,
-        "dubbed_video_url": dubbed_video_url,
         "metadata": {
             **metadata,
-            "media_type": media_type_value if segments_with_audio else None,
             "tts_segments": len(result_segments),
             "tts_failed": failed,
-            **({"merge_error": merge_error_message} if merge_error_message else {}),
         },
     }
 
@@ -536,10 +427,10 @@ def tts_combine_results(
 
     # ── Write to Job row ─────────────────────────────────────────────────────
     error_message: Optional[str] = None
-    if segments_with_audio and not combined_minio_key:
-        error_message = merge_error_message or "TTS merge failed: no combined output was generated."
-    elif failed and not combined_minio_key:
-        error_message = f"TTS failed for {failed}/{len(result_segments)} segments"
+    if failed == len(result_segments):
+        error_message = f"TTS failed for all {len(result_segments)} segments"
+    elif failed > 0:
+        logger.warning("[TTS] %d/%d segments failed for job %s", failed, len(result_segments), job_id)
 
     if error_message:
         BaseJobTask._patch_job(
@@ -552,34 +443,32 @@ def tts_combine_results(
             output_data=output, progress=100.0, completed_at=_utcnow(),
         )
 
-    # ── Update VideoTask ─────────────────────────────────────────────────────
+    # ── Update VideoTask with segment tts_keys ────────────────────────────────
     if task_id:
         from app.tasks.models import TaskStatus
-        task_status = TaskStatus.FAILED if error_message else TaskStatus.COMPLETED
+        task_status = TaskStatus.FAILED if error_message else TaskStatus.PROCESSING
         logger.info("[TTS] patching VideoTask to %s | task_id=%s tts_job=%s", task_status.value, task_id, job_id)
         patch_kwargs = {
             "segments": result_segments,
-            "combined_audio_key": combined_minio_key,
-            "combined_audio_url": combined_audio_url,
-            "progress": 100.0,
-            "completed_at": _utcnow(),
+            "progress": 75.0,
+            "completed_at": _utcnow() if error_message else None,
         }
         if error_message:
             patch_kwargs["error_message"] = error_message
         BaseJobTask._patch_task(task_id, task_status, **patch_kwargs)
 
-    # ── Publish merge result to RabbitMQ for orchestrator ──────────────────
+    # ── Publish TTS result to RabbitMQ for orchestrator ───────────────────────
     try:
-        from app.shared.rabbitmq import publish_merge_result
+        from app.shared.rabbitmq import publish_job_result
         if error_message:
-            publish_merge_result(job_id, "FAILED", output, error=error_message)
+            publish_job_result("job.results.tts", job_id, "TTS_SYNTHESIZE", "FAILED", output, error=error_message)
         else:
-            publish_merge_result(job_id, "COMPLETED", output)
+            publish_job_result("job.results.tts", job_id, "TTS_SYNTHESIZE", "COMPLETED", output)
     except Exception as _pub_exc:
-        logger.warning("[TTS] Could not publish merge result to RabbitMQ: %s", _pub_exc)
+        logger.warning("[TTS] Could not publish TTS result to RabbitMQ: %s", _pub_exc)
 
     logger.info(
-        "[TTS] combined | job=%s | segments=%d | failed=%d | merged=%s",
-        job_id, len(result_segments), failed, bool(combined_minio_key),
+        "[TTS] combined | job=%s | segments=%d | failed=%d",
+        job_id, len(result_segments), failed,
     )
     return output

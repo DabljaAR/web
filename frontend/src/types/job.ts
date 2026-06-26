@@ -1,5 +1,15 @@
 export type JobStatus = 'pending' | 'processing' | 'queued' | 'downloading' | 'completed' | 'failed' | 'success';
 
+export interface StageInfo {
+  type: string;
+  label: string;
+  order: number;
+  status: string;
+  progress: number;
+  segment_count?: number;
+  error?: string;
+}
+
 export interface BaseJob {
   id: string;
   name: string;
@@ -11,6 +21,8 @@ export interface ProcessingJob extends BaseJob {
   progress?: number;
   estTime?: string;
   type?: string;
+  stages?: StageInfo[];
+  totalSegments?: number;
 }
 
 export interface RecentJob extends BaseJob {
@@ -31,6 +43,15 @@ export interface DashboardDataResponse {
     status: string;
     type?: string;
     progress?: number;
+    stages?: Array<{
+      type: string;
+      label: string;
+      order: number;
+      status: string;
+      progress: number;
+      segment_count?: number;
+      error?: string;
+    }>;
   }>;
   recent: Array<{
     id: string;

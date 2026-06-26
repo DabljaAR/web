@@ -21,7 +21,7 @@ def _get_backend_settings():
 def _make_backend_download_fn() -> Callable:
     """Returns the backend's async StorageService download function."""
     import asyncio
-    from app.media.storage import get_storage_service
+    from app.storage import get_storage_service
 
     def _download(prefix: str, local_path: str, bucket: str) -> bool:
         storage = get_storage_service()
@@ -328,18 +328,18 @@ class NLLBTranslatorWrapper:
         num_beams: int = 5,
     ) -> str:
         """Performs model inference for a single text string."""
-        tgt_token_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
         with NLLBTranslatorWrapper._tokenizer_lock:
+            tgt_token_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
             self.tokenizer.src_lang = src_lang
             inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
-        outputs = self.model.generate(
-            **inputs,
-            forced_bos_token_id=tgt_token_id,
-            max_length=max_length,
-            num_beams=num_beams,
-            early_stopping=True,
-        )
-        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+            outputs = self.model.generate(
+                **inputs,
+                forced_bos_token_id=tgt_token_id,
+                max_length=max_length,
+                num_beams=num_beams,
+                early_stopping=True,
+            )
+            return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
     def translate_segment(
         self,
