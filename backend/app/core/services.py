@@ -1,10 +1,10 @@
 from datetime import datetime
 from sqlalchemy import true, select
-from app.media.models import Video
+from app.videos.models import Video
 from typing import Optional, List
 from fastapi import HTTPException, status
 from app.core.models import User, Payment, UserSubscription
-from app.media.storage import StorageService
+from app.storage import StorageService
 from app.core.schema import (
     UserCreate,
     UserUpdate,

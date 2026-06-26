@@ -168,8 +168,8 @@ async def get_task(
 
     # Best-effort presigned URL generation — failures are logged but do not break the response
     try:
-        from app.media.storage import get_storage_service
-        from app.media.models import Video
+        from app.storage import get_storage_service
+        from app.videos.models import Video
         storage = get_storage_service()
 
         video = await db.get(Video, task.video_id)

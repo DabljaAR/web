@@ -4,10 +4,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.models import User
 from app.core.services import UserService 
-from app.media.models import Video
+from app.videos.models import Video
 from app.core.auth import get_current_user
-from app.media.schemas import VideoResponse, VideoCreate, VideoUploadResponse, PaginatedVideoResponse, DashboardResponse
-from app.media.service import VideoService
+from app.videos.schemas import VideoResponse, VideoCreate, VideoUploadResponse, PaginatedVideoResponse, DashboardResponse
+from app.videos.service import VideoService
 
 router = APIRouter(
     prefix="/videos",

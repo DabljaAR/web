@@ -626,7 +626,7 @@ def register_tts_task(celery_app):
         # Upload to MinIO if requested
         if upload_to_minio:
             try:
-                from app.media.storage import get_storage_service
+                from app.storage import get_storage_service
 
                 storage = get_storage_service()
                 final_minio_key = minio_key or f"tts/{job_id}/output.wav"

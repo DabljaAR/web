@@ -217,6 +217,34 @@ services:
       - dabljaar_network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # ─── Media Microservice (FastAPI + FFmpeg) ──────────────────────────────
+  media-service:
+    build:
+      context: ./media-service
+      dockerfile: Dockerfile
+    container_name: dabljaar_media_service
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      AWS_DEFAULT_REGION: us-east-1
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      PORT: "8003"
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
   # ─── Frontend (React/Vite) ────────────────────────────────────────────────
   frontend:
     build:
@@ -258,6 +286,7 @@ services:
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      MEDIA_SERVICE_URL: http://media-service:8001
     volumes:
       - ./backend:/app
       - /app/__pycache__
@@ -267,6 +296,8 @@ services:
       redis:
         condition: service_healthy
       minio:
+        condition: service_started
+      media-service:
         condition: service_started
     restart: unless-stopped
     networks:
@@ -317,6 +348,10 @@ services:
       XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
       TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
       CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
+      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
+      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
+      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
+      MEDIA_SERVICE_URL: http://media-service:8003
     volumes:
       - ./backend:/app
       - /app/__pycache__
@@ -327,6 +362,8 @@ services:
       redis:
         condition: service_healthy
       minio:
+        condition: service_started
+      media-service:
         condition: service_started
     restart: unless-stopped
     networks:

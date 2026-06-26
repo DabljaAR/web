@@ -14,7 +14,7 @@ from app.shared.enums import (
     languageEnum,
     SubscriptionStatusEnum,
 )
-from app.media.models import Video
+from app.videos.models import Video
 
 # Import Video to avoid SQLAlchemy mapper errors when resolving User.videos
 
