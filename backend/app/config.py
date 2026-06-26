@@ -265,6 +265,9 @@ class Settings(BaseSettings):
     # ========== RABBITMQ (Go orchestrator + native workers) ==========
     RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
 
+    # ========== STT MICROSERVICE ==========
+    STT_SERVICE_URL: str = os.getenv("STT_SERVICE_URL", "http://stt-service:8001")
+
     # ========== CELERY / REDIS ==========
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
     CELERY_RESULT_BACKEND: str = os.getenv(

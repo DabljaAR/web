@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -10,19 +11,78 @@ import (
 
 	"github.com/dabljaar/orchestrator/internal/db"
 	"github.com/dabljaar/orchestrator/internal/mq"
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"gorm.io/gorm"
 )
 
-// nextStageRoutes is the pipeline state-machine transition table.
-// It maps a completed job type to the routing key for the next stage.
-// Using a map instead of a switch statement makes it easy to extend the
-// pipeline without touching handler logic.
-var nextStageRoutes = map[db.JobType]string{
-	db.JobTypeSTTTranscribe: "job.start.nmt",
-	db.JobTypeNMTTranslate:  "job.start.tts",
-	db.JobTypeTTSSynthesize: "job.start.merge",
-	// JobTypeDubbingMerge is the final stage — no next route.
+// errPermanent wraps an error that should NOT be requeued — retrying will never
+// succeed (e.g. job ID not in DB, malformed payload that survived the JSON check).
+// The startConsumer loop checks for this type to set requeue=false on Nack,
+// routing the message to the Dead Letter Queue instead of looping forever.
+type errPermanent struct{ err error }
+
+func (e errPermanent) Error() string { return e.err.Error() }
+func (e errPermanent) Unwrap() error { return e.err }
+
+// permanent wraps err as a non-retryable failure.
+func permanent(err error) error { return errPermanent{err} }
+
+// ─── Pipeline stage definitions ──────────────────────────────────────────────
+
+// stageOrder defines the pipeline sequence per output_type (D5, §7.2).
+var stageOrder = map[string][]db.JobType{
+	"captionsOnly":           {db.JobTypeSTTTranscribe},
+	"captionsAndTranslation": {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate},
+	"translationAndTTS":      {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate, db.JobTypeTTSSynthesize},
+	"fullDubbing":            {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate, db.JobTypeTTSSynthesize, db.JobTypeDubbingMerge},
+}
+
+// startRoute maps JobType to the RabbitMQ routing key for dispatching that stage.
+var startRoute = map[db.JobType]string{
+	db.JobTypeSTTTranscribe: "job.start.stt",
+	db.JobTypeNMTTranslate:  "job.start.nmt",
+	db.JobTypeTTSSynthesize: "job.start.tts",
+	db.JobTypeDubbingMerge:  "job.start.merge",
+}
+
+// stageProgress maps a completed stage to the parent's progress percentage.
+var stageProgress = map[db.JobType]float64{
+	db.JobTypeSTTTranscribe: 20.0,
+	db.JobTypeNMTTranslate:  45.0,
+	db.JobTypeTTSSynthesize: 75.0,
+	db.JobTypeDubbingMerge:  100.0,
+}
+
+// firstStageFor returns the first pipeline stage for an output_type.
+func firstStageFor(outputType string) (db.JobType, bool) {
+	seq, ok := stageOrder[outputType]
+	if !ok || len(seq) == 0 {
+		return "", false
+	}
+	return seq[0], true
+}
+
+// nextStage returns the stage after current, or ("", false) if pipeline is done.
+func nextStage(outputType string, current db.JobType) (db.JobType, bool) {
+	seq := stageOrder[outputType]
+	for i, s := range seq {
+		if s == current && i+1 < len(seq) {
+			return seq[i+1], true
+		}
+	}
+	return "", false
+}
+
+// getOutputType extracts output_type from input_data, defaulting to fullDubbing.
+func getOutputType(inputData map[string]any) string {
+	if inputData == nil {
+		return "fullDubbing"
+	}
+	if t, ok := inputData["output_type"].(string); ok && t != "" {
+		return t
+	}
+	return "fullDubbing"
 }
 
 // ─── Payloads ─────────────────────────────────────────────────────────────────
@@ -226,16 +286,17 @@ func (m *Manager) startConsumer(
 					elapsed := time.Since(start)
 
 					if err != nil {
+						requeue := !errors.As(err, &errPermanent{})
 						m.logger.Error("Message handler failed — nacking",
 							"queue", queueName,
 							"error", err,
+							"requeue", requeue,
 							"elapsed_ms", elapsed.Milliseconds(),
 						)
-						// Nack with requeue=true so RabbitMQ retries the message.
-						// For permanent failures (e.g., bad JSON that will never
-						// parse), set requeue=false so the message goes to the DLQ
-						// instead of causing an infinite loop.
-						d.Nack(false, true)
+						// requeue=false sends to the Dead Letter Queue; the message
+						// will not spin in a retry loop. Use errPermanent for errors
+						// where retrying can never succeed (job missing, bad ID, etc.).
+						d.Nack(false, requeue)
 						return
 					}
 
@@ -255,108 +316,295 @@ func (m *Manager) startConsumer(
 // ─── Message Handlers ─────────────────────────────────────────────────────────
 
 // handleNewJob is invoked when the FastAPI backend publishes a "job.created"
-// event. It marks the pipeline as started and triggers the first stage (STT).
+// event with the PARENT job_id (§15 contract). It resolves output_type, marks
+// the parent PROCESSING, creates the first child job (STT), and dispatches.
 func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
 	var payload newJobPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
-		// Bad JSON will never get better; log and return nil so the message
-		// is Ack'd and moved on (or change to a dedicated dead-letter Nack).
 		m.logger.Error("handleNewJob: bad JSON — discarding message", "error", err)
-		return nil // returning nil = Ack = move to DLQ via policy, not infinite retry
+		return nil
 	}
 
-	log := m.logger.With("job_id", payload.JobID, "handler", "handleNewJob")
+	parentID := payload.JobID
+	log := m.logger.With("parent_job_id", parentID, "handler", "handleNewJob")
 	log.Info("Orchestrator received new job")
 
-	var job db.Job
-	if err := m.db.WithContext(ctx).Where("id = ?", payload.JobID).First(&job).Error; err != nil {
-		return fmt.Errorf("job %s not found: %w", payload.JobID, err)
+	var parent db.Job
+	if err := m.db.WithContext(ctx).Where("id = ?", parentID).First(&parent).Error; err != nil {
+		return permanent(fmt.Errorf("parent job %s not found: %w", parentID, err))
 	}
 
 	now := time.Now().UTC()
-	job.Status = db.JobStatusProcessing
-	job.StartedAt = &now
 
-	if err := m.db.WithContext(ctx).Save(&job).Error; err != nil {
-		return fmt.Errorf("save job %s: %w", payload.JobID, err)
+	// Mark parent PROCESSING
+	m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+		"status":     db.JobStatusProcessing,
+		"started_at": &now,
+		"updated_at": now,
+	})
+
+	// Resolve first stage from output_type
+	outputType := getOutputType(parent.InputData)
+	firstStage, ok := firstStageFor(outputType)
+	if !ok {
+		// uploadOnly or unknown — mark parent COMPLETED immediately
+		log.Info("No pipeline stages for output_type — marking parent COMPLETED", "output_type", outputType)
+		m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+			"status":       db.JobStatusCompleted,
+			"progress":     100.0,
+			"completed_at": &now,
+			"updated_at":   now,
+		})
+		return nil
 	}
 
-	log.Info("Pipeline starting — dispatching STT stage")
-	if err := m.publishNextJob("job.start.stt", job.ID); err != nil {
-		return fmt.Errorf("publish STT trigger for job %s: %w", job.ID, err)
+	// Duplicate prevention: if a child already exists for this parent+stage,
+	// don't create another one. Instead, re-publish if the existing child is
+	// still in a non-terminal state (the original dispatch may have been lost).
+	var existing db.Job
+	dupErr := m.db.WithContext(ctx).
+		Where("parent_job_id = ? AND job_type = ?", parentID, firstStage).
+		First(&existing).Error
+
+	if dupErr == nil {
+		// Child already exists — decide based on its status
+		switch existing.Status {
+		case db.JobStatusQueued, db.JobStatusProcessing, db.JobStatusRetrying:
+			log.Info("Child already exists — re-publishing dispatch", "child_job_id", existing.ID, "stage", firstStage, "status", existing.Status)
+			route, ok := startRoute[firstStage]
+			if !ok {
+				return permanent(fmt.Errorf("no start route for stage %s", firstStage))
+			}
+			if err := m.publishNextJob(route, existing.ID); err != nil {
+				return fmt.Errorf("re-publish %s for child %s: %w", route, existing.ID, err)
+			}
+			return nil
+
+		case db.JobStatusCompleted:
+			log.Info("Child already completed — skipping", "child_job_id", existing.ID, "stage", firstStage)
+			return nil
+
+		case db.JobStatusFailed:
+			log.Info("Child previously failed — creating new child for retry", "old_child_id", existing.ID, "stage", firstStage)
+
+		case db.JobStatusCancelled:
+			log.Info("Child was cancelled — skipping", "child_job_id", existing.ID)
+			return nil
+		}
+	}
+
+	// Create first child job (STT_TRANSCRIBE) linked to parent
+	childID := uuid.NewString()
+	child := db.Job{
+		ID:           childID,
+		VideoID:      parent.VideoID,
+		UserID:       parent.UserID,
+		JobType:      firstStage,
+		Status:       db.JobStatusQueued,
+		ParentJobID:  &parentID,
+		InputData:    parent.InputData,
+		RetryCount:   0,
+		MaxRetries:   3,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := m.db.WithContext(ctx).Create(&child).Error; err != nil {
+		return fmt.Errorf("create STT child for parent %s: %w", parentID, err)
+	}
+
+	route, ok := startRoute[firstStage]
+	if !ok {
+		return permanent(fmt.Errorf("no start route for stage %s", firstStage))
+	}
+
+	log.Info("Dispatching first stage", "child_job_id", childID, "stage", firstStage, "route", route)
+	if err := m.publishNextJob(route, childID); err != nil {
+		return fmt.Errorf("publish %s for child %s: %w", route, childID, err)
 	}
 
 	return nil
 }
 
 // handleResult is invoked when an AI worker publishes a "job.results.*" event.
-// It updates the job record in the database and advances the pipeline to the
-// next stage (or marks the parent job complete/failed).
+// It updates the child job, then either creates the next child and dispatches
+// (COMPLETED), propagates failure to the parent (FAILED), or marks the pipeline
+// complete when no more stages remain. Never mutates job_type on existing rows.
 func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 	var payload WorkerResultPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		m.logger.Error("handleResult: bad JSON — discarding message", "error", err)
-		return nil // malformed — discard rather than infinite-retry
+		return nil
 	}
 
+	childID := payload.JobID
 	log := m.logger.With(
-		"job_id", payload.JobID,
+		"child_job_id", childID,
 		"job_type", payload.JobType,
 		"status", payload.Status,
 	)
 	log.Info("Worker result received")
 
-	var job db.Job
-	if err := m.db.WithContext(ctx).Where("id = ?", payload.JobID).First(&job).Error; err != nil {
-		return fmt.Errorf("job %s not found: %w", payload.JobID, err)
+	var child db.Job
+	if err := m.db.WithContext(ctx).Where("id = ?", childID).First(&child).Error; err != nil {
+		return permanent(fmt.Errorf("child job %s not found: %w", childID, err))
 	}
 
-	// ── Persist result ─────────────────────────────────────────────────────
 	now := time.Now().UTC()
-	job.Status = db.JobStatus(payload.Status)
+	resultStatus := db.JobStatus(payload.Status)
+
+	// Targeted update: status + output only — never job_type
+	updates := map[string]any{
+		"status":     resultStatus,
+		"updated_at": now,
+	}
 	if payload.OutputData != nil {
-		job.OutputData = payload.OutputData
+		updates["output_data"] = payload.OutputData
 	}
 	if payload.Error != "" {
 		errCopy := payload.Error
-		job.ErrorMessage = &errCopy
+		updates["error_message"] = &errCopy
 	}
-	if job.Status == db.JobStatusCompleted || job.Status == db.JobStatusFailed {
-		job.CompletedAt = &now
+	if resultStatus == db.JobStatusCompleted || resultStatus == db.JobStatusFailed {
+		updates["completed_at"] = &now
+		updates["progress"] = 100.0
 	}
-
-	if err := m.db.WithContext(ctx).Save(&job).Error; err != nil {
-		return fmt.Errorf("save job %s: %w", payload.JobID, err)
-	}
+	m.db.WithContext(ctx).Model(&child).Updates(updates)
 
 	// ── State machine ──────────────────────────────────────────────────────
-	switch job.Status {
+	switch resultStatus {
+	case db.JobStatusFailed:
+		log.Error("Stage failed — propagating to parent", "error", payload.Error)
+		m.updateParent(ctx, child, db.JobStatusFailed, payload.Error, &now)
+
 	case db.JobStatusCompleted:
-		if nextRoute, hasNext := nextStageRoutes[job.JobType]; hasNext {
-			log.Info("Advancing pipeline to next stage", "next_route", nextRoute)
-			if err := m.publishNextJob(nextRoute, job.ID); err != nil {
-				return fmt.Errorf("publish next stage for job %s: %w", job.ID, err)
-			}
-		} else if job.JobType == db.JobTypeDubbingMerge {
-			log.Info("All pipeline stages complete")
-			m.markParentJob(ctx, job, db.JobStatusCompleted, "", 100.0, &now)
+		// Load parent for cancel check and output_type
+		if child.ParentJobID == nil {
+			log.Warn("Child has no parent_job_id — cannot advance pipeline")
+			return nil
 		}
 
-	case db.JobStatusFailed:
-		log.Error("Stage failed — propagating failure to parent", "error", payload.Error)
-		m.markParentJob(ctx, job, db.JobStatusFailed, payload.Error, job.Progress, &now)
+		var parent db.Job
+		if err := m.db.WithContext(ctx).Where("id = ?", *child.ParentJobID).First(&parent).Error; err != nil {
+			// Parent gone — still update child progress, but can't advance
+			m.logger.Warn("Parent job not found for child", "child_id", childID, "parent_id", *child.ParentJobID, "error", err)
+			return nil
+		}
+
+		// D8: cancel check — if parent was cancelled, stop advancing
+		if parent.Status == db.JobStatusCancelled {
+			log.Info("Parent is CANCELLED — stopping pipeline")
+			m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+				"status": db.JobStatusCancelled, "updated_at": now,
+			})
+			return nil
+		}
+
+		// Update parent progress for completed stage
+		if prog, hasProg := stageProgress[child.JobType]; hasProg {
+			m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+				"progress": prog, "updated_at": now,
+			})
+		}
+
+		// Resolve next stage from output_type
+		outputType := getOutputType(parent.InputData)
+		next, hasNext := nextStage(outputType, child.JobType)
+
+		if !hasNext {
+			log.Info("All pipeline stages complete")
+			m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+				"status":       db.JobStatusCompleted,
+				"progress":     100.0,
+				"completed_at": &now,
+				"updated_at":   now,
+			})
+			return nil
+		}
+
+		// Duplicate prevention: if a next-stage child already exists for this
+		// parent, don't create another one. Re-publish if still non-terminal.
+		var existingNext db.Job
+		dupErr := m.db.WithContext(ctx).
+			Where("parent_job_id = ? AND job_type = ?", *child.ParentJobID, next).
+			First(&existingNext).Error
+
+		if dupErr == nil {
+			switch existingNext.Status {
+			case db.JobStatusQueued:
+				log.Info("Next child already queued — re-publishing dispatch", "next_child_id", existingNext.ID, "stage", next)
+				route, ok := startRoute[next]
+				if !ok {
+					return permanent(fmt.Errorf("no start route for stage %s", next))
+				}
+				if err := m.publishNextJob(route, existingNext.ID); err != nil {
+					return fmt.Errorf("re-publish %s for next child %s: %w", route, existingNext.ID, err)
+				}
+				return nil
+
+			case db.JobStatusProcessing, db.JobStatusRetrying:
+				log.Info("Next child already processing — skipping", "next_child_id", existingNext.ID, "stage", next, "status", existingNext.Status)
+				return nil
+
+			case db.JobStatusCompleted:
+				log.Info("Next child already completed — skipping", "next_child_id", existingNext.ID, "stage", next)
+				return nil
+
+			case db.JobStatusFailed:
+				log.Info("Next child previously failed — creating new child for retry", "old_child_id", existingNext.ID, "stage", next)
+
+			case db.JobStatusCancelled:
+				log.Info("Next child was cancelled — skipping", "next_child_id", existingNext.ID)
+				return nil
+			}
+		}
+
+		// Create next child job
+		nextChildID := uuid.NewString()
+		nextChild := db.Job{
+			ID:           nextChildID,
+			VideoID:      child.VideoID,
+			UserID:       child.UserID,
+			JobType:      next,
+			Status:       db.JobStatusQueued,
+			ParentJobID:  child.ParentJobID,
+			InputData:    child.InputData,
+			RetryCount:   0,
+			MaxRetries:   3,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+		if err := m.db.WithContext(ctx).Create(&nextChild).Error; err != nil {
+			return fmt.Errorf("create next child for parent %s: %w", *child.ParentJobID, err)
+		}
+
+		route, ok := startRoute[next]
+		if !ok {
+			return permanent(fmt.Errorf("no start route for stage %s", next))
+		}
+
+		log.Info("Advancing pipeline to next stage",
+			"next_child_id", nextChildID,
+			"next_stage", next,
+			"route", route,
+		)
+		if err := m.publishNextJob(route, nextChildID); err != nil {
+			return fmt.Errorf("publish %s for next child %s: %w", route, nextChildID, err)
+		}
+
+	default:
+		// RETRYING or CANCELLED — no state-machine action
+		log.Debug("No state-machine action for status", "status", resultStatus)
 	}
 
 	return nil
 }
 
-// markParentJob updates the FULL_DUBBING_PIPELINE parent record.
-func (m *Manager) markParentJob(
+// updateParent pushes a status/error change up to the parent FULL_DUBBING_PIPELINE row.
+func (m *Manager) updateParent(
 	ctx context.Context,
 	child db.Job,
 	status db.JobStatus,
 	errMsg string,
-	progress float64,
 	completedAt *time.Time,
 ) {
 	if child.ParentJobID == nil {
@@ -364,12 +612,14 @@ func (m *Manager) markParentJob(
 	}
 
 	updates := map[string]any{
-		"status":       status,
-		"progress":     progress,
-		"completed_at": completedAt,
+		"status":     status,
+		"updated_at": time.Now().UTC(),
 	}
 	if errMsg != "" {
 		updates["error_message"] = errMsg
+	}
+	if completedAt != nil {
+		updates["completed_at"] = completedAt
 	}
 
 	result := m.db.WithContext(ctx).Model(&db.Job{}).

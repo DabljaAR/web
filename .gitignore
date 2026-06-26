@@ -1,3 +1,8 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
 # Logs
 logs
 *.log
@@ -156,6 +161,8 @@ infra/terraform/*.tfvars
 
 
 #orchestrator
+orchestrator/vendor/
+orchestrator/server
 
 backend/go1.22.5.linux-amd64.tar.gz
 backend/sys

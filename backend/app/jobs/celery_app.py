@@ -40,8 +40,6 @@ _base_imports = ["app.jobs.tasks.media"]
 _ai_imports = (
     [
         "app.jobs.tasks.pipeline",
-        "app.jobs.tasks.nmt",
-        "app.stt.models",
         "app.tts.models",
     ]
     if _INSTALL_AI
@@ -73,15 +71,11 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
 
-    # Queue routing
+    # Queue routing (STT and NMT are handled by their respective microservices via RabbitMQ)
     task_routes={
         "app.jobs.tasks.media.*":                              {"queue": "media"},
-        "app.jobs.tasks.pipeline.stt_transcribe":              {"queue": "ai_stt"},
         "app.jobs.tasks.pipeline.tts_synthesize_segment":      {"queue": "ai_tts"},
         "app.jobs.tasks.pipeline.tts_combine_results":         {"queue": "ai_tts"},
-        "app.jobs.tasks.nmt.nmt_translate":                    {"queue": "ai_nmt"},
-        "app.jobs.tasks.nmt.translate_segment":                {"queue": "ai_nmt"},
-        "app.jobs.tasks.nmt.nmt_combine_results":              {"queue": "ai_nmt"},
         "app.jobs.tasks.tts.synthesize":                       {"queue": "ai_tts"},
     },
 
@@ -141,31 +135,10 @@ def _optional_prewarm_models(sender=None, **kwargs):
     )
 
     if prewarm_stt:
-        t0 = time.perf_counter()
-        try:
-            from app.stt.models import WhisperModelManager
-
-            _ = WhisperModelManager().model
-            logger.info(
-                "[CELERY][PREWARM] STT ready in %.1fs",
-                time.perf_counter() - t0,
-            )
-        except Exception as exc:
-            logger.warning("[CELERY][PREWARM] STT prewarm failed: %s", exc)
+        logger.info("[CELERY][PREWARM] STT prewarm skipped — STT is now a separate microservice")
 
     if prewarm_nmt:
-        t0 = time.perf_counter()
-        try:
-            from app.nmt.service import translator
-
-            _ = translator.tokenizer
-            _ = translator.model
-            logger.info(
-                "[CELERY][PREWARM] NMT ready in %.1fs",
-                time.perf_counter() - t0,
-            )
-        except Exception as exc:
-            logger.warning("[CELERY][PREWARM] NMT prewarm failed: %s", exc)
+        logger.info("[CELERY][PREWARM] NMT prewarm skipped — NMT is now a separate microservice")
 
     if prewarm_tts:
         t0 = time.perf_counter()

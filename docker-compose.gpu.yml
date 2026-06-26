@@ -1,11 +1,20 @@
 # docker-compose.gpu.yml
-# GPU overlay: enables NVIDIA GPU passthrough for the AI worker (STT/TTS).
-# Usage: docker compose -f docker-compose.yml [-f docker-compose.prod.yml] -f docker-compose.gpu.yml up -d
-# Requires: NVIDIA Container Toolkit installed on the host (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+# GPU overlay — builds the AI worker with Pascal-compatible PyTorch (sm_61+).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# Requires: NVIDIA Container Toolkit on the host.
 services:
   celery-worker-ai:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.gpu
     gpus: all
     environment:
       STT_DEVICE: cuda
       SILMA_DEVICE: cuda
-      STT_COMPUTE_TYPE: float16
+      STT_COMPUTE_TYPE: int8_float32
+
+  stt-service:
+    build:
+      context: ./stt-service
+      dockerfile: Dockerfile.gpu
+    gpus: all
