@@ -35,6 +35,12 @@ const ProcessingQueue = ({
                 {t('dashboard.processing')}
               </span>
             </div>
+            <div className="progress-bar-container">
+              <div
+                className="progress-bar-fill"
+                style={{ width: `${Math.min(100, Math.max(0, job.progress || 0))}%` }}
+              />
+            </div>
             <div className="job-time">
               <span>{t('dashboard.estTime')}</span> {job.estTime}
             </div>

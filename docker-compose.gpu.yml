@@ -11,7 +11,7 @@ services:
     environment:
       STT_DEVICE: cuda
       SILMA_DEVICE: cuda
-      STT_COMPUTE_TYPE: float16
+      STT_COMPUTE_TYPE: int8_float32
 
   stt-service:
     build:

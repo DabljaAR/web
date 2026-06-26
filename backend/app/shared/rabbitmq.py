@@ -44,3 +44,37 @@ def publish_job_created(job_id: str) -> bool:
     except Exception as exc:
         logger.error("[RabbitMQ] Failed to publish job.created for %s: %s", job_id, exc)
         return False
+
+
+def publish_merge_result(job_id: str, status: str, output_data: dict, error: str | None = None) -> bool:
+    """Publish job.results.merge so the orchestrator marks the pipeline complete."""
+    try:
+        payload: dict = {
+            "job_id": job_id,
+            "job_type": "TTS_SYNTHESIZE",
+            "status": status,
+            "output_data": output_data or {},
+        }
+        if error:
+            payload["error"] = error
+
+        params = pika.URLParameters(_get_rabbitmq_url())
+        params.socket_timeout = 5
+        connection = pika.BlockingConnection(params)
+        channel = connection.channel()
+        channel.exchange_declare(EXCHANGE, exchange_type="topic", durable=True)
+        channel.basic_publish(
+            exchange=EXCHANGE,
+            routing_key="job.results.merge",
+            body=json.dumps(payload),
+            properties=pika.BasicProperties(
+                content_type="application/json",
+                delivery_mode=2,
+            ),
+        )
+        connection.close()
+        logger.info("[RabbitMQ] Published job.results.merge for job %s", job_id)
+        return True
+    except Exception as exc:
+        logger.error("[RabbitMQ] Failed to publish job.results.merge for %s: %s", job_id, exc)
+        return False

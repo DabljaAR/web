@@ -142,7 +142,24 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                     db.add(video_task)
                     await db.flush()  # get video_task.id before creating the job
 
-                    # Create the initial STT job
+                    # Create parent FULL_DUBBING_PIPELINE job
+                    parent_job_id = str(uuid.uuid4())
+                    parent_job = Job(
+                        id=parent_job_id,
+                        video_id=video_id,
+                        user_id=video.user_id,
+                        job_type=JobType.FULL_DUBBING_PIPELINE,
+                        status=JobStatus.QUEUED,
+                        progress=0.0,
+                        input_data={
+                            "output_type": output_type,
+                            "processing_mode": processing_mode,
+                            "target_lang": target_lang,
+                        },
+                    )
+                    db.add(parent_job)
+
+                    # Create STT child job linked to parent
                     stt_job_id = str(uuid.uuid4())
                     stt_job = Job(
                         id=stt_job_id,
@@ -150,6 +167,7 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                         user_id=video.user_id,
                         job_type=JobType.STT_TRANSCRIBE,
                         status=JobStatus.QUEUED,
+                        parent_job_id=parent_job_id,
                         input_data={
                             **options,
                             "task_id": video_task.id,
@@ -159,12 +177,12 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                         }
                     )
                     db.add(stt_job)
-                    video_task.root_job_id = stt_job_id
+                    video_task.root_job_id = parent_job_id
                     await db.commit()
 
-                    # Publish job.created to RabbitMQ so the orchestrator dispatches to STT microservice
+                    # Publish job.created with PARENT job_id so orchestrator reads output_type
                     from app.shared.rabbitmq import publish_job_created
-                    publish_job_created(stt_job_id)
+                    publish_job_created(parent_job_id)
                     await db.commit()
 
         except Exception as e:
@@ -620,22 +638,41 @@ class VideoService:
             "processing_mode": processing_mode,
         }
 
+        # Create parent FULL_DUBBING_PIPELINE job
+        parent_job_id = str(uuid.uuid4())
+        parent_job = Job(
+            id=parent_job_id,
+            video_id=media.id,
+            user_id=media.user_id,
+            job_type=JobType.FULL_DUBBING_PIPELINE,
+            status=JobStatus.QUEUED,
+            progress=0.0,
+            input_data={
+                "output_type": output_type,
+                "processing_mode": processing_mode,
+                "target_lang": target_lang,
+            },
+        )
+        self.db.add(parent_job)
+
+        # Create STT child job linked to parent
         stt_job = Job(
             id=str(uuid.uuid4()),
             video_id=media.id,
             user_id=media.user_id,
             job_type=JobType.STT_TRANSCRIBE,
             status=JobStatus.QUEUED,
+            parent_job_id=parent_job_id,
             input_data=input_options,
         )
         self.db.add(stt_job)
-        video_task.root_job_id = stt_job.id
+        video_task.root_job_id = parent_job_id
         await self.db.commit()
         await self.db.refresh(stt_job)
 
-        # Publish job.created to RabbitMQ so the orchestrator dispatches to STT microservice
+        # Publish job.created with PARENT job_id so orchestrator reads output_type
         from app.shared.rabbitmq import publish_job_created
-        publish_job_created(stt_job.id)
+        publish_job_created(parent_job_id)
         await self.db.commit()
 
         return stt_job
@@ -898,23 +935,25 @@ class VideoService:
         result_active_videos = await self.db.execute(query_active_videos)
         active_videos = result_active_videos.scalars().all()
 
-        # 2. Fetch active background Jobs (STT, NMT, TTS, etc.)
+        # 2. Fetch active background Jobs (STT, NMT, TTS, etc.) — only parent jobs (pipeline roots)
         query_active_jobs = select(Job).where(
             Job.user_id == user_id,
+            Job.parent_job_id.is_(None),
             Job.status.in_([JobStatus.QUEUED, JobStatus.PROCESSING, JobStatus.RETRYING])
         ).order_by(Job.created_at.desc())
 
         result_active_jobs = await self.db.execute(query_active_jobs)
         active_jobs = result_active_jobs.scalars().all()
 
-        # Collect video_ids that have at least one active job, then fetch ALL jobs
-        # for those videos (including already-completed pipeline steps like STT).
+        # Collect video_ids that have at least one active job, then fetch ALL parent
+        # jobs for those videos (including already-completed pipeline steps like STT).
         active_video_ids = {j.video_id for j in active_jobs if j.video_id}
         all_pipeline_jobs = list(active_jobs)
         if active_video_ids:
             query_pipeline_jobs = select(Job).where(
                 Job.user_id == user_id,
                 Job.video_id.in_(active_video_ids),
+                Job.parent_job_id.is_(None),
                 Job.status.in_([JobStatus.COMPLETED, JobStatus.FAILED]),
             ).order_by(Job.created_at.desc())
             result_pipeline = await self.db.execute(query_pipeline_jobs)

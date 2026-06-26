@@ -1,14 +1,11 @@
-"""AI pipeline Celery tasks.
+"""TTS Celery tasks (remaining Celery pipeline after STT/NMT migration).
 
-Each task follows the same contract:
-  - First positional arg is ``job_id`` (consumed by BaseJobTask lifecycle hooks).
-  - Returns a dict that downstream tasks in a chain can consume.
+STT and NMT are now handled by their respective microservices via RabbitMQ.
+This file contains only the TTS tasks still running as Celery workers.
 
-Pipeline flow:
-  [STT microservice via RabbitMQ]  →  nmt_translate  →  tts_synthesize_segment (×N)  →  tts_combine_results
-
-NOTE: stt_transcribe has been removed — STT is now handled by the standalone
-stt-service that subscribes to RabbitMQ ``job.start.stt``.
+Pipeline (TTS portion):
+  tts_synthesize_segment (×N, dispatched by nmt-service result handler)
+  → tts_combine_results  (triggered by Redis counter when all segments done)
 """
 import logging
 import os
@@ -155,7 +152,7 @@ def tts_synthesize_segment(
     end: float,
     minio_segment_key: str,
     ref_clip_minio_key: Optional[str],
-    # Counter-based combine params (set when dispatched from nmt_translate_segment)
+    # Counter-based combine params (set when dispatched from the nmt-service)
     tts_job_id: Optional[str] = None,
     total_segments: Optional[int] = None,
     task_id: Optional[str] = None,
@@ -570,6 +567,16 @@ def tts_combine_results(
         if error_message:
             patch_kwargs["error_message"] = error_message
         BaseJobTask._patch_task(task_id, task_status, **patch_kwargs)
+
+    # ── Publish merge result to RabbitMQ for orchestrator ──────────────────
+    try:
+        from app.shared.rabbitmq import publish_merge_result
+        if error_message:
+            publish_merge_result(job_id, "FAILED", output, error=error_message)
+        else:
+            publish_merge_result(job_id, "COMPLETED", output)
+    except Exception as _pub_exc:
+        logger.warning("[TTS] Could not publish merge result to RabbitMQ: %s", _pub_exc)
 
     logger.info(
         "[TTS] combined | job=%s | segments=%d | failed=%d | merged=%s",

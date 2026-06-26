@@ -18,14 +18,17 @@ export const useJobPolling = (pollInterval: number = 5000) => {
       const active = data.active || [];
       const recent = data.recent || [];
 
-      const pending: ProcessingJob[] = active.map((v: any) => ({
-        id: v.id,
-        name: v.name ?? v.title ?? v.original_filename ?? 'Untitled',
-        status: (typeof v.status === 'string' ? v.status : 'PENDING').toLowerCase() as any,
-        type: v.type,
-        progress: v.progress,
-        estTime: v.progress !== undefined && v.progress > 0 ? `${v.progress.toFixed(0)}%` : 'Processing...'
-      }));
+      const pending: ProcessingJob[] = active.map((v: any) => {
+        const progress = v.progress !== undefined && v.progress !== null ? Number(v.progress) : 0;
+        return {
+          id: v.id,
+          name: v.name ?? v.title ?? v.original_filename ?? 'Untitled',
+          status: (typeof v.status === 'string' ? v.status : 'PENDING').toLowerCase() as any,
+          type: v.type,
+          progress,
+          estTime: progress > 0 ? `${Math.round(progress)}%` : 'Processing...'
+        };
+      });
 
       const completed: RecentJob[] = recent.map(v => {
         // Find transcript and translation URLs from the jobs array

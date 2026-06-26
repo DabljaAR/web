@@ -1,5 +1,5 @@
 services:
-  # PostgreSQL Database
+  # ─── PostgreSQL Database ───────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: dabljaar_postgres
@@ -7,6 +7,8 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: dabljaar
+    ports:
+      - "5433:5432"
     volumes:
       - dabljaar_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,7 +19,7 @@ services:
     networks:
       - dabljaar_network
 
-  # Redis (Celery broker & result backend)
+  # ─── Redis (Celery broker & result backend) ──────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: dabljaar_redis
@@ -33,13 +35,16 @@ services:
     networks:
       - dabljaar_network
 
-  # RabbitMQ (Event Broker for Go Orchestrator & Python Workers)
+  # ─── RabbitMQ (Event Broker) ──────────────────────────────────────────────
   rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: dabljaar_rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -48,59 +53,7 @@ services:
     networks:
       - dabljaar_network
 
-  # STT Microservice (Speech-to-Text via Faster-Whisper + RabbitMQ)
-  stt-service:
-    build:
-      context: ./stt-service
-      dockerfile: Dockerfile
-    container_name: dabljaar_stt_service
-    environment:
-      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
-      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/dabljaar"
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
-      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
-      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
-      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
-      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
-      PORT: 8001
-    ports:
-      - "8001:8001"
-    volumes:
-      - nmt_model_cache:/model-cache
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_started
-    restart: unless-stopped
-    networks:
-      - dabljaar_network
-
-  # Go Orchestrator
-  orchestrator:
-    build:
-      context: ./orchestrator
-      dockerfile: Dockerfile
-    container_name: dabljaar_orchestrator
-    environment:
-      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
-      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/dabljaar"
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - dabljaar_network
-
-  # MinIO (S3-compatible object storage)
+  # ─── MinIO (S3-compatible object storage) ─────────────────────────────────
   minio:
     image: minio/minio:latest
     container_name: dabljaar_minio
@@ -121,7 +74,103 @@ services:
     networks:
       - dabljaar_network
 
-  # Backend API (FastAPI)
+  # ─── STT Microservice (Speech-to-Text via Faster-Whisper) ─────────────────
+  stt-service:
+    build:
+      context: ./stt-service
+      dockerfile: Dockerfile
+    container_name: dabljaar_stt_service
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/dabljaar"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
+      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-small}
+      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-small}
+      HF_HOME: ${HF_HOME:-/model-cache/hf}
+      HF_HUB_CACHE: ${HF_HUB_CACHE:-/model-cache/hf/hub}
+      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/model-cache/hf/transformers}
+      STT_DEVICE: ${STT_DEVICE:-auto}
+      STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-auto}
+      PORT: 8001
+    ports:
+      - "8001:8001"
+    volumes:
+      - nmt_model_cache:/model-cache
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
+  # ─── NMT Microservice (Neural Machine Translation) ────────────────────────
+  nmt-service:
+    build:
+      context: .
+      dockerfile: nmt-service/Dockerfile
+    container_name: dabljaar_nmt_service
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/dabljaar"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      NMT_MODEL_LOCAL_PATH: ${NMT_MODEL_LOCAL_PATH:-/model-cache/nmt-v4}
+      NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
+      NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-false}
+      NMT_INTERNAL_CONCURRENCY: ${NMT_INTERNAL_CONCURRENCY:-4}
+      NMT_LENGTH_ADJUST_ENABLED: ${NMT_LENGTH_ADJUST_ENABLED:-false}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+      PORT: 8002
+    ports:
+      - "8002:8002"
+    volumes:
+      - nmt_model_cache:/model-cache
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
+  # ─── Go Orchestrator ──────────────────────────────────────────────────────
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: dabljaar_orchestrator
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/dabljaar?sslmode=disable"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
+  # ─── Backend API (FastAPI) ────────────────────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -168,11 +217,13 @@ services:
       - dabljaar_network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  # Frontend (React/Vite)
+  # ─── Frontend (React/Vite) ────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api}
     container_name: dabljaar_frontend
     ports:
       - "5173:5173"
@@ -180,11 +231,11 @@ services:
       - backend
     restart: unless-stopped
     environment:
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://136.112.92.233:8000/api}
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8000/api}
     networks:
       - dabljaar_network
 
-  # Celery worker — media queue (video processing, HLS transcode)
+  # ─── Celery Worker — Media Queue (video processing, HLS transcode) ─────────
   celery-worker-media:
     build:
       context: ./backend
@@ -221,9 +272,7 @@ services:
     networks:
       - dabljaar_network
 
-  # Celery worker — AI queues (NMT, TTS, pipeline)
-  # STT is now handled by the stt-service microservice via RabbitMQ.
-  # Optional env (not set by default): HF_HOME=/model-cache/hf HF_HUB_DISABLE_XET=1 HF_HUB_ENABLE_HF_TRANSFER=1
+  # ─── Celery Worker — AI Queues (NMT, TTS, pipeline) ───────────────────────
   celery-worker-ai:
     build:
       context: ./backend
@@ -240,6 +289,9 @@ services:
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
+      STT_DEVICE: ${STT_DEVICE:-auto}
+      SILMA_DEVICE: ${SILMA_DEVICE:-auto}
+      STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-auto}
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -280,7 +332,7 @@ services:
     networks:
       - dabljaar_network
 
-  # Flower — Celery monitoring UI
+  # ─── Flower — Celery Monitoring UI ────────────────────────────────────────
   flower:
     build:
       context: ./backend
@@ -291,10 +343,9 @@ services:
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      # Milliseconds; default 1000 is too low when workers are still booting (especially celery-worker-ai).
       FLOWER_INSPECT_TIMEOUT: ${FLOWER_INSPECT_TIMEOUT:-15000}
     ports:
-      - "5555:5555"
+      - "5556:5555"
     depends_on:
       redis:
         condition: service_healthy
