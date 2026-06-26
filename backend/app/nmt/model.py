@@ -1,18 +1,35 @@
 import os
 import logging
 import torch
-from typing import List, Optional
+from typing import Callable, List, Optional
 from threading import Lock
 
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from langdetect import detect, DetectorFactory
 
 from pathlib import Path
-from app.media.storage import get_storage_service
-from app.config import settings
 
 # Seed for consistent langdetect results
 DetectorFactory.seed = 0
+
+
+def _get_backend_settings():
+    from app.config import settings
+    return settings
+
+
+def _make_backend_download_fn() -> Callable:
+    """Returns the backend's async StorageService download function."""
+    import asyncio
+    from app.media.storage import get_storage_service
+
+    def _download(prefix: str, local_path: str, bucket: str) -> bool:
+        storage = get_storage_service()
+        return asyncio.run(
+            storage.download_prefix(prefix, local_path, bucket_name=bucket or "")
+        )
+
+    return _download
 
 logger = logging.getLogger(__name__)
 
@@ -20,37 +37,6 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _download_model_files(
-    storage,
-    file_key: str,
-    local_path: Path,
-    bucket_name: Optional[str] = None,
-) -> bool:
-    """
-    Download all objects under *file_key* prefix into *local_path*.
-
-    Uses ``StorageService.download_prefix`` (S3-compatible or local uploads dir).
-    Safe in Celery: isolated ``asyncio.run()`` with no shared loop state.
-    """
-    import asyncio as _asyncio
-
-    ok = _asyncio.run(
-        storage.download_prefix(file_key, str(local_path), bucket_name=bucket_name or "")
-    )
-    if ok:
-        logger.info(
-            "[NMT] Downloaded model prefix=%s bucket=%s → %s",
-            file_key,
-            bucket_name or getattr(storage, "bucket_name", ""),
-            local_path,
-        )
-    else:
-        logger.warning(
-            "[NMT] download_prefix returned no data for prefix=%s (bucket=%s)",
-            file_key,
-            bucket_name or getattr(storage, "bucket_name", ""),
-        )
-    return ok
 
 # ---------------------------------------------------------------------------
 # Model integrity validation
@@ -68,62 +54,52 @@ def _validate_model_dir(path: str) -> bool:
     return bool(files & _REQUIRED_WEIGHT_FILES) and bool(files & _REQUIRED_TOKENIZER_FILES)
 
 
-def resolve_default_model() -> tuple[str, str]:
+def resolve_default_model(
+    config=None,
+    download_fn: Optional[Callable] = None,
+) -> tuple[str, str]:
+    """Resolve NMT model path: local cache → object storage → HuggingFace Hub.
+
+    config      — settings-like object; defaults to backend's app.config.settings.
+    download_fn — callable(prefix, local_path, bucket) -> bool; defaults to the
+                  backend's async StorageService (lazy-imported only when needed).
     """
-    Resolve the NMT model path using a priority chain:
+    if config is None:
+        config = _get_backend_settings()
 
-    1. Local cache (``NMT_MODEL_LOCAL_PATH``) — fast, no network.
-    2. Object storage download → populate local cache (requires ``STORAGE_BACKEND=s3`` + ``NMT_MODEL_KEY``).
-    3. HuggingFace Hub (``NMT_HF_FALLBACK``) — requires internet access.
-    """
-    local_path  = settings.NMT_MODEL_LOCAL_PATH
-    bucket      = settings.S3_MODELS_BUCKET
-    key         = settings.NMT_MODEL_KEY
-    hf_fallback = settings.NMT_HF_FALLBACK
+    local_path  = config.NMT_MODEL_LOCAL_PATH
+    bucket      = config.S3_MODELS_BUCKET
+    key         = config.NMT_MODEL_KEY
+    hf_fallback = config.NMT_HF_FALLBACK
 
-    logger.info(
-        "[NMT] Resolving model | local_path=%s bucket=%s key=%s",
-        local_path, bucket, key,
-    )
+    logger.info("[NMT] Resolving model | local_path=%s bucket=%s key=%s", local_path, bucket, key)
 
-    # 1. Local cache hit — fastest path, no I/O beyond a directory listing
+    # 1. Local cache hit
     if _validate_model_dir(local_path):
         logger.info("[NMT][CACHE] source=local_disk_hit path=%s", local_path)
         return local_path, "local_disk_hit"
 
-    # 2. Object storage download (S3-compatible: MinIO, GCP interop, AWS)
-    if settings.STORAGE_BACKEND.lower() == "s3" and key:
-        logger.info(
-            "[NMT] Downloading from object storage | bucket=%s key=%s → %s",
-            bucket, key, local_path,
-        )
+    # 2. Object storage download
+    if config.STORAGE_BACKEND.lower() == "s3" and key:
+        logger.info("[NMT] Downloading from object storage | bucket=%s key=%s → %s", bucket, key, local_path)
         try:
             os.makedirs(local_path, exist_ok=True)
-            storage = get_storage_service()
-            _download_model_files(storage, key, Path(local_path), bucket_name=bucket)
-            if _validate_model_dir(local_path):
+            fn = download_fn or _make_backend_download_fn()
+            ok = fn(key, local_path, bucket)
+            if ok and _validate_model_dir(local_path):
                 logger.info("[NMT][CACHE] source=s3_hit path=%s", local_path)
                 return local_path, "s3_hit"
-            logger.warning(
-                "[NMT] Object storage download finished but model validation failed at %s "
-                "(missing weight or tokenizer files). Falling back to HF Hub.",
-                local_path,
-            )
+            logger.warning("[NMT] S3 download done but model validation failed at %s", local_path)
         except Exception as exc:
             logger.error("[NMT] Object storage download failed: %s", exc)
     else:
         logger.warning(
-            "[NMT] Skipping object-storage download (STORAGE_BACKEND=%r, NMT_MODEL_KEY=%r). "
-            "Use STORAGE_BACKEND=s3 and set NMT_MODEL_KEY to use a custom model without internet access.",
-            settings.STORAGE_BACKEND, key,
+            "[NMT] Skipping object-storage download (STORAGE_BACKEND=%r, NMT_MODEL_KEY=%r).",
+            config.STORAGE_BACKEND, key,
         )
 
     # 3. HuggingFace Hub — last resort
-    logger.warning(
-        "[NMT] Falling back to HuggingFace Hub: %s. "
-        "Configure S3_MODELS_BUCKET + NMT_MODEL_KEY to avoid this.",
-        hf_fallback,
-    )
+    logger.warning("[NMT] Falling back to HuggingFace Hub: %s", hf_fallback)
     logger.info("[NMT][CACHE] source=hf_fallback model=%s", hf_fallback)
     return hf_fallback, "hf_fallback"
 
@@ -140,16 +116,29 @@ class NLLBTranslatorWrapper:
     _model = None
     _tokenizer = None
     _lock = Lock()
+    _tokenizer_lock = Lock()
 
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(
+        self,
+        model_name: Optional[str] = None,
+        config=None,
+        download_fn: Optional[Callable] = None,
+    ):
         self._model_name = model_name
+        self._config = config          # None → lazy-load backend settings
+        self._download_fn = download_fn  # None → use backend StorageService
         self._model_source: Optional[str] = None
-        self._device     = None
+        self._device: Optional[str] = None
+
+    def _cfg(self):
+        return self._config if self._config is not None else _get_backend_settings()
 
     @property
     def model_name(self) -> str:
         if self._model_name is None:
-            self._model_name, self._model_source = resolve_default_model()
+            self._model_name, self._model_source = resolve_default_model(
+                config=self._cfg(), download_fn=self._download_fn
+            )
         return self._model_name
 
     @property
@@ -174,7 +163,7 @@ class NLLBTranslatorWrapper:
                     NLLBTranslatorWrapper._tokenizer = AutoTokenizer.from_pretrained(
                         self.model_name,
                         local_files_only=_local,
-                        token=settings.HF_TOKEN or None,
+                        token=self._cfg().HF_TOKEN or None,
                     )
         return NLLBTranslatorWrapper._tokenizer
 
@@ -199,7 +188,7 @@ class NLLBTranslatorWrapper:
                     # float16 saves ~1.3 GB VRAM on GPU
                     model_kwargs: dict = {
                         "local_files_only": _local,
-                        "token": settings.HF_TOKEN or None,
+                        "token": self._cfg().HF_TOKEN or None,
                     }
                     if "cuda" in self.device:
                         model_kwargs["torch_dtype"] = torch.float16
@@ -312,12 +301,14 @@ class NLLBTranslatorWrapper:
     def _translate_word_by_word(self, text: str, src_lang: str, tgt_lang: str) -> str:
         """Last-resort fallback: translate each word individually and join."""
         translated_words = []
+        tgt_token_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
         for word in text.split():
-            self.tokenizer.src_lang = src_lang
-            inputs = self.tokenizer(word, return_tensors="pt").to(self.device)
+            with NLLBTranslatorWrapper._tokenizer_lock:
+                self.tokenizer.src_lang = src_lang
+                inputs = self.tokenizer(word, return_tensors="pt").to(self.device)
             outputs = self.model.generate(
                 **inputs,
-                forced_bos_token_id=self.tokenizer.lang_code_to_id[tgt_lang],
+                forced_bos_token_id=tgt_token_id,
                 max_length=20,
                 num_beams=1,
             )
@@ -337,16 +328,30 @@ class NLLBTranslatorWrapper:
         num_beams: int = 5,
     ) -> str:
         """Performs model inference for a single text string."""
-        self.tokenizer.src_lang = src_lang
-        inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
+        tgt_token_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
+        with NLLBTranslatorWrapper._tokenizer_lock:
+            self.tokenizer.src_lang = src_lang
+            inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
         outputs = self.model.generate(
             **inputs,
-            forced_bos_token_id=self.tokenizer.lang_code_to_id[tgt_lang],
+            forced_bos_token_id=tgt_token_id,
             max_length=max_length,
             num_beams=num_beams,
             early_stopping=True,
         )
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+    def translate_segment(
+        self,
+        text: str,
+        src_lang: Optional[str] = None,
+        tgt_lang: str = "arb_Arab",
+        max_length: int = 512,
+        num_beams: int = 5,
+        english_ratio_threshold: float = 0.5,
+    ) -> str:
+        """Public entry-point for single-segment translation (used by nmt-service worker)."""
+        return self._translate_item(text, src_lang, tgt_lang, max_length, num_beams, english_ratio_threshold)
 
     def _translate_item(
         self,
@@ -409,7 +414,7 @@ class NLLBTranslatorWrapper:
             result = self._run_inference(stripped, item_src_lang, tgt_lang, max_length, num_beams=1)
 
         # 5. Stage 3 — still too many English words → word-by-word fallback
-        fallback_mode = settings.NMT_FALLBACK_MODE
+        fallback_mode = self._cfg().NMT_FALLBACK_MODE
         if fallback_mode == "stage2_only":
             logger.debug("[NMT] stage-3 skipped (NMT_FALLBACK_MODE=stage2_only)")
             return result
