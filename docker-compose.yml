@@ -19,22 +19,6 @@ services:
     networks:
       - dabljaar_network
 
-  # ─── Redis (Celery broker & result backend) ──────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: dabljaar_redis
-    ports:
-      - "16379:6379"
-    volumes:
-      - dabljaar_redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - dabljaar_network
-
   # ─── RabbitMQ (Event Broker) ──────────────────────────────────────────────
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -121,8 +105,8 @@ services:
   # ─── NMT Microservice (Neural Machine Translation) ────────────────────────
   nmt-service:
     build:
-      context: .
-      dockerfile: nmt-service/Dockerfile
+      context: ./nmt-service
+      dockerfile: Dockerfile
     container_name: dabljaar_nmt_service
     environment:
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
@@ -194,9 +178,8 @@ services:
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 60
       REFRESH_TOKEN_EXPIRE_DAYS: 7
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      ENABLE_TTS_BRIDGE: "false"
       STT_SERVICE_URL: "http://stt-service:8001"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
@@ -214,8 +197,6 @@ services:
       - /app/__pycache__
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       minio:
         condition: service_started
@@ -244,122 +225,8 @@ services:
     networks:
       - dabljaar_network
 
-  # ─── Celery Worker — Media Queue (video processing, HLS transcode) ─────────
-  celery-worker-media:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: dabljaar_worker_media
-    entrypoint: []
-    command: celery -A app.jobs.celery_app worker --loglevel=info -Q media --concurrency=${MEDIA_WORKER_CONCURRENCY:-2} --hostname=worker-media@%h
-    environment:
-      MEDIA_WORKER_CONCURRENCY: ${MEDIA_WORKER_CONCURRENCY:-2}
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
-      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET_NAME: dablaja-videos
-      MINIO_SECURE: "false"
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
-      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
-      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
-    volumes:
-      - ./backend:/app
-      - /app/__pycache__
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_started
-    restart: unless-stopped
-    networks:
-      - dabljaar_network
-
-  # ─── Celery Worker — AI TTS Queue (SILMA synthesis via tts_bridge) ──────────
-  celery-worker-ai:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        INSTALL_AI: "true"
-    container_name: dabljaar_worker_ai
-    entrypoint: []
-    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
-    environment:
-      AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
-      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET_NAME: dablaja-videos
-      MINIO_SECURE: "false"
-      S3_ENDPOINT_URL: http://minio:9000
-      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
-      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
-      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
-      SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
-      SILMA_REFERENCE_AUDIO: ${SILMA_REFERENCE_AUDIO:-}
-      SILMA_REFERENCE_TEXT: ${SILMA_REFERENCE_TEXT:-ويدقق النظر في القرآن الكريم وسائر الكتب السماوية ويتبع مسالك الرسل العظام عليهم الصلاة والسلام.}
-      HF_HOME: ${HF_HOME:-/model-cache/hf}
-      HF_HUB_CACHE: ${HF_HUB_CACHE:-/model-cache/hf/hub}
-      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/model-cache/hf/transformers}
-      TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
-    volumes:
-      - ./backend:/app
-      - /app/__pycache__
-      - ai_model_cache:/model-cache
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - dabljaar_network
-
-  # ─── Flower — Celery Monitoring UI (optional: --profile monitoring) ───────
-  flower:
-    profiles: ["monitoring"]
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: dabljaar_flower
-    entrypoint: []
-    command: celery -A app.jobs.celery_app flower --port=5555
-    environment:
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      FLOWER_INSPECT_TIMEOUT: ${FLOWER_INSPECT_TIMEOUT:-15000}
-    ports:
-      - "5556:5555"
-    depends_on:
-      redis:
-        condition: service_healthy
-      celery-worker-media:
-        condition: service_started
-      celery-worker-ai:
-        condition: service_started
-    restart: unless-stopped
-    networks:
-      - dabljaar_network
-
 volumes:
   dabljaar_postgres_data:
-  dabljaar_redis_data:
   dabljaar_minio_data:
   ai_model_cache:
 

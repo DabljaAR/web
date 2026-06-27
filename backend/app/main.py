@@ -74,18 +74,24 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to connect to database during startup", exc_info=True)
         raise
 
-    # Start TTS bridge (temporary — consumes job.start.tts from RabbitMQ, dispatches Celery tasks)
-    try:
-        from app.jobs.tasks.tts_bridge import start_tts_bridge
-        global _tts_bridge_thread
-        _tts_bridge_stop.clear()
-        _tts_bridge_thread = threading.Thread(
-            target=start_tts_bridge, name="tts-bridge", daemon=True
+    # Legacy Celery bridge — disabled by default; use tts-service microservice instead.
+    if os.getenv("ENABLE_TTS_BRIDGE", "false").lower() == "true":
+        try:
+            from app.jobs.tasks.tts_bridge import start_tts_bridge
+            global _tts_bridge_thread
+            _tts_bridge_stop.clear()
+            _tts_bridge_thread = threading.Thread(
+                target=start_tts_bridge, name="tts-bridge", daemon=True
+            )
+            _tts_bridge_thread.start()
+            logger.info("[TTS-BRIDGE] Bridge thread started (Celery path)")
+        except Exception as _bridge_exc:
+            logger.warning("[TTS-BRIDGE] Could not start bridge: %s", _bridge_exc)
+    else:
+        logger.info(
+            "[TTS-BRIDGE] Disabled (ENABLE_TTS_BRIDGE=false). "
+            "Pipelines that need TTS require a tts-service worker."
         )
-        _tts_bridge_thread.start()
-        logger.info("[TTS-BRIDGE] Bridge thread started")
-    except Exception as _bridge_exc:
-        logger.warning("[TTS-BRIDGE] Could not start bridge: %s", _bridge_exc)
 
     try:
         yield

@@ -158,6 +158,16 @@ func (f *fixture) shutdown() {
 // ─── Per-test Helpers ─────────────────────────────────────────────────────────
 
 func (f *fixture) createJob(t *testing.T, id string, jobType db.JobType, parentID *string) {
+	f.createJobWithInput(t, id, jobType, parentID, nil)
+}
+
+func (f *fixture) createJobWithInput(
+	t *testing.T,
+	id string,
+	jobType db.JobType,
+	parentID *string,
+	inputData map[string]any,
+) {
 	t.Helper()
 	now := time.Now().UTC()
 	j := &db.Job{
@@ -167,6 +177,7 @@ func (f *fixture) createJob(t *testing.T, id string, jobType db.JobType, parentI
 		JobType:     jobType,
 		Status:      db.JobStatusQueued,
 		ParentJobID: parentID,
+		InputData:   inputData,
 		MaxRetries:  3,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -297,6 +308,89 @@ func TestIntegration_T02_FullPipeline_ParentCompleted(t *testing.T) {
 	}
 	if j.Progress != 100.0 {
 		t.Errorf("parent Progress = %v, want 100.0", j.Progress)
+	}
+}
+
+// CaptionsAndTranslation: parent completes after NMT (no TTS stage).
+func TestIntegration_CaptionsAndTranslation_ParentCompletedAfterNMT(t *testing.T) {
+	parentID := "inttest-cat-parent"
+	sttID    := "inttest-cat-stt"
+	nmtID    := "inttest-cat-nmt"
+
+	global.createJobWithInput(t, parentID, db.JobTypeFullDubbingPipeline, nil, map[string]any{
+		"output_type": "captionsAndTranslation",
+	})
+	global.createJob(t, sttID, db.JobTypeSTTTranscribe, strPtr(parentID))
+	global.createJob(t, nmtID, db.JobTypeNMTTranslate, strPtr(parentID))
+
+	global.publish(t, "job.created", map[string]string{"job_id": parentID})
+	if _, ok := global.waitStatus(parentID, db.JobStatusProcessing, 5*time.Second); !ok {
+		t.Fatal("parent never became PROCESSING")
+	}
+
+	stages := []struct{ id, typ string }{
+		{sttID, "STT_TRANSCRIBE"},
+		{nmtID, "NMT_TRANSLATE"},
+	}
+	for _, s := range stages {
+		global.publish(t, "job.results.worker", pipeline.WorkerResultPayload{
+			JobID: s.id, JobType: s.typ, Status: "COMPLETED",
+			OutputData: map[string]any{"stage": s.typ, "ok": true},
+		})
+		if _, ok := global.waitStatus(s.id, db.JobStatusCompleted, 5*time.Second); !ok {
+			t.Fatalf("stage %s never completed", s.typ)
+		}
+	}
+
+	j, ok := global.waitStatus(parentID, db.JobStatusCompleted, 5*time.Second)
+	if !ok {
+		t.Fatal("parent never became COMPLETED after NMT")
+	}
+	if j.CompletedAt == nil {
+		t.Error("parent CompletedAt must be set")
+	}
+}
+
+// TranslationAndTTS: parent completes after TTS (no merge stage).
+func TestIntegration_TranslationAndTTS_ParentCompletedAfterTTS(t *testing.T) {
+	parentID := "inttest-tat-parent"
+	sttID    := "inttest-tat-stt"
+	nmtID    := "inttest-tat-nmt"
+	ttsID    := "inttest-tat-tts"
+
+	global.createJobWithInput(t, parentID, db.JobTypeFullDubbingPipeline, nil, map[string]any{
+		"output_type": "translationAndTTS",
+	})
+	global.createJob(t, sttID, db.JobTypeSTTTranscribe, strPtr(parentID))
+	global.createJob(t, nmtID, db.JobTypeNMTTranslate, strPtr(parentID))
+	global.createJob(t, ttsID, db.JobTypeTTSSynthesize, strPtr(parentID))
+
+	global.publish(t, "job.created", map[string]string{"job_id": parentID})
+	if _, ok := global.waitStatus(parentID, db.JobStatusProcessing, 5*time.Second); !ok {
+		t.Fatal("parent never became PROCESSING")
+	}
+
+	stages := []struct{ id, typ string }{
+		{sttID, "STT_TRANSCRIBE"},
+		{nmtID, "NMT_TRANSLATE"},
+		{ttsID, "TTS_SYNTHESIZE"},
+	}
+	for _, s := range stages {
+		global.publish(t, "job.results.worker", pipeline.WorkerResultPayload{
+			JobID: s.id, JobType: s.typ, Status: "COMPLETED",
+			OutputData: map[string]any{"stage": s.typ, "ok": true},
+		})
+		if _, ok := global.waitStatus(s.id, db.JobStatusCompleted, 5*time.Second); !ok {
+			t.Fatalf("stage %s never completed", s.typ)
+		}
+	}
+
+	j, ok := global.waitStatus(parentID, db.JobStatusCompleted, 5*time.Second)
+	if !ok {
+		t.Fatal("parent never became COMPLETED after TTS")
+	}
+	if j.CompletedAt == nil {
+		t.Error("parent CompletedAt must be set")
 	}
 }
 

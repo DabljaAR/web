@@ -13,6 +13,7 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"testing"
 	"time"
 	"fmt"
@@ -75,70 +76,42 @@ func TestNextStageRoutes_AllStagesPresent(t *testing.T) {
 // ─── Unit Tests: WorkerResultPayload JSON parsing ────────────────────────────
 
 func TestWorkerResultPayload_Unmarshal(t *testing.T) {
-	cases := []struct {
-		name        string
-		body        []byte
-		wantJobID   string
-		wantStatus  string
-		wantErr     bool
-	}{
-		{
-			name: "valid success payload",
-			body: mustMarshal( map[string]any{
-				"job_id":   "abc-123",
-				"job_type": "STT_TRANSCRIBE",
-				"status":   "COMPLETED",
-				"output_data": map[string]any{
-					"transcript": "hello world",
-				},
-			}),
-			wantJobID:  "abc-123",
-			wantStatus: "COMPLETED",
-		},
-		{
-			name: "valid failure payload",
-			body: mustMarshal( map[string]any{
-				"job_id":   "xyz-456",
-				"job_type": "NMT_TRANSLATE",
-				"status":   "FAILED",
-				"error":    "CUDA out of memory",
-			}),
-			wantJobID:  "xyz-456",
-			wantStatus: "FAILED",
-		},
-		{
-			name:    "malformed JSON",
-			body:    []byte(`{bad json`),
-			wantErr: true,
-		},
-		{
-			name:    "empty body",
-			body:    []byte(`{}`),
-			wantJobID:  "",
-			wantStatus: "",
-		},
+	fixturePath := "testdata/worker_result_payload.json"
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", fixturePath, err)
+	}
+
+	var cases []struct {
+		Description   string         `json:"description"`
+		Input         map[string]any `json:"input"`
+		ExpectJobID   string         `json:"expect_job_id"`
+		ExpectStatus  string         `json:"expect_status"`
+		ExpectError   string         `json:"expect_error"`
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var p pipeline.WorkerResultPayload
-			err := json.Unmarshal(tc.body, &p)
-
-			if tc.wantErr {
-				if err == nil {
-					t.Error("expected unmarshal error, got nil")
-				}
-				return
+		t.Run(tc.Description, func(t *testing.T) {
+			body, err := json.Marshal(tc.Input)
+			if err != nil {
+				t.Fatalf("marshal input: %v", err)
 			}
 
-			if err != nil {
+			var p pipeline.WorkerResultPayload
+			if err := json.Unmarshal(body, &p); err != nil {
 				t.Fatalf("unexpected unmarshal error: %v", err)
 			}
-			if p.JobID != tc.wantJobID {
-				t.Errorf("JobID: got %q, want %q", p.JobID, tc.wantJobID)
+			if p.JobID != tc.ExpectJobID {
+				t.Errorf("JobID: got %q, want %q", p.JobID, tc.ExpectJobID)
 			}
-			if p.Status != tc.wantStatus {
-				t.Errorf("Status: got %q, want %q", p.Status, tc.wantStatus)
+			if p.Status != tc.ExpectStatus {
+				t.Errorf("Status: got %q, want %q", p.Status, tc.ExpectStatus)
+			}
+			if p.Error != tc.ExpectError {
+				t.Errorf("Error: got %q, want %q", p.Error, tc.ExpectError)
 			}
 		})
 	}

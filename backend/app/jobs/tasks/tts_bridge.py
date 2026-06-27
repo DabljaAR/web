@@ -18,11 +18,11 @@ import time
 from datetime import datetime, timezone
 
 import pika
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
 from app.config import settings
 from app.jobs.celery_app import celery_app
+from app.shared.dablja_worker import consume_loop, make_engine
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +32,12 @@ BINDING_KEY = "job.start.tts"
 RESULT_KEY = "job.results.tts"
 JOB_TYPE = "TTS_SYNTHESIZE"
 
+_SYNC_DB_URL = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+_ENGINE, _SessionLocal = make_engine(_SYNC_DB_URL)
+
 
 def _make_db():
-    engine = create_engine(
-        settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
-    )
-    return engine, sessionmaker(bind=engine)
+    return _ENGINE, _SessionLocal
 
 
 def _utcnow():
@@ -83,54 +83,50 @@ def on_message(channel, method, _properties, body):
     logger.info("[TTS-BRIDGE] Received job %s", tts_job_id)
 
     try:
-        engine, SessionLocal = _make_db()
-        try:
-            with SessionLocal() as db:
-                jrow = db.execute(
-                    text(
-                        "SELECT video_id, input_data, status"
-                        " FROM jobs WHERE id = :jid"
-                    ),
-                    {"jid": tts_job_id},
-                ).fetchone()
-                if not jrow:
-                    raise ValueError(f"TTS child job {tts_job_id} not found")
+        with _SessionLocal() as db:
+            jrow = db.execute(
+                text(
+                    "SELECT video_id, input_data, status"
+                    " FROM jobs WHERE id = :jid"
+                ),
+                {"jid": tts_job_id},
+            ).fetchone()
+            if not jrow:
+                raise ValueError(f"TTS child job {tts_job_id} not found")
 
-                if jrow[2] == "COMPLETED":
-                    logger.info("[TTS-BRIDGE] job=%s already COMPLETED — skipping", tts_job_id)
-                    channel.basic_ack(delivery_tag=method.delivery_tag)
-                    return
+            if jrow[2] == "COMPLETED":
+                logger.info("[TTS-BRIDGE] job=%s already COMPLETED — skipping", tts_job_id)
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+                return
 
-                video_id = jrow[0]
-                input_data = jrow[1] or {}
-                task_id = input_data.get("task_id")
+            video_id = jrow[0]
+            input_data = jrow[1] or {}
+            task_id = input_data.get("task_id")
 
-                if not task_id:
-                    raise ValueError(f"No task_id in input_data for job {tts_job_id}")
+            if not task_id:
+                raise ValueError(f"No task_id in input_data for job {tts_job_id}")
 
-                vt = db.execute(
-                    text(
-                        "SELECT segments, output_type FROM video_tasks WHERE id = :tid"
-                    ),
-                    {"tid": task_id},
-                ).fetchone()
-                if not vt or not vt[0]:
-                    raise ValueError(f"No translated segments in video_task {task_id}")
+            vt = db.execute(
+                text(
+                    "SELECT segments, output_type FROM video_tasks WHERE id = :tid"
+                ),
+                {"tid": task_id},
+            ).fetchone()
+            if not vt or not vt[0]:
+                raise ValueError(f"No translated segments in video_task {task_id}")
 
-                translated_segments = list(vt[0])
-                output_type = vt[1] or "fullDubbing"
+            translated_segments = list(vt[0])
+            output_type = vt[1] or "fullDubbing"
 
-                # Mark TTS child as PROCESSING
-                db.execute(
-                    text(
-                        "UPDATE jobs SET status='PROCESSING', started_at=:now, updated_at=:now"
-                        " WHERE id = :jid"
-                    ),
-                    {"now": _utcnow(), "jid": tts_job_id},
-                )
-                db.commit()
-        finally:
-            engine.dispose()
+            # Mark TTS child as PROCESSING
+            db.execute(
+                text(
+                    "UPDATE jobs SET status='PROCESSING', started_at=:now, updated_at=:now"
+                    " WHERE id = :jid"
+                ),
+                {"now": _utcnow(), "jid": tts_job_id},
+            )
+            db.commit()
 
         total = len(translated_segments)
         enqueued_at = time.time()
@@ -167,19 +163,15 @@ def on_message(channel, method, _properties, body):
     except Exception as exc:
         logger.exception("[TTS-BRIDGE] Job %s failed: %s", tts_job_id, exc)
         try:
-            engine, SessionLocal = _make_db()
-            try:
-                with SessionLocal() as db:
-                    db.execute(
-                        text(
-                            "UPDATE jobs SET status='FAILED', error_message=:err,"
-                            " completed_at=:now, updated_at=:now WHERE id = :jid"
-                        ),
-                        {"err": str(exc), "now": _utcnow(), "jid": tts_job_id},
-                    )
-                    db.commit()
-            finally:
-                engine.dispose()
+            with _SessionLocal() as db:
+                db.execute(
+                    text(
+                        "UPDATE jobs SET status='FAILED', error_message=:err,"
+                        " completed_at=:now, updated_at=:now WHERE id = :jid"
+                    ),
+                    {"err": str(exc), "now": _utcnow(), "jid": tts_job_id},
+                )
+                db.commit()
         except Exception as db_exc:
             logger.error("[TTS-BRIDGE] Could not mark job %s failed: %s", tts_job_id, db_exc)
 
@@ -190,27 +182,11 @@ def on_message(channel, method, _properties, body):
 
 def start_tts_bridge():
     """Connect to RabbitMQ, declare topology, start consuming (blocking)."""
-    logger.info("[TTS-BRIDGE] Connecting to RabbitMQ: %s", settings.RABBITMQ_URL)
-
-    params = pika.URLParameters(settings.RABBITMQ_URL)
-    params.heartbeat = 600
-    params.blocked_connection_timeout = 300
-
-    connection = pika.BlockingConnection(params)
-    channel = connection.channel()
-
-    channel.exchange_declare(EXCHANGE, exchange_type="topic", durable=True)
-    channel.exchange_declare("dablja.jobs.dlx", exchange_type="direct", durable=True)
-
-    channel.queue_declare(
+    consume_loop(
+        settings.RABBITMQ_URL,
         TTS_QUEUE,
-        durable=True,
-        arguments={"x-dead-letter-exchange": "dablja.jobs.dlx"},
+        BINDING_KEY,
+        EXCHANGE,
+        on_message,
+        service_name="TTS-BRIDGE",
     )
-    channel.queue_bind(TTS_QUEUE, EXCHANGE, BINDING_KEY)
-
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(TTS_QUEUE, on_message)
-
-    logger.info("[TTS-BRIDGE] Waiting for jobs on '%s' (queue='%s')", BINDING_KEY, TTS_QUEUE)
-    channel.start_consuming()
