@@ -6,7 +6,6 @@
 #   ./run_integration_tests.sh            # full run
 #   ./run_integration_tests.sh --skip-build  # reuse existing images
 #   ./run_integration_tests.sh --orchestrator-only  # only orchestrator tests
-#   ./run_integration_tests.sh --worker-db-only     # only worker DB tests
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -28,9 +27,8 @@ for arg in "$@"; do
     case "$arg" in
         --skip-build) SKIP_BUILD="--no-build" ;;
         --orchestrator-only) TEST_PATH="tests/integration/test_orchestrator.py" ;;
-        --worker-db-only) TEST_PATH="tests/integration/test_worker_db.py" ;;
         *)
-            echo "Usage: $0 [--skip-build] [--orchestrator-only] [--worker-db-only]"
+            echo "Usage: $0 [--skip-build] [--orchestrator-only]"
             exit 1
             ;;
     esac

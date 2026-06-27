@@ -568,15 +568,15 @@ def tts_combine_results(
             patch_kwargs["error_message"] = error_message
         BaseJobTask._patch_task(task_id, task_status, **patch_kwargs)
 
-    # ── Publish merge result to RabbitMQ for orchestrator ──────────────────
+    # ── Publish TTS result to RabbitMQ for orchestrator ────────────────────────
     try:
-        from app.shared.rabbitmq import publish_merge_result
+        from app.shared.rabbitmq import publish_tts_result
         if error_message:
-            publish_merge_result(job_id, "FAILED", output, error=error_message)
+            publish_tts_result(job_id, "FAILED", output, error=error_message)
         else:
-            publish_merge_result(job_id, "COMPLETED", output)
+            publish_tts_result(job_id, "COMPLETED", output)
     except Exception as _pub_exc:
-        logger.warning("[TTS] Could not publish merge result to RabbitMQ: %s", _pub_exc)
+        logger.warning("[TTS] Could not publish TTS result to RabbitMQ: %s", _pub_exc)
 
     logger.info(
         "[TTS] combined | job=%s | segments=%d | failed=%d | merged=%s",
