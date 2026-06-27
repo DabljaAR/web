@@ -83,10 +83,9 @@ services:
     environment:
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
       DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/dabljaar"
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
       S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STT_MODEL_SIZE: ${STT_MODEL_SIZE:-small}
@@ -101,7 +100,13 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - nmt_model_cache:/model-cache
+      - ai_model_cache:/model-cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -122,10 +127,9 @@ services:
     environment:
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
       DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/dabljaar"
-      MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
       S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
@@ -140,7 +144,13 @@ services:
     ports:
       - "8002:8002"
     volumes:
-      - nmt_model_cache:/model-cache
+      - ai_model_cache:/model-cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -176,10 +186,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       args:
-        INSTALL_AI: "true"
+        INSTALL_AI: "false"
     container_name: dabljaar_backend
     environment:
-      INSTALL_AI: "true"
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
       ALGORITHM: HS256
@@ -272,7 +281,7 @@ services:
     networks:
       - dabljaar_network
 
-  # ─── Celery Worker — AI Queues (NMT, TTS, pipeline) ───────────────────────
+  # ─── Celery Worker — AI TTS Queue (SILMA synthesis via tts_bridge) ──────────
   celery-worker-ai:
     build:
       context: ./backend
@@ -281,17 +290,14 @@ services:
         INSTALL_AI: "true"
     container_name: dabljaar_worker_ai
     entrypoint: []
-    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q pipeline,ai_nmt,ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
+    command: celery -A app.jobs.celery_app worker --pool=solo --loglevel=info -Q ai_tts --concurrency=${AI_WORKER_CONCURRENCY:-1} --hostname=worker-ai@%h
     environment:
       AI_WORKER_CONCURRENCY: ${AI_WORKER_CONCURRENCY:-1}
-      INSTALL_AI: "true"
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
-      STT_DEVICE: ${STT_DEVICE:-auto}
-      SILMA_DEVICE: ${SILMA_DEVICE:-auto}
-      STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-auto}
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
@@ -301,26 +307,17 @@ services:
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
-      NMT_MODEL_LOCAL_PATH: /model-cache/nmt-v4
-      NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
-      NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
-      NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
-      NMT_LENGTH_ADJUST_ENABLED: ${NMT_LENGTH_ADJUST_ENABLED:-true}
-      NMT_LENGTH_ADJUST_SCALE: ${NMT_LENGTH_ADJUST_SCALE:-0.9}
-      NMT_LENGTH_ADJUST_MAX_ITERS: ${NMT_LENGTH_ADJUST_MAX_ITERS:-5}
-      HF_TOKEN: ${HF_TOKEN:-}
+      SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
+      SILMA_REFERENCE_AUDIO: ${SILMA_REFERENCE_AUDIO:-}
+      SILMA_REFERENCE_TEXT: ${SILMA_REFERENCE_TEXT:-ويدقق النظر في القرآن الكريم وسائر الكتب السماوية ويتبع مسالك الرسل العظام عليهم الصلاة والسلام.}
       HF_HOME: ${HF_HOME:-/model-cache/hf}
-      HUGGINGFACE_HUB_CACHE: ${HUGGINGFACE_HUB_CACHE:-/model-cache/hf/hub}
+      HF_HUB_CACHE: ${HF_HUB_CACHE:-/model-cache/hf/hub}
       TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/model-cache/hf/transformers}
-      XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
       TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
-      CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
     volumes:
       - ./backend:/app
       - /app/__pycache__
-      - nmt_model_cache:/model-cache
+      - ai_model_cache:/model-cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -328,12 +325,15 @@ services:
         condition: service_healthy
       minio:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - dabljaar_network
 
-  # ─── Flower — Celery Monitoring UI ────────────────────────────────────────
+  # ─── Flower — Celery Monitoring UI (optional: --profile monitoring) ───────
   flower:
+    profiles: ["monitoring"]
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -361,7 +361,7 @@ volumes:
   dabljaar_postgres_data:
   dabljaar_redis_data:
   dabljaar_minio_data:
-  nmt_model_cache:
+  ai_model_cache:
 
 networks:
   dabljaar_network:

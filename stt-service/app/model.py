@@ -5,20 +5,68 @@ Loads the model lazily on first transcription request and reuses it across jobs.
 import logging
 import os
 import time
+from pathlib import Path
 from threading import Lock
 from typing import Optional
+
+import boto3
+from botocore.config import Config as BotoConfig
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
+def _download_model_from_s3(prefix: str, local_path: str, bucket: str) -> bool:
+    """Download Whisper weights from object storage (mirrors nmt-service pattern)."""
+    client = boto3.client(
+        "s3",
+        endpoint_url=settings.s3_endpoint(),
+        aws_access_key_id=settings.s3_access_key(),
+        aws_secret_access_key=settings.s3_secret_key(),
+        config=BotoConfig(signature_version="s3v4"),
+        region_name="us-east-1",
+    )
+    paginator = client.get_paginator("list_objects_v2")
+    downloaded = 0
+    prefix = prefix.strip("/")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            rel = key[len(prefix):].lstrip("/")
+            if not rel:
+                continue
+            dest = Path(local_path) / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            client.download_file(bucket, key, str(dest))
+            downloaded += 1
+    if downloaded > 0:
+        logger.info(
+            "[STT] Downloaded %d files from s3://%s/%s → %s",
+            downloaded, bucket, prefix, local_path,
+        )
+    return downloaded > 0
+
+
 def _resolve_model_path() -> str:
-    """Return local cache path if valid, otherwise the HuggingFace model id."""
+    """Return local cache path if valid, otherwise S3 download or HuggingFace model id."""
     local = (settings.STT_MODEL_LOCAL_PATH or "").strip()
     if local and os.path.isdir(local) and _has_model_files(local):
         logger.info("[STT] Using cached model at %s", local)
         return local
+
+    model_key = (settings.STT_MODEL_KEY or "").strip()
+    bucket = (settings.S3_MODELS_BUCKET or "").strip()
+    if local and model_key and bucket:
+        try:
+            os.makedirs(local, exist_ok=True)
+            if _download_model_from_s3(model_key, local, bucket) and _has_model_files(local):
+                logger.info("[STT] Model downloaded from S3 to %s", local)
+                return local
+            logger.warning("[STT] S3 download for %s did not yield a valid model at %s", model_key, local)
+        except Exception as exc:
+            logger.error("[STT] S3 model download failed: %s", exc)
+
     logger.info("[STT] Falling back to HuggingFace model id: %s", settings.STT_MODEL_SIZE)
     return settings.STT_MODEL_SIZE
 
