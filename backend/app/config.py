@@ -262,8 +262,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
 
-    # ========== RABBITMQ (Orchestrator event bus) ==========
-    RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+    # ========== RABBITMQ (Go orchestrator + native workers) ==========
+    RABBITMQ_URL: str = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
 
     # ========== STT MICROSERVICE ==========
     STT_SERVICE_URL: str = os.getenv("STT_SERVICE_URL", "http://stt-service:8001")
