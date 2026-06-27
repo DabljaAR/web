@@ -46,8 +46,8 @@ def publish_job_created(job_id: str) -> bool:
         return False
 
 
-def publish_merge_result(job_id: str, status: str, output_data: dict, error: str | None = None) -> bool:
-    """Publish job.results.merge so the orchestrator marks the pipeline complete."""
+def publish_tts_result(job_id: str, status: str, output_data: dict, error: str | None = None) -> bool:
+    """Publish job.results.tts after the bridged TTS combine (includes merge) finishes."""
     try:
         payload: dict = {
             "job_id": job_id,
@@ -65,7 +65,7 @@ def publish_merge_result(job_id: str, status: str, output_data: dict, error: str
         channel.exchange_declare(EXCHANGE, exchange_type="topic", durable=True)
         channel.basic_publish(
             exchange=EXCHANGE,
-            routing_key="job.results.merge",
+            routing_key="job.results.tts",
             body=json.dumps(payload),
             properties=pika.BasicProperties(
                 content_type="application/json",
@@ -73,8 +73,8 @@ def publish_merge_result(job_id: str, status: str, output_data: dict, error: str
             ),
         )
         connection.close()
-        logger.info("[RabbitMQ] Published job.results.merge for job %s", job_id)
+        logger.info("[RabbitMQ] Published job.results.tts for job %s", job_id)
         return True
     except Exception as exc:
-        logger.error("[RabbitMQ] Failed to publish job.results.merge for %s: %s", job_id, exc)
+        logger.error("[RabbitMQ] Failed to publish job.results.tts for %s: %s", job_id, exc)
         return False

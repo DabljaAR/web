@@ -33,7 +33,7 @@ pytestmark = [
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-STAGES = ["stt", "nmt", "tts", "merge"]
+STAGES = ["stt", "nmt", "tts"]
 ROUTES = {s: f"job.start.{s}" for s in STAGES}
 RESULT_KEYS = {s: f"job.results.{s}" for s in STAGES}
 JOB_TYPES = {
@@ -52,7 +52,10 @@ FINAL_TIMEOUT = 10  # seconds to wait for parent job COMPLETED
 
 @pytest.mark.asyncio
 async def test_orchestrator_state_machine(pg_cursor, pg_conn, rmq_channel):
-    """Drive the orchestrator through all 4 pipeline stages via real messages.
+    """Drive the orchestrator through all pipeline stages via real messages.
+
+    fullDubbing ends at TTS while the bridged Celery path performs merge inside
+    tts_combine_results — no separate merge stage is dispatched.
 
     The test subscribes to ``job.start.*`` (triggers) and ``job.results.*``
     (results), creates a pipeline job in PostgreSQL, publishes ``job.created``,
@@ -109,7 +112,7 @@ async def test_orchestrator_state_machine(pg_cursor, pg_conn, rmq_channel):
             "error": "",
         })
 
-    # All 4 stages completed — verify parent pipeline job is COMPLETED
+    # All stages completed — verify parent pipeline job is COMPLETED
     status = _wait_for_status(pipeline_id, "COMPLETED", timeout=FINAL_TIMEOUT)
     assert status == "COMPLETED", (
         f"Pipeline job ended with status {status}, expected COMPLETED"
