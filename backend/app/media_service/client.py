@@ -130,5 +130,15 @@ class MediaServiceClient:
             resp.raise_for_status()
             return resp.json()["url"]
 
+    async def preprocess(self, video_id: str, file_key: str, user_id: int) -> dict:
+        """Full video preprocessing via the media microservice."""
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/preprocess",
+                json={"video_id": video_id, "file_key": file_key, "user_id": user_id},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
 
 media_client = MediaServiceClient()

@@ -24,7 +24,7 @@ ENV UV_LINK_MODE=copy \
 # Install all AI deps via uv (pulls torch>=2.11+cu130 as a side effect — overridden below)
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-install-project --group ai
+    uv sync --no-install-project --group ai
 
 # Replace torch with cu118 build that supports Pascal (sm_61 / GTX 1080 Ti).
 # --force-reinstall overwrites the cu130 torch pulled in by uv above.

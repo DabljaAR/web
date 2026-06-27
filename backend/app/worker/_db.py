@@ -12,7 +12,7 @@ from app.config import settings
 
 # Ensure SQLAlchemy mapper knows about the Video model so FK resolution
 # on jobs.video_id → videos.id works in worker processes.
-from app.media.models import Video  # noqa: F401
+from app.videos.models import Video  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def _get_job_model():
 
 
 def _get_video_model():
-    from app.media.models import Video
+    from app.videos.models import Video
     return Video
 
 

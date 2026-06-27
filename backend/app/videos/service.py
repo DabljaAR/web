@@ -29,165 +29,102 @@ def _resolve_processing_mode(output_type: str) -> str:
 
 
 async def process_video_task(video_id: str, file_path_key: str, options: dict = None):
-    """
-    Background task logic. It creates its own DB session.
-    """
-    logger.info(f"Starting processing for video {video_id}")
-    storage = get_storage_service()
-    ffmpeg = FFmpegService()
-    
+    """Background task: delegate preprocessing to media-service, then create pipeline jobs."""
+    import asyncio
+    from app.media_service.client import media_client
+    logger.info(f"Starting preprocessing for video {video_id} via media-service")
+
     async with AsyncSessionLocal() as db:
         try:
-            # 1. Update status to PROCESSING
             video = await db.get(Video, video_id)
             if not video:
                 logger.error(f"Video {video_id} not found during processing")
                 return
-            
-            video.status = VideoStatus.PROCESSING
+
+            user_id = video.user_id
             await db.commit()
 
-            # 2. Prepare file
-            with tempfile.TemporaryDirectory() as temp_dir:
-                local_video_path = Path(temp_dir) / "input_video"
-                downloaded = await storage.download(file_path_key, str(local_video_path))
-                if not downloaded:
-                    local_video_path = Path(storage.get_absolute_path(file_path_key))
+            result = None
+            last_error = None
+            await asyncio.sleep(5)
+            for attempt in range(10):
+                try:
+                    result = await media_client.preprocess(video_id, file_path_key, user_id)
+                    break
+                except Exception as e:
+                    last_error = e
+                    delay = min(5 * (2 ** attempt), 60)
+                    logger.warning("Preprocess attempt %d/10 for %s failed: %s — retry in %ds", attempt + 1, video_id, e, delay)
+                    if attempt < 9:
+                        await asyncio.sleep(delay)
+            if result is None:
+                raise RuntimeError(f"All connection attempts failed: {last_error}")
+            logger.info(f"Media preprocessing completed for {video_id}: {result.get('status')}")
 
-                # 3. Extract Metadata
-                metadata = await ffmpeg.get_metadata(str(local_video_path))
-                
-                video.duration = metadata.duration
-                video.width = metadata.width
-                video.height = metadata.height
-                video.size_bytes = metadata.size
-                video.format = metadata.format
-                video.codec = metadata.codec
-                video.frame_rate = metadata.frame_rate
-                
-                # Metadata Done - Commit metadata
+            if result.get("status") == "FAILED":
+                raise RuntimeError(result.get("error", "Media preprocessing failed"))
+
+            # Trigger pipeline if requested (skip for uploadOnly)
+            if options and video.media_type in [MediaType.VIDEO, MediaType.AUDIO]:
+                output_type = options.get("output_type", "fullDubbing")
+                if output_type == "uploadOnly":
+                    logger.info(f"Skipping pipeline for {video_id} — upload-only mode")
+                    return
+                processing_mode = _resolve_processing_mode(output_type)
+                target_lang = options.get("target_lang", "arb_Arab")
+                audio_key = result.get("audio_key") or file_path_key
+
+                logger.info("Triggering pipeline with output_type=%s processing_mode=%s for %s", output_type, processing_mode, video_id)
+
+                from app.tasks.models import VideoTask, TaskStatus
+                video_task = VideoTask(
+                    id=str(uuid.uuid4()),
+                    video_id=video_id,
+                    user_id=user_id,
+                    source_lang=options.get("source_lang"),
+                    target_lang=target_lang,
+                    output_type=output_type,
+                    processing_mode=processing_mode,
+                    num_beams=int(options.get("num_beams", 5)),
+                    english_ratio_threshold=float(options.get("english_ratio_threshold", 0.5)),
+                    status=TaskStatus.QUEUED,
+                )
+                db.add(video_task)
+                await db.flush()
+
+                parent_job_id = str(uuid.uuid4())
+                parent_job = Job(
+                    id=parent_job_id,
+                    video_id=video_id,
+                    user_id=user_id,
+                    job_type=JobType.FULL_DUBBING_PIPELINE,
+                    status=JobStatus.QUEUED,
+                    progress=0.0,
+                    input_data={"output_type": output_type, "processing_mode": processing_mode, "target_lang": target_lang},
+                )
+                db.add(parent_job)
+
+                stt_job_id = str(uuid.uuid4())
+                stt_job = Job(
+                    id=stt_job_id,
+                    video_id=video_id,
+                    user_id=user_id,
+                    job_type=JobType.STT_TRANSCRIBE,
+                    status=JobStatus.QUEUED,
+                    parent_job_id=parent_job_id,
+                    input_data={**options, "task_id": video_task.id, "audio_key": audio_key, "target_lang": target_lang, "processing_mode": processing_mode},
+                )
+                db.add(stt_job)
+                video_task.root_job_id = parent_job_id
                 await db.commit()
-                await db.refresh(video)
-                
-                audio_key = None
-                thumbnail_key = None
-                
-                logger.info(f"Media type: {video.media_type}")
 
-                # Processing based on Media Type
-                if video.media_type == MediaType.VIDEO:
-                    # 4. Extract Audio
-                    if metadata.audio_present:
-                        logger.info("Audio present, extracting...")
-                        
-                        audio_filename = f"{video_id}.mp3"
-                        audio_local_path = Path(temp_dir) / audio_filename
-                        success = await ffmpeg.extract_audio(str(local_video_path), str(audio_local_path))
-                        
-                        logger.info(f"Audio extraction success: {success}")
-                        if success and audio_local_path.exists():
-                             audio_key = await storage.save_file(str(audio_local_path), directory=f"audio/{video.user_id}")
-                    
-                    # 5. Generate Thumbnail
-                    thumbnail_filename = f"{video_id}.jpg"
-                    thumbnail_local_path = Path(temp_dir) / thumbnail_filename
-                    success = await ffmpeg.generate_thumbnail(str(local_video_path), str(thumbnail_local_path))
-                    if success:
-                        thumbnail_key = await storage.save_file(str(thumbnail_local_path), directory=f"thumbnails/{video.user_id}")
-                        
-                    video.audio_path = audio_key
-                    video.thumbnail_path = thumbnail_key
-
-                elif video.media_type == MediaType.AUDIO:
-                     # Audio specific steps if any
-                     # If it's pure audio, we might want to skip extraction but maybe validate?
-                     logger.info("Processing AUDIO type")
-
-                elif video.media_type == MediaType.TEXT:
-                     logger.info("Processing TEXT type")
-
-                video.status = VideoStatus.COMPLETED
+                from app.shared.rabbitmq import publish_job_created
+                publish_job_created(parent_job_id)
                 await db.commit()
-                logger.info(f"Processing completed for {video.media_type} {video_id}")
-
-                # 6. Trigger pipeline if requested (skip for uploadOnly)
-                if options and video.media_type in [MediaType.VIDEO, MediaType.AUDIO]:
-                    output_type = options.get("output_type", "fullDubbing")
-                    if output_type == "uploadOnly":
-                        logger.info(f"Skipping pipeline for {video_id} — upload-only mode")
-                        return
-                    processing_mode = _resolve_processing_mode(output_type)
-                    target_lang = options.get("target_lang", "arb_Arab")
-                    logger.info(
-                        "Triggering pipeline with output_type=%s processing_mode=%s for %s",
-                        output_type,
-                        processing_mode,
-                        video_id,
-                    )
-
-                    # Create VideoTask as single source-of-truth for this pipeline run
-                    from app.tasks.models import VideoTask, TaskStatus
-                    video_task = VideoTask(
-                        id=str(uuid.uuid4()),
-                        video_id=video_id,
-                        user_id=video.user_id,
-                        source_lang=options.get("source_lang"),
-                        target_lang=target_lang,
-                        output_type=output_type,
-                        processing_mode=processing_mode,
-                        num_beams=int(options.get("num_beams", 5)),
-                        english_ratio_threshold=float(options.get("english_ratio_threshold", 0.5)),
-                        status=TaskStatus.QUEUED,
-                    )
-                    db.add(video_task)
-                    await db.flush()  # get video_task.id before creating the job
-
-                    # Create parent FULL_DUBBING_PIPELINE job
-                    parent_job_id = str(uuid.uuid4())
-                    parent_job = Job(
-                        id=parent_job_id,
-                        video_id=video_id,
-                        user_id=video.user_id,
-                        job_type=JobType.FULL_DUBBING_PIPELINE,
-                        status=JobStatus.QUEUED,
-                        progress=0.0,
-                        input_data={
-                            "output_type": output_type,
-                            "processing_mode": processing_mode,
-                            "target_lang": target_lang,
-                        },
-                    )
-                    db.add(parent_job)
-
-                    # Create STT child job linked to parent
-                    stt_job_id = str(uuid.uuid4())
-                    stt_job = Job(
-                        id=stt_job_id,
-                        video_id=video_id,
-                        user_id=video.user_id,
-                        job_type=JobType.STT_TRANSCRIBE,
-                        status=JobStatus.QUEUED,
-                        parent_job_id=parent_job_id,
-                        input_data={
-                            **options,
-                            "task_id": video_task.id,
-                            "audio_key": audio_key or file_path_key,
-                            "target_lang": target_lang,
-                            "processing_mode": processing_mode,
-                        }
-                    )
-                    db.add(stt_job)
-                    video_task.root_job_id = parent_job_id
-                    await db.commit()
-
-                    # Publish job.created with PARENT job_id so orchestrator reads output_type
-                    from app.shared.rabbitmq import publish_job_created
-                    publish_job_created(parent_job_id)
-                    await db.commit()
 
         except Exception as e:
-            logger.error(f"Processing failed for video {video_id}: {e}")
-            video = await db.get(Video, video_id) # Re-fetch to be safe
+            logger.error(f"Preprocessing failed for video {video_id}: {e}")
+            video = await db.get(Video, video_id)
             if video:
                 video.status = VideoStatus.FAILED
                 video.error_message = str(e)
@@ -196,87 +133,46 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
 
 
 async def process_video_hls_task(video_id: str, file_path_key: str):
-    """
-    Background task logic for HLS processing.
-    """
-    logger.info(f"Starting HLS processing for video {video_id}")
+    """Background task for HLS processing — delegates base preprocessing to media-service."""
+    from app.media_service.client import media_client
+    logger.info(f"Starting HLS processing for video {video_id} via media-service")
     storage = get_storage_service()
     ffmpeg = FFmpegService()
-    
+
     async with AsyncSessionLocal() as db:
         try:
-            # 1. Update status to PROCESSING
             video = await db.get(Video, video_id)
             if not video:
                 logger.error(f"Video {video_id} not found during processing")
                 return
-            
-            video.status = VideoStatus.PROCESSING
+            user_id = video.user_id
             await db.commit()
 
-            # 2. Prepare file for ffmpeg (Download if S3)
             with tempfile.TemporaryDirectory() as temp_dir:
                 local_video_path = Path(temp_dir) / "input_video"
                 output_hls_dir = Path(temp_dir) / "hls"
                 output_hls_dir.mkdir()
-                
+
                 downloaded = await storage.download(file_path_key, str(local_video_path))
                 if not downloaded:
                     local_video_path = Path(storage.get_absolute_path(file_path_key))
 
-                # 3. Generate HLS
                 success = await ffmpeg.generate_hls(str(local_video_path), str(output_hls_dir))
                 if not success:
                     raise MediaProcessingError("HLS Generation failed")
 
-                # 4. Upload HLS Directory
-                # We upload to videos/{user_id}/{video_id}/hls/
-                hls_key_prefix = await storage.upload_directory(str(output_hls_dir), f"videos/{video.user_id}/{video.id}/hls")
-                
-                # Index file is at prefix/index.m3u8
+                hls_key_prefix = await storage.upload_directory(str(output_hls_dir), f"videos/{user_id}/{video_id}/hls")
                 hls_playlist_key = f"{hls_key_prefix}/index.m3u8"
-                
-                # 5. Extract Metadata (from original)
-                metadata = await ffmpeg.get_metadata(str(local_video_path))
-                
-                # Update DB with metadata
-                video.duration = metadata.duration
-                video.width = metadata.width
-                video.height = metadata.height
-                video.size_bytes = metadata.size
-                video.format = "hls"
-                video.codec = metadata.codec
-                video.frame_rate = metadata.frame_rate
-                
-                # 6. Extract Audio (Optional, kept for consistency)
-                audio_key = None
-                if metadata.audio_present:
-                    audio_filename = f"{video_id}.mp3"
-                    audio_local_path = Path(temp_dir) / audio_filename
-                    success = await ffmpeg.extract_audio(str(local_video_path), str(audio_local_path))
-                    if success:
-                         audio_key = await storage.save_file(str(audio_local_path), directory=f"audio/{video.user_id}")
 
-                # 7. Generate Thumbnail
-                thumbnail_key = None
-                thumbnail_filename = f"{video_id}.jpg"
-                thumbnail_local_path = Path(temp_dir) / thumbnail_filename
-                success = await ffmpeg.generate_thumbnail(str(local_video_path), str(thumbnail_local_path))
-                if success:
-                    thumbnail_key = await storage.save_file(str(thumbnail_local_path), directory=f"thumbnails/{video.user_id}")
+            result = await media_client.preprocess(video_id, file_path_key, user_id)
 
-                # Update File Path to point to the m3u8 playlist instead of the raw file
-                # Optional: Delete the raw file from storage if we only want to keep HLS?
-                # For now, let's keep the raw file as a "source" but update the main path to HLS.
-                # actually, user wants "store as chunk".
-                # video.file_path was the raw uploads. 
-                # Let's update file_path to be the HLS playlist.
+            video = await db.get(Video, video_id)
+            if video:
                 video.file_path = hls_playlist_key
-                video.audio_path = audio_key
-                video.thumbnail_path = thumbnail_key
-                video.status = VideoStatus.COMPLETED
+                video.format = "hls"
                 await db.commit()
-                logger.info(f"HLS Processing completed for video {video_id}")
+
+            logger.info(f"HLS Processing completed for video {video_id}")
 
         except Exception as e:
             logger.error(f"HLS Processing failed for video {video_id}: {e}")
@@ -609,6 +505,12 @@ class VideoService:
         target_lang = selected_options.get("target_lang", "arb_Arab")
         output_type = selected_options.get("output_type", "fullDubbing")
         processing_mode = _resolve_processing_mode(output_type)
+
+        # Reset video status so the UI shows it as active again
+        if media.status == VideoStatus.FAILED:
+            media.status = VideoStatus.PROCESSING
+            media.error_message = None
+            await self.db.flush()
 
         # Create VideoTask as single source-of-truth for this reprocess run
         from app.tasks.models import VideoTask, TaskStatus

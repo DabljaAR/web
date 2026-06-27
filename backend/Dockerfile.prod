@@ -21,9 +21,9 @@ ARG INSTALL_AI=false
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ "$INSTALL_AI" = "true" ]; then \
-      uv sync --locked --no-install-project --group ai; \
+      uv sync --no-install-project --group ai; \
     else \
-      uv sync --locked --no-install-project; \
+      uv sync --no-install-project; \
     fi
 
 FROM python:3.12-slim

@@ -72,6 +72,7 @@ services:
       MINIO_SECURE: "false"
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
     ports:
@@ -106,6 +107,7 @@ services:
       MINIO_SECURE: "false"
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
     volumes:
       - .:/app
@@ -140,6 +142,7 @@ services:
       MINIO_SECURE: "false"
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
     volumes:
       - .:/app

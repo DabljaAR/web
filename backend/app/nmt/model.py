@@ -372,6 +372,7 @@ class NLLBTranslatorWrapper:
         """
         # 0. Robust language mapping (ensures "ar" -> "arb_Arab")
         tgt_lang = self.LANG_MAP.get(tgt_lang, tgt_lang)
+        provided_src_lang = src_lang
         if src_lang:
             src_lang = self.LANG_MAP.get(src_lang, src_lang)
 
@@ -394,8 +395,9 @@ class NLLBTranslatorWrapper:
         except Exception:
             item_src_lang = src_lang or "eng_Latn"
 
-        # 2. Skip if already in target language
-        if item_src_lang == tgt_lang:
+        # 2. Skip if already in target language — only when src was truly auto-detected
+        user_set_src = provided_src_lang is not None and str(provided_src_lang).lower() not in {"auto", "none", ""}
+        if not user_set_src and item_src_lang == tgt_lang:
             return text
 
         # 3. Stage 1 — primary translation

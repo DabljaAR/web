@@ -131,11 +131,12 @@ services:
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       NMT_MODEL_LOCAL_PATH: ${NMT_MODEL_LOCAL_PATH:-/model-cache/nmt-v4}
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
-      NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-false}
-      NMT_INTERNAL_CONCURRENCY: ${NMT_INTERNAL_CONCURRENCY:-4}
+      NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
+      NMT_INTERNAL_CONCURRENCY: ${NMT_INTERNAL_CONCURRENCY:-1}
       NMT_LENGTH_ADJUST_ENABLED: ${NMT_LENGTH_ADJUST_ENABLED:-false}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       HF_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /model-cache/hf
       PORT: 8002
     ports:
       - "8002:8002"
@@ -195,6 +196,7 @@ services:
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
       S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
@@ -211,6 +213,8 @@ services:
       minio:
         condition: service_started
       rabbitmq:
+        condition: service_healthy
+      media-service:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -231,9 +235,16 @@ services:
       AWS_SECRET_ACCESS_KEY: minioadmin
       AWS_DEFAULT_REGION: us-east-1
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       PORT: "8003"
     ports:
       - "8003:8003"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
@@ -283,6 +294,7 @@ services:
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
       S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
@@ -329,6 +341,7 @@ services:
       MINIO_BUCKET_NAME: dablaja-videos
       MINIO_SECURE: "false"
       S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
@@ -364,6 +377,97 @@ services:
       minio:
         condition: service_started
       media-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
+  # ─── RabbitMQ-native TTS Worker ───────────────────────────────────────────
+  worker-tts:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        INSTALL_AI: "true"
+    container_name: dabljaar_worker_tts
+    entrypoint: []
+    command: python -m app.worker.run tts --concurrency 1
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      STT_DEVICE: ${STT_DEVICE:-auto}
+      SILMA_DEVICE: ${SILMA_DEVICE:-auto}
+      STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-auto}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: dablaja-videos
+      MINIO_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: ${HF_HOME:-/model-cache/hf}
+      HUGGINGFACE_HUB_CACHE: ${HUGGINGFACE_HUB_CACHE:-/model-cache/hf/hub}
+      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/model-cache/hf/transformers}
+      XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
+      TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
+      CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+      - nmt_model_cache:/model-cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      media-service:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
+  # ─── RabbitMQ-native Merge Worker ─────────────────────────────────────────
+  worker-merge:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dabljaar_worker_merge
+    entrypoint: []
+    command: python -m app.worker.run merge --concurrency 2
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: dablaja-videos
+      MINIO_SECURE: "false"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://localhost:9000
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:-model}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      DUBBING_MERGE_PATH: ${DUBBING_MERGE_PATH:-/tmp/dubbing_merge}
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+      - nmt_model_cache:/model-cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
         condition: service_started
     restart: unless-stopped
     networks:

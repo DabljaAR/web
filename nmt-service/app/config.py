@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     NMT_HF_FALLBACK: str = "facebook/nllb-200-distilled-600M"
     STORAGE_BACKEND: str = "local"   # "s3" enables object-storage download
     HF_TOKEN: str = ""
+    HF_HOME: str = "/model-cache/hf"
 
     # Groq — Arabic length adjustment
     GROQ_API_KEY: str = ""
@@ -37,7 +38,9 @@ class Settings(BaseSettings):
     NMT_FALLBACK_MODE: str = "stage2_only"
 
     # D3: internal segment fan-out concurrency
-    NMT_INTERNAL_CONCURRENCY: int = 4
+    # Must be 1 — HuggingFace NLLB tokenizer (Rust) panics with
+    # "Already borrowed" when used from multiple threads concurrently.
+    NMT_INTERNAL_CONCURRENCY: int = 1
 
     # HTTP health endpoint
     PORT: int = 8002

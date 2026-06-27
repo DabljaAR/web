@@ -355,23 +355,28 @@ class S3StorageService:
             logger.info("S3Storage: explicit upload complete.")
         return key
 
+    def _presign_client_kwargs(self) -> dict:
+        kw = self._client_kwargs().copy()
+        public = (settings.S3_PUBLIC_ENDPOINT_URL or "").strip()
+        if public:
+            kw["endpoint_url"] = public
+        return kw
+
     async def get_url(self, path: str, filename: str = None) -> str:
-        # Generate presigned URL
         try:
             params = {'Bucket': self.bucket_name, 'Key': path}
             if filename:
                 params['ResponseContentDisposition'] = f'attachment; filename="{filename}"'
 
-            async with self.session.client("s3", **self._client_kwargs()) as s3:
+            async with self.session.client("s3", **self._presign_client_kwargs()) as s3:
                 url = await s3.generate_presigned_url(
                     'get_object',
                     Params=params,
-                    ExpiresIn=3600  # 1 hour
+                    ExpiresIn=3600
                 )
                 return url
         except Exception as e:
             logger.error(f"Error generating presigned URL: {e}")
-            # Fallback (though probably won't work if private)
             base = self.endpoint_url or ""
             if base:
                 return f"{base.rstrip('/')}/{self.bucket_name}/{path}"

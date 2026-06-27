@@ -7,7 +7,6 @@ from typing import Optional
 
 from app.dubbing.schemas import SegmentTimingInfo
 from app.dubbing.service import DubbingMergeService
-from app.media.storage import get_storage_service
 import app.worker._db as _db
 from app.worker._db import (
     create_child_job,
@@ -27,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 def _get_video_media_type(video_id: str) -> str:
     """Resolve the media type (video/audio) for a given video_id."""
-    from app.media.models import MediaType, Video as MediaVideo
+    from app.videos.models import MediaType, Video as MediaVideo
 
     engine, SessionLocal = _make_engine()
     try:
@@ -36,7 +35,7 @@ def _get_video_media_type(video_id: str) -> str:
             if row is None:
                 return "audio"
             mt = row.media_type
-            if isinstance(mt, MediaType):
+            if hasattr(mt, "value"):
                 return mt.value.lower()
             return str(mt).lower()
     finally:
@@ -45,7 +44,7 @@ def _get_video_media_type(video_id: str) -> str:
 
 def _get_original_media_key(video_id: str, media_type: str) -> Optional[str]:
     """Get the storage key for the original media file."""
-    from app.media.models import Video as MediaVideo
+    from app.videos.models import Video as MediaVideo
 
     engine, SessionLocal = _make_engine()
     try:
@@ -148,7 +147,7 @@ async def handle_merge(job_id: str) -> dict:
 
     # 7. Update the video record with dubbed path
     if output_key:
-        from app.media.models import Video as MediaVideo
+        from app.videos.models import Video as MediaVideo
 
         engine, SessionLocal = _make_engine()
         try:

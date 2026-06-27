@@ -1,7 +1,6 @@
 import gc
 import logging
 import os
-import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -23,13 +22,9 @@ _INSTALL_AI = os.getenv("INSTALL_AI", "false").lower() == "true"
 if _INSTALL_AI:
     from app.nmt.router import router as nmt_router
     from app.stt.router import router as stt_router
-    from app.tts.router import router as tts_router
 from app.shared.middleware import ExceptionLoggingMiddleware
 
 logger = logging.getLogger(__name__)
-
-_tts_bridge_thread: threading.Thread | None = None
-_tts_bridge_stop = threading.Event()
 
 
 async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
@@ -74,24 +69,10 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to connect to database during startup", exc_info=True)
         raise
 
-    # Start TTS bridge (temporary — consumes job.start.tts from RabbitMQ, dispatches Celery tasks)
-    try:
-        from app.jobs.tasks.tts_bridge import start_tts_bridge
-        global _tts_bridge_thread
-        _tts_bridge_stop.clear()
-        _tts_bridge_thread = threading.Thread(
-            target=start_tts_bridge, name="tts-bridge", daemon=True
-        )
-        _tts_bridge_thread.start()
-        logger.info("[TTS-BRIDGE] Bridge thread started")
-    except Exception as _bridge_exc:
-        logger.warning("[TTS-BRIDGE] Could not start bridge: %s", _bridge_exc)
-
     try:
         yield
     finally:
         logger.info("🛑 Application shutting down...")
-        _tts_bridge_stop.set()
 
         try:
             await disconnect_from_db()
@@ -164,7 +145,6 @@ app.include_router(tasks_router, prefix="/api")
 if _INSTALL_AI:
     app.include_router(stt_router)  # has prefix="/api/transcription"
     app.include_router(nmt_router, prefix="/api")
-    app.include_router(tts_router, prefix="/api/tts")
 
 # ---------------------------------------------------------------------------
 # Root endpoint

@@ -133,6 +133,9 @@ class Settings(BaseSettings):
     S3_SECURE: bool = (
         os.getenv("S3_SECURE") or os.getenv("MINIO_SECURE", "False")
     ).lower() == "true"
+    # Public endpoint used for presigned URLs returned to the browser.
+    # If unset, the internal S3_ENDPOINT_URL is used (which may be unresolvable for clients).
+    S3_PUBLIC_ENDPOINT_URL: str = os.getenv("S3_PUBLIC_ENDPOINT_URL", "")
 
     @model_validator(mode="after")
     def _s3_empty_env_falls_back_to_minio(self) -> "Settings":

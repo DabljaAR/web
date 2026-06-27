@@ -10,6 +10,7 @@ Design doc references:
 """
 import json
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -477,7 +478,19 @@ def start_consumer():
     params.heartbeat = 600
     params.blocked_connection_timeout = 300
 
-    connection = pika.BlockingConnection(params)
+    max_retries = 30
+    for attempt in range(1, max_retries + 1):
+        try:
+            connection = pika.BlockingConnection(params)
+            break
+        except pika.exceptions.AMQPConnectionError as e:
+            if attempt == max_retries:
+                logger.error("[NMT] Could not connect to RabbitMQ after %d attempts", max_retries)
+                raise
+            wait = min(2 ** attempt, 30)
+            logger.warning("[NMT] RabbitMQ not ready (attempt %d/%d), retrying in %ds: %s", attempt, max_retries, wait, e)
+            time.sleep(wait)
+
     channel = connection.channel()
 
     channel.exchange_declare(EXCHANGE, exchange_type="topic", durable=True)

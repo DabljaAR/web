@@ -2,6 +2,7 @@
 import json
 import logging
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -324,7 +325,19 @@ def start_consumer():
     params.heartbeat = 600
     params.blocked_connection_timeout = 300
 
-    connection = pika.BlockingConnection(params)
+    max_retries = 30
+    for attempt in range(1, max_retries + 1):
+        try:
+            connection = pika.BlockingConnection(params)
+            break
+        except pika.exceptions.AMQPConnectionError as e:
+            if attempt == max_retries:
+                logger.error("[STT] Could not connect to RabbitMQ after %d attempts", max_retries)
+                raise
+            wait = min(2 ** attempt, 30)
+            logger.warning("[STT] RabbitMQ not ready (attempt %d/%d), retrying in %ds: %s", attempt, max_retries, wait, e)
+            time.sleep(wait)
+
     channel = connection.channel()
 
     # Topology declarations are idempotent — safe to run on every startup.
