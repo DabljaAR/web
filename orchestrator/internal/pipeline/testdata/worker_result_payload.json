@@ -1,0 +1,36 @@
+[
+  {
+    "description": "completed STT with output",
+    "input": {
+      "job_id": "test-stt-001",
+      "job_type": "STT_TRANSCRIBE",
+      "status": "COMPLETED",
+      "output_data": {
+        "transcript": "hello world",
+        "segment_count": 1
+      }
+    },
+    "expect_job_id": "test-stt-001",
+    "expect_status": "COMPLETED",
+    "expect_error": ""
+  },
+  {
+    "description": "failed NMT",
+    "input": {
+      "job_id": "test-nmt-002",
+      "job_type": "NMT_TRANSLATE",
+      "status": "FAILED",
+      "error": "CUDA out of memory"
+    },
+    "expect_job_id": "test-nmt-002",
+    "expect_status": "FAILED",
+    "expect_error": "CUDA out of memory"
+  },
+  {
+    "description": "empty body — zero values only",
+    "input": {},
+    "expect_job_id": "",
+    "expect_status": "",
+    "expect_error": ""
+  }
+]

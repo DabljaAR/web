@@ -10,17 +10,18 @@ Design doc references:
 """
 import json
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import pika
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
 from app.config import settings
+from app.dablja_worker import check_cancelled, classify_failure, consume_loop, make_engine
 from app.model import NLLBTranslatorWrapper
-from nmt_core.length_adjuster import adjust_ar
+from app.length_adjuster import adjust_ar
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +33,37 @@ BINDING_KEY = "job.start.nmt"
 RESULT_ROUTING_KEY = "job.results.nmt"
 JOB_TYPE = "NMT_TRANSLATE"
 
+_ENGINE, _SessionLocal = make_engine(settings.DATABASE_URL)
+
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 def _make_db():
-    engine = create_engine(settings.DATABASE_URL)
-    return engine, sessionmaker(bind=engine)
+    return _ENGINE, _SessionLocal
 
 
 def _utcnow():
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _watch_cancel(
+    job_id: str,
+    cancelled_flag: list,
+    interval_s: float,
+    stop_event: threading.Event,
+) -> None:
+    """Poll DB periodically; set cancelled_flag when job status is CANCELLED (H1/D8)."""
+    while not stop_event.is_set():
+        if stop_event.wait(interval_s):
+            break
+        try:
+            with _SessionLocal() as db:
+                if check_cancelled(db, job_id):
+                    cancelled_flag[0] = True
+                    logger.info("[NMT] job=%s cancelled mid-translation — watcher flagged", job_id)
+                    return
+        except Exception as exc:
+            logger.warning("[NMT] cancel watcher DB error for job %s: %s", job_id, exc)
 
 
 def _load_job(db, job_id: str) -> Optional[dict]:
@@ -100,11 +122,7 @@ def _load_video_task(db, task_id: str) -> Optional[dict]:
 
 def _is_cancelled(db, job_id: str) -> bool:
     """D8: cooperative cancel check."""
-    row = db.execute(
-        text("SELECT status FROM jobs WHERE id = :jid"),
-        {"jid": job_id},
-    ).fetchone()
-    return row is not None and row[0] == "CANCELLED"
+    return check_cancelled(db, job_id)
 
 
 def _update_job_processing(db, job_id: str):
@@ -326,7 +344,7 @@ def process_nmt_job(job_id: str, cancelled_flag: list) -> dict:
 
             _update_job_processing(db, job_id)
     finally:
-        engine.dispose()
+        pass
 
     logger.info(
         "[NMT] job=%s task=%s segments=%d %s→%s output_type=%s",
@@ -365,7 +383,7 @@ def process_nmt_job(job_id: str, cancelled_flag: list) -> dict:
             )
             _update_job_completed(db, job_id, summary)
     finally:
-        engine2.dispose()
+        pass
 
     logger.info(
         "[NMT] job=%s done | segments=%d | terminal=%s",
@@ -422,13 +440,14 @@ def on_message(channel, method, _properties, body):
 
     # D8: cooperative cancellation check before doing any work
     try:
-        engine, SessionLocal = _make_db()
-        with SessionLocal() as db:
+        with _SessionLocal() as db:
             cancelled = _is_cancelled(db, job_id)
-        engine.dispose()
     except Exception as exc:
         logger.error("[NMT] DB unreachable checking cancel for job %s: %s", job_id, exc)
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+        if classify_failure(exc) == "transient":
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+        else:
+            channel.basic_ack(delivery_tag=method.delivery_tag)
         return
 
     if cancelled:
@@ -438,6 +457,14 @@ def on_message(channel, method, _properties, body):
 
     # Mutable flag so _translate_all_segments can detect mid-job cancellation
     cancelled_flag = [False]
+    stop_event = threading.Event()
+    watcher = threading.Thread(
+        target=_watch_cancel,
+        args=(job_id, cancelled_flag, 3.0, stop_event),
+        name=f"nmt-cancel-{job_id}",
+        daemon=True,
+    )
+    watcher.start()
 
     try:
         summary = process_nmt_job(job_id, cancelled_flag)
@@ -455,46 +482,27 @@ def on_message(channel, method, _properties, body):
         logger.exception("[NMT] Job %s failed: %s", job_id, exc)
         _handle_failure(job_id, exc)
         _publish_result(channel, job_id, "FAILED", error=str(exc))
+    finally:
+        stop_event.set()
 
     channel.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def _handle_failure(job_id: str, exc: Exception):
     try:
-        engine, SessionLocal = _make_db()
-        with SessionLocal() as db:
+        with _SessionLocal() as db:
             _update_job_failed(db, job_id, str(exc))
-        engine.dispose()
     except Exception as db_exc:
         logger.error("[NMT] Could not mark job %s failed: %s", job_id, db_exc)
 
 
 def start_consumer():
     """Connect to RabbitMQ, declare topology, and start consuming (blocking)."""
-    logger.info("[NMT] Connecting to RabbitMQ: %s", settings.RABBITMQ_URL)
-
-    params = pika.URLParameters(settings.RABBITMQ_URL)
-    params.heartbeat = 600
-    params.blocked_connection_timeout = 300
-
-    connection = pika.BlockingConnection(params)
-    channel = connection.channel()
-
-    channel.exchange_declare(EXCHANGE, exchange_type="topic", durable=True)
-    channel.exchange_declare("dablja.jobs.dlx", exchange_type="direct", durable=True)
-
-    channel.queue_declare(
+    consume_loop(
+        settings.RABBITMQ_URL,
         NMT_QUEUE,
-        durable=True,
-        arguments={"x-dead-letter-exchange": "dablja.jobs.dlx"},
+        BINDING_KEY,
+        EXCHANGE,
+        on_message,
+        service_name="NMT",
     )
-    channel.queue_bind(NMT_QUEUE, EXCHANGE, BINDING_KEY)
-
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(NMT_QUEUE, on_message)
-
-    logger.info(
-        "[NMT] Waiting for jobs on routing key '%s' (queue='%s')",
-        BINDING_KEY, NMT_QUEUE,
-    )
-    channel.start_consuming()

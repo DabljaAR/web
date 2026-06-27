@@ -155,28 +155,12 @@ async def process_video_task(video_id: str, file_path_key: str, options: dict = 
                             "output_type": output_type,
                             "processing_mode": processing_mode,
                             "target_lang": target_lang,
+                            "source_lang": options.get("source_lang"),
+                            "task_id": video_task.id,
                         },
                     )
                     db.add(parent_job)
 
-                    # Create STT child job linked to parent
-                    stt_job_id = str(uuid.uuid4())
-                    stt_job = Job(
-                        id=stt_job_id,
-                        video_id=video_id,
-                        user_id=video.user_id,
-                        job_type=JobType.STT_TRANSCRIBE,
-                        status=JobStatus.QUEUED,
-                        parent_job_id=parent_job_id,
-                        input_data={
-                            **options,
-                            "task_id": video_task.id,
-                            "audio_key": audio_key or file_path_key,
-                            "target_lang": target_lang,
-                            "processing_mode": processing_mode,
-                        }
-                    )
-                    db.add(stt_job)
                     video_task.root_job_id = parent_job_id
                     await db.commit()
 
@@ -627,17 +611,6 @@ class VideoService:
         self.db.add(video_task)
         await self.db.flush()
 
-        input_options = {
-            "output_type": output_type,
-            "domain": selected_options.get("domain", "general"),
-            "voice": selected_options.get("voice", "male1"),
-            "translation_style": selected_options.get("translation_style", "neutral"),
-            "target_lang": target_lang,
-            "audio_key": media.audio_path or media.file_path,
-            "task_id": video_task.id,
-            "processing_mode": processing_mode,
-        }
-
         # Create parent FULL_DUBBING_PIPELINE job
         parent_job_id = str(uuid.uuid4())
         parent_job = Job(
@@ -651,31 +624,22 @@ class VideoService:
                 "output_type": output_type,
                 "processing_mode": processing_mode,
                 "target_lang": target_lang,
+                "source_lang": selected_options.get("source_lang"),
+                "task_id": video_task.id,
             },
         )
         self.db.add(parent_job)
 
-        # Create STT child job linked to parent
-        stt_job = Job(
-            id=str(uuid.uuid4()),
-            video_id=media.id,
-            user_id=media.user_id,
-            job_type=JobType.STT_TRANSCRIBE,
-            status=JobStatus.QUEUED,
-            parent_job_id=parent_job_id,
-            input_data=input_options,
-        )
-        self.db.add(stt_job)
         video_task.root_job_id = parent_job_id
         await self.db.commit()
-        await self.db.refresh(stt_job)
+        await self.db.refresh(parent_job)
 
         # Publish job.created with PARENT job_id so orchestrator reads output_type
         from app.shared.rabbitmq import publish_job_created
         publish_job_created(parent_job_id)
         await self.db.commit()
 
-        return stt_job
+        return parent_job
 
 
     async def get_user_videos(

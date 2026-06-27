@@ -39,3 +39,24 @@ func TestNextStage_TranslationAndTTSEndsAtTTS(t *testing.T) {
 		t.Fatalf("nextStage(translationAndTTS, TTS) = (%q, true), want (_, false)", next)
 	}
 }
+
+func TestNextStage_CaptionsAndTranslationEndsAtNMT(t *testing.T) {
+	next, ok := nextStage("captionsAndTranslation", db.JobTypeNMTTranslate)
+	if ok {
+		t.Fatalf("nextStage(captionsAndTranslation, NMT) = (%q, true), want (_, false)", next)
+	}
+}
+
+func TestNextStage_CaptionsAndTranslationIntermediateStages(t *testing.T) {
+	next, ok := nextStage("captionsAndTranslation", db.JobTypeSTTTranscribe)
+	if !ok || next != db.JobTypeNMTTranslate {
+		t.Errorf("nextStage(captionsAndTranslation, STT) = (%q, %v), want (NMT_TRANSLATE, true)", next, ok)
+	}
+}
+
+func TestNextStage_CaptionsOnlyEndsAtSTT(t *testing.T) {
+	next, ok := nextStage("captionsOnly", db.JobTypeSTTTranscribe)
+	if ok {
+		t.Fatalf("nextStage(captionsOnly, STT) = (%q, true), want (_, false)", next)
+	}
+}

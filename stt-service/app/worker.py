@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Optional
 
 import pika
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
 from app.config import settings
+from app.dablja_worker import check_cancelled, classify_failure, consume_loop, make_engine
 from app.model import WhisperModelManager
 from app.storage import download_file
 
@@ -24,12 +24,13 @@ BINDING_KEY = "job.start.stt"
 RESULT_ROUTING_KEY = "job.results.stt"
 JOB_TYPE = "STT_TRANSCRIBE"
 
+_ENGINE, _SessionLocal = make_engine(settings.DATABASE_URL)
+
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 def _make_db():
-    engine = create_engine(settings.DATABASE_URL)
-    return engine, sessionmaker(bind=engine)
+    return _ENGINE, _SessionLocal
 
 
 def _utcnow():
@@ -79,11 +80,7 @@ def _find_video_task_id(db, video_id: str) -> Optional[str]:
 
 def _is_cancelled(db, job_id: str) -> bool:
     """D8: check whether the job has been cancelled before doing any work."""
-    row = db.execute(
-        text("SELECT status FROM jobs WHERE id = :jid"),
-        {"jid": job_id},
-    ).fetchone()
-    return row is not None and row[0] == "CANCELLED"
+    return check_cancelled(db, job_id)
 
 
 def _update_job_processing(db, job_id: str):
@@ -190,7 +187,7 @@ def process_stt_job(job_id: str) -> dict:
 
             _update_job_processing(db, job_id)
     finally:
-        engine.dispose()
+        pass
 
     logger.info(
         "[STT] job=%s video=%s file_key=%s language=%s task_id=%s",
@@ -231,7 +228,7 @@ def process_stt_job(job_id: str) -> dict:
                 )
             _update_job_completed(db, job_id, summary)
     finally:
-        engine2.dispose()
+        pass
 
     return summary
 
@@ -284,13 +281,14 @@ def on_message(channel, method, _properties, body):
 
     # D8: cooperative cancellation — check before doing any work.
     try:
-        engine, SessionLocal = _make_db()
-        with SessionLocal() as db:
+        with _SessionLocal() as db:
             cancelled = _is_cancelled(db, job_id)
-        engine.dispose()
     except Exception as exc:
         logger.error("[STT] DB unreachable checking cancel for job %s: %s", job_id, exc)
-        channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+        if classify_failure(exc) == "transient":
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+        else:
+            channel.basic_ack(delivery_tag=method.delivery_tag)
         return
 
     if cancelled:
@@ -304,10 +302,8 @@ def on_message(channel, method, _properties, body):
     except Exception as exc:
         logger.exception("[STT] Job %s failed: %s", job_id, exc)
         try:
-            engine, SessionLocal = _make_db()
-            with SessionLocal() as db:
+            with _SessionLocal() as db:
                 _update_job_failed(db, job_id, str(exc))
-            engine.dispose()
         except Exception as db_exc:
             logger.error("[STT] Could not mark job %s failed: %s", job_id, db_exc)
 
@@ -318,31 +314,11 @@ def on_message(channel, method, _properties, body):
 
 def start_consumer():
     """Connect to RabbitMQ, declare topology, and start consuming (blocking)."""
-    logger.info("[STT] Connecting to RabbitMQ: %s", settings.RABBITMQ_URL)
-
-    params = pika.URLParameters(settings.RABBITMQ_URL)
-    params.heartbeat = 600
-    params.blocked_connection_timeout = 300
-
-    connection = pika.BlockingConnection(params)
-    channel = connection.channel()
-
-    # Topology declarations are idempotent — safe to run on every startup.
-    channel.exchange_declare(EXCHANGE, exchange_type="topic", durable=True)
-    channel.exchange_declare("dablja.jobs.dlx", exchange_type="direct", durable=True)
-
-    channel.queue_declare(
+    consume_loop(
+        settings.RABBITMQ_URL,
         STT_QUEUE,
-        durable=True,
-        arguments={"x-dead-letter-exchange": "dablja.jobs.dlx"},
+        BINDING_KEY,
+        EXCHANGE,
+        on_message,
+        service_name="STT",
     )
-    channel.queue_bind(STT_QUEUE, EXCHANGE, BINDING_KEY)
-
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(STT_QUEUE, on_message)
-
-    logger.info(
-        "[STT] Waiting for jobs on routing key '%s' (queue='%s')",
-        BINDING_KEY, STT_QUEUE,
-    )
-    channel.start_consuming()
