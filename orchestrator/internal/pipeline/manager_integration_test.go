@@ -256,18 +256,17 @@ func TestIntegration_T01_NewJob_BecomesProcessing(t *testing.T) {
 }
 
 // T02: Full happy-path pipeline → parent reaches COMPLETED with 100% progress
+// fullDubbing ends at TTS (merge runs inside the bridged Celery TTS combine).
 func TestIntegration_T02_FullPipeline_ParentCompleted(t *testing.T) {
 	parentID := "inttest-t02-parent"
 	sttID    := "inttest-t02-stt"
 	nmtID    := "inttest-t02-nmt"
 	ttsID    := "inttest-t02-tts"
-	mergeID  := "inttest-t02-merge"
 
 	global.createJob(t, parentID, db.JobTypeFullDubbingPipeline, nil)
 	global.createJob(t, sttID,    db.JobTypeSTTTranscribe,       strPtr(parentID))
 	global.createJob(t, nmtID,    db.JobTypeNMTTranslate,        strPtr(parentID))
 	global.createJob(t, ttsID,    db.JobTypeTTSSynthesize,       strPtr(parentID))
-	global.createJob(t, mergeID,  db.JobTypeDubbingMerge,        strPtr(parentID))
 
 	global.publish(t, "job.created", map[string]string{"job_id": parentID})
 	if _, ok := global.waitStatus(parentID, db.JobStatusProcessing, 5*time.Second); !ok {
@@ -275,10 +274,9 @@ func TestIntegration_T02_FullPipeline_ParentCompleted(t *testing.T) {
 	}
 
 	stages := []struct{ id, typ string }{
-		{sttID,   "STT_TRANSCRIBE"},
-		{nmtID,   "NMT_TRANSLATE"},
-		{ttsID,   "TTS_SYNTHESIZE"},
-		{mergeID, "DUBBING_MERGE"},
+		{sttID, "STT_TRANSCRIBE"},
+		{nmtID, "NMT_TRANSLATE"},
+		{ttsID, "TTS_SYNTHESIZE"},
 	}
 	for _, s := range stages {
 		global.publish(t, "job.results.worker", pipeline.WorkerResultPayload{
