@@ -1,5 +1,17 @@
-"""Unit tests for nmt-service worker logic (no DB, RabbitMQ, or model)."""
-from unittest.mock import MagicMock
+"""Unit tests for nmt-service worker logic (no DB, RabbitMQ, or model).
+
+Covers:
+  §10.3 — idempotency (COMPLETED skip)
+  D3    — internal fan-out (one message → one result, no chord)
+  D8    — cooperative cancellation (pre-check + mid-job cancel watcher)
+  §15   — WorkerResultPayload contract
+  §6    — NMT→TTS segment shape contract (Phase 2 dependency)
+  A.9   — output_type rules per LLD table
+"""
+import json
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.worker import (
     _translate_all_segments,
@@ -8,7 +20,10 @@ from app.worker import (
 )
 
 
+# ── _update_video_task_nmt: output_type → DB status rules (A.9) ───────────────
+
 def test_update_video_task_nmt_captionsAndTranslation_is_terminal():
+    """captionsAndTranslation: NMT is the last stage → COMPLETED at 100%."""
     db = MagicMock()
     _update_video_task_nmt(
         db,
@@ -26,6 +41,7 @@ def test_update_video_task_nmt_captionsAndTranslation_is_terminal():
 
 
 def test_update_video_task_nmt_fullDubbing_is_processing():
+    """fullDubbing: NMT is NOT the last stage → PROCESSING at 50%."""
     db = MagicMock()
     _update_video_task_nmt(db, "task-1", "translated", [], "fullDubbing")
     params = db.execute.call_args[0][1]
@@ -34,7 +50,29 @@ def test_update_video_task_nmt_fullDubbing_is_processing():
     assert params["completed_at"] is None
 
 
+def test_update_video_task_nmt_translationAndTTS_is_processing():
+    """translationAndTTS: NMT is not last (TTS follows) → PROCESSING at 50%."""
+    db = MagicMock()
+    _update_video_task_nmt(db, "task-1", "translated", [], "translationAndTTS")
+    params = db.execute.call_args[0][1]
+    assert params["status"] == "PROCESSING"
+    assert params["progress"] == 50.0
+    assert params["completed_at"] is None
+
+
+def test_update_video_task_nmt_unknown_output_type_is_processing():
+    """Unknown output_type must default to PROCESSING (safe fallback)."""
+    db = MagicMock()
+    _update_video_task_nmt(db, "task-1", "translated", [], "unknownType")
+    params = db.execute.call_args[0][1]
+    assert params["status"] == "PROCESSING"
+    assert params["completed_at"] is None
+
+
+# ── Cancellation — pre-check (D8) ─────────────────────────────────────────────
+
 def test_translate_one_segment_returns_none_on_cancel():
+    """Segment worker returns None immediately when cancelled flag is set."""
     result = _translate_one_segment(
         0,
         {"text": "hello", "start": 0.0, "end": 1.0},
@@ -42,12 +80,13 @@ def test_translate_one_segment_returns_none_on_cancel():
         "arb_Arab",
         5,
         0.5,
-        lambda: True,
+        lambda: True,   # is_cancelled = True
     )
     assert result is None
 
 
 def test_translate_all_segments_returns_none_on_cancel():
+    """Fan-out returns None when cancelled_flag is True from the start (D3+D8)."""
     cancelled_flag = [True]
     result = _translate_all_segments(
         "job-1",
@@ -59,3 +98,116 @@ def test_translate_all_segments_returns_none_on_cancel():
         cancelled_flag,
     )
     assert result is None
+
+
+def test_translate_all_segments_returns_none_on_mid_job_cancel():
+    """Fan-out returns None when cancelled_flag is flipped during execution."""
+    cancelled_flag = [False]
+
+    call_count = [0]
+
+    def slow_translate_one(idx, seg, src, tgt, beams, ratio, is_cancelled):
+        call_count[0] += 1
+        # Simulate mid-job cancellation after the first segment starts
+        if call_count[0] >= 1:
+            cancelled_flag[0] = True
+        if is_cancelled():
+            return None
+        return {"start": seg["start"], "end": seg["end"],
+                "original_text": seg["text"], "translated_text": "translated"}
+
+    with patch("app.worker._translate_one_segment", side_effect=slow_translate_one):
+        result = _translate_all_segments(
+            "job-cancel-mid",
+            [{"text": "seg", "start": i * 1.0, "end": i * 1.0 + 1.0} for i in range(5)],
+            None, "arb_Arab", 5, 0.5,
+            cancelled_flag,
+        )
+
+    assert result is None
+
+
+# ── Fan-out result shape (D3 + Phase 2 TTS contract) ─────────────────────────
+
+def test_translate_all_segments_returns_correct_shape():
+    """Each translated segment must have the 4 keys the TTS service expects."""
+    cancelled_flag = [False]
+
+    def fake_translate(idx, seg, src, tgt, beams, ratio, is_cancelled):
+        return {
+            "start": seg["start"],
+            "end": seg["end"],
+            "original_text": seg["text"],
+            "translated_text": f"translated-{idx}",
+        }
+
+    with patch("app.worker._translate_one_segment", side_effect=fake_translate):
+        segments = [
+            {"text": f"seg {i}", "start": float(i), "end": float(i + 1)}
+            for i in range(3)
+        ]
+        result = _translate_all_segments(
+            "job-shape", segments, None, "arb_Arab", 5, 0.5, cancelled_flag
+        )
+
+    assert result is not None
+    assert len(result) == 3
+    for i, seg in enumerate(result):
+        # These 4 keys are the TTS contract (§6, LLD A.9, Phase 2 dependency)
+        assert "start" in seg
+        assert "end" in seg
+        assert "original_text" in seg
+        assert "translated_text" in seg
+        assert seg["translated_text"] == f"translated-{i}"
+
+
+def test_translate_all_segments_empty_input_returns_empty_list():
+    """Empty stt_segments should return an empty list (not None)."""
+    cancelled_flag = [False]
+    result = _translate_all_segments(
+        "job-empty", [], None, "arb_Arab", 5, 0.5, cancelled_flag
+    )
+    assert result == []
+
+
+# ── _translate_one_segment: not cancelled → returns translated dict ───────────
+
+def test_translate_one_segment_not_cancelled_returns_dict():
+    """Non-cancelled segment returns a dict with all 4 required keys."""
+    mock_translator = MagicMock()
+    mock_translator.translate_segment.return_value = "ترجمة"
+
+    with patch("app.worker._translator", mock_translator):
+        result = _translate_one_segment(
+            0,
+            {"text": "hello world", "start": 0.0, "end": 2.0},
+            "eng_Latn",
+            "arb_Arab",
+            5,
+            0.5,
+            lambda: False,  # not cancelled
+        )
+
+    assert result is not None
+    assert result["original_text"] == "hello world"
+    assert result["translated_text"] == "ترجمة"
+    assert result["start"] == 0.0
+    assert result["end"] == 2.0
+
+
+def test_translate_one_segment_translation_exception_falls_back_to_original():
+    """If translation raises, the original text is used (graceful fallback)."""
+    mock_translator = MagicMock()
+    mock_translator.translate_segment.side_effect = RuntimeError("model OOM")
+
+    with patch("app.worker._translator", mock_translator):
+        result = _translate_one_segment(
+            0,
+            {"text": "fallback text", "start": 0.0, "end": 1.0},
+            None, "arb_Arab", 5, 0.5,
+            lambda: False,
+        )
+
+    assert result is not None
+    assert result["translated_text"] == "fallback text"
+    assert result["original_text"] == "fallback text"

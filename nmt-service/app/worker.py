@@ -19,7 +19,7 @@ import pika
 from sqlalchemy import text
 
 from app.config import settings
-from app.dablja_worker import check_cancelled, classify_failure, consume_loop, make_engine
+from dablja_worker import check_cancelled, classify_failure, consume_loop, make_engine
 from app.model import NLLBTranslatorWrapper
 from app.length_adjuster import adjust_ar
 

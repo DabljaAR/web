@@ -53,7 +53,7 @@ echo "🚀 Starting test infrastructure..."
 echo "    Compose file: $COMPOSE_FILE"
 echo ""
 
-docker compose -f "$COMPOSE_FILE" up -d $SKIP_BUILD postgres rabbitmq minio redis orchestrator backend
+docker compose -f "$COMPOSE_FILE" up -d $SKIP_BUILD postgres rabbitmq minio orchestrator backend
 
 echo ""
 echo "⏳ Waiting for infrastructure to be healthy..."
@@ -100,7 +100,7 @@ echo -n "   Checking RabbitMQ connectivity... "
 python3 -c "
 import asyncio, aio_pika
 async def check():
-    conn = await aio_pika.connect_robust('amqp://guest:guest@localhost:5673/')
+    conn = await aio_pika.connect_robust('amqp://guest:guest@localhost:5672/')
     await conn.close()
 asyncio.run(check())
 print('✅')

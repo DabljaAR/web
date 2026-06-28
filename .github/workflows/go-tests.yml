@@ -1,0 +1,94 @@
+name: Go Tests
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - orchestrator/**
+      - libs/dablja-worker/**
+      - .github/workflows/go-tests.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go-unit-tests:
+    name: orchestrator-unit-tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: orchestrator
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: orchestrator/go.mod
+          cache-dependency-path: orchestrator/go.sum
+
+      - name: Run Go unit tests
+        # No -tags=integration — unit tests only; integration tests require compose
+        run: go test ./internal/pipeline/... -v -count=1 -race
+
+      - name: Run Go vet
+        run: go vet ./...
+
+  nmt-unit-tests:
+    name: nmt-service-unit-tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: nmt-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install shared lib and test dependencies
+        run: |
+          pip install ../libs/dablja-worker
+          pip install pytest
+          # Install stubs for heavy deps only
+          pip install sqlalchemy psycopg2-binary pika
+
+      - name: Run NMT unit tests
+        run: pytest tests/ -v --tb=short -ra
+
+  stt-unit-tests:
+    name: stt-service-unit-tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: stt-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install shared lib and test dependencies
+        run: |
+          pip install ../libs/dablja-worker
+          pip install pytest sqlalchemy psycopg2-binary pika
+
+      - name: Run STT unit tests
+        run: pytest tests/ -v --tb=short -ra
