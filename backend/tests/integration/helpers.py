@@ -11,7 +11,7 @@ PG_DSN: str = os.getenv(
     "TEST_PG_DSN",
     "host=localhost port=5433 dbname=dabljaar user=postgres password=postgres",
 )
-RMQ_URL: str = os.getenv("TEST_RMQ_URL", "amqp://guest:guest@localhost:5673/")
+RMQ_URL: str = os.getenv("TEST_RMQ_URL", "amqp://guest:guest@localhost:5672/")
 EXCHANGE = "dablja.jobs.exchange"
 
 

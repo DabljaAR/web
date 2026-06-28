@@ -161,6 +161,7 @@ infra/terraform/override.tf
 infra/terraform/override.tf.json
 infra/terraform/*.tfvars
 !infra/terraform/*.tfvars.example
+infra/terraform/secrets.auto.tfvars
 
 
 #orchestrator

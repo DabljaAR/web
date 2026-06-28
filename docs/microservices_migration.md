@@ -463,39 +463,34 @@ Workers stop writing `jobs`/`video_tasks`. They return results in messages; the 
 
 ## 12. Migration Plan (Phased)
 
+> **See also:** [docs/microservices_lld.md](microservices_lld.md) — canonical Phase 1/2 LLD.
+
 Incremental **Strangler Fig** — the monolith keeps running until each queue is cut over.
 
-### Step 0 — Contracts & scaffolding
-- [ ] Freeze message contracts ([§15](#15-appendix-message-contracts)).
-- [ ] Add `aio-pika` to backend deps; create a shared `messaging.py` (publish/consume helpers).
-- [ ] Extract the DB helpers from `BaseJobTask` into a transport-agnostic `job_state.py` (reused by all workers).
+### Phase 1 — Full-app LLD + STT/NMT validation ✅ COMPLETED
 
-### Step 1 — Orchestrator upgrade
-- [ ] Replace static `nextStageRoutes` with dynamic `output_type` resolution ([§7.2](#72-dynamic-transition-table)).
-- [ ] Add child-job creation before each publish (D7).
-- [ ] Add cancel re-check in `handleResult` (D8).
-- [ ] Unit-test `nextStage()` for all 5 `output_type` values.
+- [x] Freeze message contracts ([§15](#15-appendix-message-contracts)).
+- [x] Extract shared `dablja_worker.py` copies into `libs/dablja-worker` installable package.
+- [x] `stt-service`: consumer, idempotency, cancel, DB writes, result payload — unit tests passing.
+- [x] `nmt-service`: fan-out, cancel watcher, per-`output_type` status rules — extended unit tests.
+- [x] `docker-compose.test.yml` created; `helpers.py` port fixed (5673 → 5672).
+- [x] E2E scripts: `test_e2e_captions_only.sh`, `test_e2e_captions_and_translation.sh`.
+- [x] `backend-tests.yml` re-enabled; `go-tests.yml` added for orchestrator + stt/nmt unit tests.
+- [x] `docs/microservices_lld.md` written with full-app LLD (including Phase 2 TTS/merge specs).
 
-### Step 2 — Cut over one stage (STT first)
-- [ ] Build `stt` consumer for `stage.stt`; reuse `app/stt` inference.
-- [ ] Backend publishes `job.created` instead of `stt_transcribe.apply_async()` in [backend/app/media/service.py](../backend/app/media/service.py).
-- [ ] Validate end-to-end for `captionsOnly` (shortest pipeline) first.
+Canonical LLD: [docs/microservices_lld.md](microservices_lld.md)
 
-### Step 3 — NMT & TTS
-- [ ] NMT consumer with internal fan-out (D3); delete chord code in `nmt.py`.
-- [ ] TTS consumer with internal segments + combine (D4); delete Redis counter in `pipeline.py`.
-- [ ] Validate `captionsAndTranslation`, `translationAndTTS`.
+### Phase 2 — TTS service + merge worker + Celery decommission (PENDING)
 
-### Step 4 — Media & merge
-- [ ] Media preprocess stays pre-pipeline (D6); confirm backend triggers it then publishes `job.created`.
-- [ ] Merge worker on `stage.merge` (co-located with media/FFmpeg).
-- [ ] Validate `fullDubbing` end-to-end.
+- [ ] Build `tts-service` (port 8003) — extract SilmaTTSModelManager + audio_combine from backend.
+- [ ] Build `merge-service` (port 8004) — extract video mux from DubbingMergeService.
+- [ ] Orchestrator: restore `JobTypeDubbingMerge` in `stageOrder["fullDubbing"]`.
+- [ ] Remove `tts_bridge.py`, Celery TTS tasks, Redis counter from backend.
+- [ ] Decommission Celery/Redis/Flower; ship `docker-compose.microservices.prod.yml`.
+- [ ] Validate `translationAndTTS`, `fullDubbing`, cancel mid-TTS E2E.
 
-### Step 5 — Decommission Celery
-- [ ] Remove Celery app, queues, Flower; drop Redis broker usage (keep Redis only if still used for cache).
-- [ ] Update [docs/architecture.md](architecture.md) and [docs/pipeline.md](pipeline.md).
+### Phase 3 (Post-K8s) — Kubernetes + data ownership
 
-### Step 6 — Kubernetes + Phase 2/3
 - [ ] Containerize each service; deploy with KEDA ([§13](#13-kubernetes--scaling)).
 - [ ] Execute Phase 3 data ownership move ([§11](#11-data-ownership-plan)).
 

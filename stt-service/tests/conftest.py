@@ -1,13 +1,13 @@
-"""Shared fixtures for nmt-service unit tests.
+"""Shared fixtures for stt-service unit tests.
 
-All tests are pure unit tests: no real RabbitMQ, PostgreSQL, or NMT model needed.
-Heavy dependencies are stubbed so pytest collects without them installed.
+All tests are pure unit tests: no real RabbitMQ, PostgreSQL, MinIO,
+or Whisper model is needed. Everything is stubbed at import time.
 """
 import sys
 from unittest.mock import MagicMock
 
-# ── Stub heavy dependencies before any app import ────────────────────────────
-
+# ── Stub all heavy dependencies before any app module can be imported ─────────
+# These must be in place before the first `from app.xxx import` in a test.
 
 class _FakeAMQPConnectionError(Exception):
     pass
@@ -30,14 +30,13 @@ _pika_stub.exceptions = _pika_exceptions
 sys.modules.setdefault("pika", _pika_stub)
 sys.modules.setdefault("pika.exceptions", _pika_exceptions)
 
+sys.modules.setdefault("faster_whisper", MagicMock())
 sys.modules.setdefault("torch", MagicMock())
-sys.modules.setdefault("transformers", MagicMock())
-sys.modules.setdefault("sentencepiece", MagicMock())
-sys.modules.setdefault("langdetect", MagicMock())
+
 _botocore_stub = MagicMock()
-_botocore_stub.config = MagicMock()
-_botocore_stub.config.Config = MagicMock
+_botocore_config_stub = MagicMock()
+_botocore_config_stub.Config = MagicMock
+_botocore_stub.config = _botocore_config_stub
 sys.modules.setdefault("boto3", MagicMock())
 sys.modules.setdefault("botocore", _botocore_stub)
-sys.modules.setdefault("botocore.config", _botocore_stub.config)
-sys.modules.setdefault("groq", MagicMock())
+sys.modules.setdefault("botocore.config", _botocore_config_stub)
