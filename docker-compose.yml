@@ -65,6 +65,7 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         shared: ./libs/dablja-worker
+        docker_torch: ./libs/docker-torch
     container_name: dabljaar_stt_service
     environment:
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
@@ -111,6 +112,7 @@ services:
       dockerfile: Dockerfile
       additional_contexts:
         shared: ./libs/dablja-worker
+        docker_torch: ./libs/docker-torch
     container_name: dabljaar_nmt_service
     environment:
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
@@ -123,7 +125,7 @@ services:
       STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
       NMT_MODEL_LOCAL_PATH: ${NMT_MODEL_LOCAL_PATH:-/model-cache/nmt-v4}
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
-      NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-false}
+      NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
       NMT_INTERNAL_CONCURRENCY: ${NMT_INTERNAL_CONCURRENCY:-4}
       NMT_LENGTH_ADJUST_ENABLED: ${NMT_LENGTH_ADJUST_ENABLED:-false}
       GROQ_API_KEY: ${GROQ_API_KEY:-}

@@ -7,4 +7,6 @@ services:
     build:
       context: ./stt-service
       dockerfile: Dockerfile.gpu
+      additional_contexts:
+        shared: ./libs/dablja-worker
     gpus: all

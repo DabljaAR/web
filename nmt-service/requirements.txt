@@ -1,15 +1,8 @@
-fastapi>=0.115.0
-uvicorn>=0.30.0
-pika>=1.3.2
-torch>=2.0.0
-transformers>=4.40.0
-sentencepiece>=0.2.0
-langdetect>=1.0.9
-protobuf>=4.25.0
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.9
-boto3>=1.34.0
-botocore>=1.34.0
-pydantic-settings>=2.0.0
-python-dotenv>=1.0.0
-groq>=0.9.0
+# Runtime deps without PyTorch — torch is installed separately (see below).
+-r requirements-base.txt
+
+# PyTorch is NOT listed here on purpose: default PyPI torch wheels bundle CUDA (~GB).
+#
+# Docker (CPU):  libs/docker-torch/install_cpu.sh in Dockerfile
+# Local CPU dev: pip install "torch==2.2.0" --index-url https://download.pytorch.org/whl/cpu
+#                then pip install -r requirements-base.txt

@@ -1,16 +1,20 @@
+# syntax=docker/dockerfile:1.7
 # GPU variant of the STT microservice.
 # Installs torch with CUDA 11.8 so faster-whisper uses the GPU automatically.
 # Works on Pascal (GTX 1080 Ti, sm_61) and newer with driver >= 450.80.
 # Usage: built automatically by docker-compose.gpu.yml overlay.
-FROM python:3.12-slim
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libc6-dev \
-    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
+# Install shared worker library (provided via additional_contexts in compose)
+COPY --from=shared . /tmp/dablja-worker
+RUN pip install --no-cache-dir /tmp/dablja-worker
 
 # Install CUDA-enabled PyTorch first so faster-whisper picks up GPU support.
 # cu118 binaries run on any driver >= 450.80 (CUDA 11.8 ABI).
@@ -18,12 +22,24 @@ RUN pip install --no-cache-dir --timeout 600 --retries 3 \
     "torch==2.2.0+cu118" \
     --index-url https://download.pytorch.org/whl/cu118
 
-# Install remaining deps (faster-whisper, pika, sqlalchemy, boto3, …)
-# torch is already satisfied above so pip will skip it.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Remaining deps — requirements-base.txt intentionally omits torch (see requirements.txt).
+COPY requirements-base.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --default-timeout=600 --retries=3 -r requirements-base.txt
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local /usr/local
 
 COPY . .
+RUN rm -f app/dablja_worker.py
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
