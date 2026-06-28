@@ -12,9 +12,29 @@ output "instance_zone" {
   value       = var.zone
 }
 
+output "project_id" {
+  description = "GCP project ID"
+  value       = var.project_id
+}
+
 output "external_ip" {
   description = "External IP address of the instance"
   value       = module.compute.external_ip
+}
+
+output "deploy_hostname" {
+  description = "Hostname for GitHub Actions GCP_VM_HOST (FQDN when DNS enabled, else external IP)"
+  value       = var.dns_enabled ? module.dns_cloudflare[0].deploy_hostname : module.compute.external_ip
+}
+
+output "app_fqdn" {
+  description = "Application FQDN when DNS is enabled (set DOMAIN in .env.production to this value)"
+  value       = var.dns_enabled ? module.dns_cloudflare[0].app_fqdn : null
+}
+
+output "flower_fqdn" {
+  description = "Flower admin FQDN when DNS is enabled"
+  value       = var.dns_enabled ? module.dns_cloudflare[0].flower_fqdn : null
 }
 
 # =============================================================================
@@ -67,9 +87,10 @@ output "vm_service_account_email" {
 output "firewall_rule_ids" {
   description = "Created firewall rule IDs"
   value = {
-    public   = module.firewall.public_firewall_id
-    admin    = module.firewall.admin_firewall_id
-    internal = module.firewall.internal_firewall_id
-    iap_ssh  = module.firewall.iap_ssh_firewall_id
+    public     = module.firewall.public_firewall_id
+    admin      = module.firewall.admin_firewall_id
+    internal   = module.firewall.internal_firewall_id
+    iap_ssh    = module.firewall.iap_ssh_firewall_id
+    deploy_ssh = module.firewall.deploy_ssh_firewall_id
   }
 }
