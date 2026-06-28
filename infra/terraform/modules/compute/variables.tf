@@ -106,3 +106,15 @@ variable "service_account_scopes" {
   type        = list(string)
   default     = ["https://www.googleapis.com/auth/cloud-platform"]
 }
+
+variable "enable_oslogin" {
+  description = "Enable GCP OS Login on the VM. Set false when using metadata ssh-keys for GitHub Actions deploy."
+  type        = bool
+  default     = true
+}
+
+variable "ssh_public_keys" {
+  description = "SSH public keys for instance metadata (username:ssh-ed25519 AAAA... comment)"
+  type        = list(string)
+  default     = []
+}

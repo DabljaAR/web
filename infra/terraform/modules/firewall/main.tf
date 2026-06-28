@@ -71,3 +71,19 @@ resource "google_compute_firewall" "iap_ssh" {
   source_ranges = ["35.235.240.0/20"]
   target_tags   = [var.instance_tag]
 }
+
+# Allow SSH from GitHub Actions / CI (public IP, key-only auth)
+resource "google_compute_firewall" "deploy_ssh" {
+  count   = var.enable_deploy_ssh && length(var.deploy_ssh_cidr_blocks) > 0 ? 1 : 0
+  name    = "${var.name_prefix}-allow-deploy-ssh"
+  network = var.network_id
+  project = var.project_id
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+
+  source_ranges = var.deploy_ssh_cidr_blocks
+  target_tags   = [var.instance_tag]
+}

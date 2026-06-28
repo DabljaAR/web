@@ -41,3 +41,15 @@ variable "admin_cidrs" {
   type        = list(string)
   default     = []
 }
+
+variable "enable_deploy_ssh" {
+  description = "Allow SSH (port 22) from deploy_ssh_cidr_blocks for GitHub Actions deploy"
+  type        = bool
+  default     = true
+}
+
+variable "deploy_ssh_cidr_blocks" {
+  description = "CIDR blocks allowed SSH for CI deploy (GitHub Actions). Key-only auth; tighten CIDRs when possible."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}

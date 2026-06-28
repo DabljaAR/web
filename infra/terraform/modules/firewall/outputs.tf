@@ -17,3 +17,8 @@ output "iap_ssh_firewall_id" {
   description = "IAP SSH firewall rule ID"
   value       = google_compute_firewall.iap_ssh.id
 }
+
+output "deploy_ssh_firewall_id" {
+  description = "Deploy SSH firewall rule ID (GitHub Actions)"
+  value       = length(google_compute_firewall.deploy_ssh) > 0 ? google_compute_firewall.deploy_ssh[0].id : null
+}
