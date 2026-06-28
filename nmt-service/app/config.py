@@ -1,5 +1,13 @@
+import logging
 import os
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
+
+NMT_FALLBACK_MODE_ALLOWED = frozenset({"stage2_only", "stage3_updated"})
+NMT_FALLBACK_MODE_DEFAULT = "stage2_only"
 
 
 class Settings(BaseSettings):
@@ -46,6 +54,22 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         extra = "ignore"
+
+    @model_validator(mode="after")
+    def _validate_nmt_fallback_mode(self) -> "Settings":
+        """Normalize NMT_FALLBACK_MODE; unknown values fail safe to stage2_only."""
+        raw_mode = str(self.NMT_FALLBACK_MODE or "").strip().lower()
+        if raw_mode not in NMT_FALLBACK_MODE_ALLOWED:
+            logger.warning(
+                "Invalid NMT_FALLBACK_MODE=%r. Allowed=%s; falling back to %s.",
+                self.NMT_FALLBACK_MODE,
+                sorted(NMT_FALLBACK_MODE_ALLOWED),
+                NMT_FALLBACK_MODE_DEFAULT,
+            )
+            raw_mode = NMT_FALLBACK_MODE_DEFAULT
+
+        object.__setattr__(self, "NMT_FALLBACK_MODE", raw_mode)
+        return self
 
     def s3_endpoint(self) -> str:
         if self.S3_ENDPOINT_URL:

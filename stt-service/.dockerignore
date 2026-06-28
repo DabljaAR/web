@@ -1,0 +1,60 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments and local secrets
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+ENV/
+env/
+
+# Build artifacts
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+wheels/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git / CI (not needed in runtime image)
+.git/
+.gitignore
+.gitattributes
+.github/
+.gitlab-ci.yml
+
+# Tests and coverage (runtime uses app/ only)
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+pytest.ini
+
+# Docker build files (already applied; no need inside image)
+Dockerfile
+Dockerfile.*
+docker-compose*.yml
+.dockerignore
+
+# Docs (not required at runtime)
+README.md
+*.md
+docs/

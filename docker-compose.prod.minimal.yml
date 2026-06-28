@@ -65,7 +65,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
       args:
-        INSTALL_AI: "true"
+        INSTALL_AI: "false"
     container_name: dabljaar_backend
     ports: []
     volumes: []
@@ -76,7 +76,7 @@ services:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
     environment:
-      INSTALL_AI: "true"
+      INSTALL_AI: "false"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
       SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       ALGORITHM: HS256
