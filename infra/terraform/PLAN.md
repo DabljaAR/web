@@ -1,28 +1,13 @@
-# Terraform Infrastructure Plan
+# Terraform scope
 
-## Scope
+Terraform provisions **infrastructure and host bootstrap** only:
 
-Terraform provisions infrastructure primitives only:
-- VPC network and subnet
-- Firewall rules
-- VM instance (optional GPU)
-- Persistent data disk
-- GCS storage bucket
-- Static external IP
+- VPC, firewall, GCS bucket, static IP, VM, data disk
+- Optional Cloudflare DNS A records
+- Optional Secret Manager bootstrap secrets + VM service account IAM
+- VM startup script: Docker, data disk mount, `.env.production` + GitHub deploy key from Secret Manager
 
-Terraform does not manage application lifecycle tasks such as:
-- cloning repositories
-- generating app runtime environment files
-- starting or managing Docker Compose services
-- app-level secret population
-
-## Implementation Notes
-
-1. Keep root modules limited to network, firewall, storage, and compute.
-2. Keep storage provisioning as infrastructure concern.
-3. Remove app-runtime startup scripts from compute metadata.
-4. Keep outputs infrastructure-centric.
-5. Keep example configs free of app/runtime variables.
+**Application deploy** (git pull, compose, migrations) stays in [`.github/workflows/deploy-gcp.yml`](../../.github/workflows/deploy-gcp.yml).
 
 ## Validation
 
@@ -30,5 +15,4 @@ Terraform does not manage application lifecycle tasks such as:
 terraform fmt -recursive
 terraform init -backend=false
 terraform validate
-terraform plan -var-file=terraform.tfvars
 ```

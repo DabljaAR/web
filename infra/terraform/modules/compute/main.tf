@@ -19,7 +19,7 @@ resource "google_compute_disk" "data" {
   labels  = var.labels
 
   lifecycle {
-    prevent_destroy = false # Set to true for production
+    prevent_destroy = false
   }
 }
 
@@ -54,9 +54,9 @@ resource "google_compute_instance" "vm" {
     }
   }
 
-  # Required for GPU instances
+  # Required for GPU instances; MIGRATE for CPU-only avoids unnecessary stop on host maintenance
   scheduling {
-    on_host_maintenance = "TERMINATE"
+    on_host_maintenance = var.gpu_count > 0 ? "TERMINATE" : "MIGRATE"
     automatic_restart   = var.spot ? false : true
     preemptible         = var.spot
     provisioning_model  = var.spot ? "SPOT" : "STANDARD"
@@ -79,8 +79,11 @@ resource "google_compute_instance" "vm" {
 
   metadata = merge(
     {
-      enable-oslogin = "TRUE"
+      enable-oslogin = var.enable_oslogin ? "TRUE" : "FALSE"
     },
+    length(var.ssh_public_keys) > 0 ? {
+      ssh-keys = join("\n", var.ssh_public_keys)
+    } : {},
     var.startup_script_content != null ? {
       "startup-script" = var.startup_script_content
     } : {}

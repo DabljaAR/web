@@ -1,66 +1,76 @@
 # =============================================================================
 # DabljaAR Terraform Configuration Example
 # =============================================================================
-# Copy this file to terraform.tfvars and fill in your values
+# Copy to terraform.tfvars and edit. See README.md for the full setup order.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Required: GCP Project Configuration
+# Required: GCP Project
 # -----------------------------------------------------------------------------
-project_id   = "your-gcp-project-id"    # Your GCP project ID
-project_name = "dabljaar"                # Short name for resources
-environment  = "dev"                     # dev, staging, or prod
+project_id   = "your-gcp-project-id"
+project_name = "dabljaar"
+environment  = "prod" # dev, staging, or prod
 
 # -----------------------------------------------------------------------------
-# Required: Region & Zone
+# Region & Zone
 # -----------------------------------------------------------------------------
-# Choose a region with T4 GPUs available
-# See: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones
 region = "us-central1"
 zone   = "us-central1-a"
 
 # -----------------------------------------------------------------------------
-# Optional: Network Configuration
+# Network
 # -----------------------------------------------------------------------------
 subnet_cidr = "10.0.0.0/24"
 
-# Admin access (SSH, Flower, MinIO console)
-# Add your IP: curl ifconfig.me
+# Restrict admin UIs to your IP (curl -4 ifconfig.me). Do not use 0.0.0.0/0 in prod.
 admin_cidr_blocks = [
-  # "YOUR_IP/32",     # Your home IP
-  # "OFFICE_IP/32",   # Office IP
+  # "YOUR_IP/32",
 ]
 
-# Public ports (Caddy TLS termination)
 public_ports = [80, 443]
-
-# Admin ports reachable only from admin_cidr_blocks
-# SSH is handled separately via IAP firewall rule in this module.
+# SSH: use IAP (35.235.240.0/20 rule) or metadata key below — avoid opening 22 publicly.
 admin_ports = [5555, 9001]
 
-# -----------------------------------------------------------------------------
-# Optional: Compute Configuration
-# -----------------------------------------------------------------------------
-machine_type   = "n1-standard-4"     # 4 vCPU, 15GB RAM
-gpu_type       = "nvidia-tesla-t4"   # 16GB VRAM
-gpu_count      = 0
-enable_spot    = true                # ~70% cost savings
-startup_script_enabled = false       # Set true to install Docker + host baseline at first boot
-deployment_user = "ubuntu"          # Ownership for /opt/web paths created by bootstrap
-enable_vm_service_account = false    # Set true to create and attach a dedicated VM SA
-# vm_env_secret_name = "env-production"  # Optional: secret containing full .env.production text
-# vm_git_deploy_key_secret_name = "github-deploy-key"  # Optional: secret containing private deploy key for git clone
-# vm_service_account_roles = [        # Optional override
-#   "roles/logging.logWriter",
-#   "roles/monitoring.metricWriter",
-#   "roles/secretmanager.secretAccessor"
-# ]
-# vm_service_account_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
-boot_disk_image = "projects/deeplearning-platform-release/global/images/family/common-cu128-ubuntu-2204-nvidia-570"
-boot_disk_size = 50                  # GB
-data_disk_size = 100                 # GB (persistent)
+# GitHub Actions deploy SSH (port 22, key-only auth). Tighten CIDRs when possible.
+enable_deploy_ssh      = true
+deploy_ssh_cidr_blocks = ["0.0.0.0/0"]
 
 # -----------------------------------------------------------------------------
-# Optional: Storage Configuration
+# DNS (Cloudflare — after nameservers updated at get.tech)
 # -----------------------------------------------------------------------------
-# Bucket is created automatically in the selected region by the storage module.
+dns_enabled       = true
+dns_zone_name     = "yourbrand.tech"
+dns_app_subdomain = "app" # -> app.yourbrand.tech (set DOMAIN to this in env-production)
+dns_proxied       = false # must stay false for Caddy ACME on the VM
+
+# Cloudflare: export CLOUDFLARE_API_TOKEN before plan/apply (see README step 3c)
+
+# -----------------------------------------------------------------------------
+# Compute
+# -----------------------------------------------------------------------------
+machine_type   = "n2-standard-4"
+gpu_type       = "nvidia-tesla-t4"
+gpu_count      = 0
+enable_spot    = false
+boot_disk_image = "projects/deeplearning-platform-release/global/images/family/common-cu128-ubuntu-2204-nvidia-570"
+boot_disk_size  = 50
+data_disk_size  = 100
+
+startup_script_enabled    = true
+deployment_user           = "ubuntu" # must match vm_ssh_public_key username and GCP_VM_USER
+enable_vm_service_account = true
+enable_oslogin            = false
+
+# Public key for GitHub Actions -> VM SSH (generate in README step 2a)
+# vm_ssh_public_key = "ubuntu:ssh-ed25519 AAAA... gha-vm-deploy"
+
+vm_env_secret_name            = "env-production"
+vm_git_deploy_key_secret_name = "github-deploy-key"
+
+# -----------------------------------------------------------------------------
+# Secrets (loaded from files in locals.tf — see secrets.auto.tfvars.example for path overrides)
+# -----------------------------------------------------------------------------
+manage_secrets         = true
+manage_secret_versions = true
+# env_production_file    = ""  # default: repo-root .env.production
+# github_deploy_key_file = ""  # default: ../../../keys/github_deploy_key

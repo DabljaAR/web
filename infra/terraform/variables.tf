@@ -88,6 +88,23 @@ variable "admin_ports" {
   default     = [5555, 9001]
 }
 
+variable "enable_deploy_ssh" {
+  description = "Allow SSH from deploy_ssh_cidr_blocks for GitHub Actions deploy (port 22, key-only auth)"
+  type        = bool
+  default     = true
+}
+
+variable "deploy_ssh_cidr_blocks" {
+  description = "CIDR blocks allowed SSH for CI deploy. Default 0.0.0.0/0 for GitHub-hosted runners."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+
+  validation {
+    condition     = alltrue([for cidr in var.deploy_ssh_cidr_blocks : can(cidrhost(cidr, 0))])
+    error_message = "All deploy_ssh_cidr_blocks must be valid CIDR notation."
+  }
+}
+
 # =============================================================================
 # Compute Configuration
 # =============================================================================
@@ -213,5 +230,94 @@ variable "data_disk_size" {
     condition     = var.data_disk_size >= 50 && var.data_disk_size <= 2000
     error_message = "Data disk size must be between 50 and 2000 GB."
   }
+}
+
+# =============================================================================
+# VM SSH (GitHub Actions deploy)
+# =============================================================================
+
+variable "enable_oslogin" {
+  description = "Enable OS Login on the VM. Set false when using metadata ssh-keys for GitHub Actions SSH deploy."
+  type        = bool
+  default     = false
+}
+
+variable "vm_ssh_public_key" {
+  description = "Public SSH key for GitHub Actions -> VM access (format: USER:ssh-ed25519 AAAA... comment). USER must match deployment_user."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.vm_ssh_public_key == "" || can(regex("^[^:]+:ssh-", var.vm_ssh_public_key))
+    error_message = "vm_ssh_public_key must be empty or in the form USER:ssh-ed25519 AAAA... (or ssh-rsa)."
+  }
+}
+
+# =============================================================================
+# DNS (Cloudflare)
+# =============================================================================
+
+variable "dns_enabled" {
+  description = "Manage A records in Cloudflare (requires zone on Cloudflare and nameservers updated at get.tech)"
+  type        = bool
+  default     = false
+}
+
+variable "dns_zone_name" {
+  description = "Cloudflare DNS zone apex (e.g. yourbrand.tech)"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.dns_zone_name == "" || can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.dns_zone_name))
+    error_message = "dns_zone_name must be a valid domain name (e.g. yourbrand.tech)."
+  }
+}
+
+variable "dns_app_subdomain" {
+  description = "App hostname label within dns_zone_name (e.g. app -> app.yourbrand.tech)"
+  type        = string
+  default     = "app"
+}
+
+variable "dns_proxied" {
+  description = "Cloudflare proxy (orange cloud). Keep false for Caddy ACME on the VM."
+  type        = bool
+  default     = false
+}
+
+# =============================================================================
+# Secret Manager (bootstrap)
+# =============================================================================
+
+variable "manage_secrets" {
+  description = "Create bootstrap secrets in Secret Manager (env-production, github-deploy-key)"
+  type        = bool
+  default     = true
+}
+
+variable "manage_secret_versions" {
+  description = "When true, populate secret versions from local files (see env_production_file, github_deploy_key_file). When false, add versions manually after apply."
+  type        = bool
+  default     = true
+}
+
+variable "env_production_file" {
+  description = "Path to .env.production for Secret Manager. Default: repo-root .env.production"
+  type        = string
+  default     = ""
+}
+
+variable "github_deploy_key_file" {
+  description = "Path to GitHub deploy private key. Default: ../../../keys/github_deploy_key relative to infra/terraform"
+  type        = string
+  default     = ""
+}
+
+variable "bootstrap_secret_values" {
+  description = "Optional inline secret overrides (merged on top of file-based values). Prefer file paths above; do not use file() in .tfvars."
+  type        = map(string)
+  sensitive   = true
+  default     = {}
 }
 
