@@ -233,7 +233,7 @@ class SilmaTTSModelManager(Task):
 
         import boto3
         import zipfile
-        from botocore.config import Config as BotoConfig
+        from dablja_worker.s3_client import make_s3_client
 
         zip_name = f"{model_type}_onnx.zip"
         s3_key = f"{prefix}/{zip_name}"
@@ -243,12 +243,10 @@ class SilmaTTSModelManager(Task):
         if encoder_path.exists() and decoder_path.exists():
             return True
 
-        client = boto3.client(
-            "s3",
+        client = make_s3_client(
             endpoint_url=settings.S3_ENDPOINT_URL or None,
             aws_access_key_id=settings.S3_ACCESS_KEY_ID or settings.MINIO_ACCESS_KEY,
             aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY or settings.MINIO_SECRET_KEY,
-            config=BotoConfig(signature_version="s3v4"),
             region_name=settings.S3_REGION or "us-east-1",
         )
 

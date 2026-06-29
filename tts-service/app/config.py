@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     S3_ENDPOINT_URL: str = ""
     S3_ACCESS_KEY_ID: str = ""
     S3_SECRET_ACCESS_KEY: str = ""
+    S3_REGION: str = "us-east-1"
     S3_MEDIA_BUCKET: str = "dablaja-videos"
 
     SILMA_DEVICE: str = "auto"
@@ -65,6 +66,9 @@ class Settings(BaseSettings):
 
     def s3_secret_key(self) -> str:
         return self.S3_SECRET_ACCESS_KEY or self.MINIO_SECRET_KEY
+
+    def s3_region(self) -> str:
+        return (self.S3_REGION or "us-east-1").strip() or "us-east-1"
 
     def catt_tashkeel_dir(self) -> str:
         if self.CATT_TASHKEEL_MODEL_DIR:

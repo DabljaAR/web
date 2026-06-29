@@ -3,8 +3,7 @@ import io
 import logging
 from typing import Optional
 
-import boto3
-from botocore.config import Config
+from dablja_worker.s3_client import make_s3_client
 
 from app.config import settings
 
@@ -16,13 +15,11 @@ _client: Optional[object] = None
 def _get_client():
     global _client
     if _client is None:
-        _client = boto3.client(
-            "s3",
+        _client = make_s3_client(
             endpoint_url=settings.s3_endpoint(),
             aws_access_key_id=settings.s3_access_key(),
             aws_secret_access_key=settings.s3_secret_key(),
-            config=Config(signature_version="s3v4"),
-            region_name="us-east-1",
+            region_name=settings.s3_region(),
         )
     return _client
 

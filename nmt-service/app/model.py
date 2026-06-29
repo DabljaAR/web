@@ -9,9 +9,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Callable, List, Optional
 
-import boto3
 import torch
-from botocore.config import Config as BotoConfig
+from dablja_worker.s3_client import make_s3_client
 from dablja_worker.s3_model_download import download_s3_prefix
 from langdetect import detect, DetectorFactory
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
@@ -28,13 +27,11 @@ _REQUIRED_TOKENIZER_FILES = {"tokenizer.json", "tokenizer_config.json"}
 
 def _s3_download_fn(prefix: str, local_path: str, bucket: str) -> bool:
     """Download NMT weights from object storage by prefix (parallel per-key downloads)."""
-    client = boto3.client(
-        "s3",
+    client = make_s3_client(
         endpoint_url=settings.s3_endpoint(),
         aws_access_key_id=settings.s3_access_key(),
         aws_secret_access_key=settings.s3_secret_key(),
-        config=BotoConfig(signature_version="s3v4"),
-        region_name="us-east-1",
+        region_name=getattr(settings, "S3_REGION", "us-east-1") or "us-east-1",
     )
     downloaded = download_s3_prefix(
         client,
