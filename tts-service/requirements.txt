@@ -1,0 +1,2 @@
+# torch installed separately via libs/docker-torch (CPU) or Dockerfile.gpu (CUDA)
+-r requirements-base.txt

@@ -6,11 +6,10 @@ import (
 	"github.com/dabljaar/orchestrator/internal/db"
 )
 
-func TestNextStage_FullDubbingEndsAtTTS(t *testing.T) {
-	// Bridged TTS path performs merge inside tts_combine_results; no separate merge stage.
-	next, ok := nextStage("fullDubbing", db.JobTypeTTSSynthesize)
+func TestNextStage_FullDubbingEndsAtMerge(t *testing.T) {
+	next, ok := nextStage("fullDubbing", db.JobTypeDubbingMerge)
 	if ok {
-		t.Fatalf("nextStage(fullDubbing, TTS) = (%q, true), want (_, false)", next)
+		t.Fatalf("nextStage(fullDubbing, MERGE) = (%q, true), want (_, false)", next)
 	}
 }
 
@@ -21,6 +20,7 @@ func TestNextStage_FullDubbingIntermediateStages(t *testing.T) {
 	}{
 		{db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate},
 		{db.JobTypeNMTTranslate, db.JobTypeTTSSynthesize},
+		{db.JobTypeTTSSynthesize, db.JobTypeDubbingMerge},
 	}
 	for _, tc := range cases {
 		next, ok := nextStage("fullDubbing", tc.current)

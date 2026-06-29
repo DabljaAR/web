@@ -35,9 +35,7 @@ var stageOrder = map[string][]db.JobType{
 	"captionsOnly":           {db.JobTypeSTTTranscribe},
 	"captionsAndTranslation": {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate},
 	"translationAndTTS":      {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate, db.JobTypeTTSSynthesize},
-	// fullDubbing ends at TTS while the bridged Celery path performs merge inside
-	// tts_combine_results. Re-add JobTypeDubbingMerge when a dedicated merge worker exists.
-	"fullDubbing": {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate, db.JobTypeTTSSynthesize},
+	"fullDubbing":            {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate, db.JobTypeTTSSynthesize, db.JobTypeDubbingMerge},
 }
 
 // startRoute maps JobType to the RabbitMQ routing key for dispatching that stage.

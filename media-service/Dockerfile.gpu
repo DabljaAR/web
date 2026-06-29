@@ -1,0 +1,26 @@
+# GPU-enabled media service — GTX 1080 Ti (Pascal, CUDA 12.x)
+# Uses NVIDIA CUDA runtime base so FFmpeg can access NVDEC (hardware decode)
+# and NVENC (hardware encode, H.264/HEVC) via the host driver bind-mount.
+FROM nvidia/cuda:12.3.2-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Python 3.12 (deadsnakes PPA) + FFmpeg from Ubuntu apt
+# Ubuntu 22.04 ffmpeg includes NVENC/NVDEC support; libs come from CUDA runtime + host driver
+RUN apt-get update && apt-get install -y software-properties-common curl \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y \
+        python3.12 python3.12-venv \
+        ffmpeg \
+    && curl -sSL https://bootstrap.pypa.io/get-pip.py | python3.12 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN python3.12 -m pip install --no-cache-dir -r requirements.txt
+
+COPY app ./app
+
+EXPOSE 8003
+CMD ["python3.12", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8003"]

@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1.7
+# GPU variant of the TTS microservice (SILMA-TTS on CUDA).
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=shared . /tmp/dablja-worker
+RUN pip install --no-cache-dir /tmp/dablja-worker
+
+RUN pip install --no-cache-dir --timeout 600 --retries 3 \
+    "torch==2.2.0+cu118" \
+    --index-url https://download.pytorch.org/whl/cu118
+
+COPY requirements-base.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --default-timeout=600 --retries=3 -r requirements-base.txt
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local /usr/local
+
+COPY . .
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+EXPOSE 8005
+
+CMD ["python", "-m", "app.main"]
