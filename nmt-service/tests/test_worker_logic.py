@@ -101,22 +101,20 @@ def test_translate_all_segments_returns_none_on_cancel():
 
 
 def test_translate_all_segments_returns_none_on_mid_job_cancel():
-    """Fan-out returns None when cancelled_flag is flipped during execution."""
+    """Batch path returns None when cancelled between inference batches."""
     cancelled_flag = [False]
-
     call_count = [0]
 
-    def slow_translate_one(idx, seg, src, tgt, beams, ratio, is_cancelled):
+    def fake_batch(*_args, **kwargs):
         call_count[0] += 1
-        # Simulate mid-job cancellation after the first segment starts
         if call_count[0] >= 1:
             cancelled_flag[0] = True
-        if is_cancelled():
+        is_cancelled = kwargs.get("is_cancelled")
+        if is_cancelled and is_cancelled():
             return None
-        return {"start": seg["start"], "end": seg["end"],
-                "original_text": seg["text"], "translated_text": "translated"}
+        return ["translated"] * len(_args[0])
 
-    with patch("app.worker._translate_one_segment", side_effect=slow_translate_one):
+    with patch("app.worker._translator.translate_segments_batch", side_effect=fake_batch):
         result = _translate_all_segments(
             "job-cancel-mid",
             [{"text": "seg", "start": i * 1.0, "end": i * 1.0 + 1.0} for i in range(5)],
@@ -132,16 +130,14 @@ def test_translate_all_segments_returns_none_on_mid_job_cancel():
 def test_translate_all_segments_returns_correct_shape():
     """Each translated segment must have the 4 keys the TTS service expects."""
     cancelled_flag = [False]
+    mock_translator = MagicMock()
+    mock_translator.translate_segments_batch.return_value = [
+        "translated-0",
+        "translated-1",
+        "translated-2",
+    ]
 
-    def fake_translate(idx, seg, src, tgt, beams, ratio, is_cancelled):
-        return {
-            "start": seg["start"],
-            "end": seg["end"],
-            "original_text": seg["text"],
-            "translated_text": f"translated-{idx}",
-        }
-
-    with patch("app.worker._translate_one_segment", side_effect=fake_translate):
+    with patch("app.worker._translator", mock_translator):
         segments = [
             {"text": f"seg {i}", "start": float(i), "end": float(i + 1)}
             for i in range(3)
@@ -168,6 +164,28 @@ def test_translate_all_segments_empty_input_returns_empty_list():
         "job-empty", [], None, "arb_Arab", 5, 0.5, cancelled_flag
     )
     assert result == []
+
+
+def test_translate_all_segments_does_not_use_thread_pool():
+    """F12: post-batch work is sequential; inference parallelism comes from batching."""
+    cancelled_flag = [False]
+    mock_translator = MagicMock()
+    mock_translator.translate_segments_batch.return_value = ["t0", "t1"]
+
+    with patch("app.worker._translator", mock_translator), patch(
+        "concurrent.futures.ThreadPoolExecutor"
+    ) as pool_cls:
+        segments = [
+            {"text": "a", "start": 0.0, "end": 1.0},
+            {"text": "b", "start": 1.0, "end": 2.0},
+        ]
+        result = _translate_all_segments(
+            "job-no-pool", segments, None, "arb_Arab", 5, 0.5, cancelled_flag
+        )
+
+    assert result is not None
+    assert len(result) == 2
+    pool_cls.assert_not_called()
 
 
 # ── _translate_one_segment: not cancelled → returns translated dict ───────────

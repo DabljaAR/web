@@ -3,6 +3,7 @@ dablja_worker/__init__.py
 dablja_worker/consumer.py
 dablja_worker/job_state.py
 dablja_worker/results.py
+dablja_worker/s3_model_download.py
 dablja_worker.egg-info/PKG-INFO
 dablja_worker.egg-info/SOURCES.txt
 dablja_worker.egg-info/dependency_links.txt

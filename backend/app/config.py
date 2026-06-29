@@ -210,6 +210,12 @@ class Settings(BaseSettings):
     TTS_FORCE_TASHKEEL: bool = (
         os.getenv("TTS_FORCE_TASHKEEL", "False").lower() == "true"
     )  # Force inclusion of Arabic diacritics (tashkeel) in input text for better pronunciation, at the cost of requiring properly formatted input
+    CATT_TASHKEEL_S3_PREFIX: str = os.getenv(
+        "CATT_TASHKEEL_S3_PREFIX", "catt_tashkeel/onnx_models"
+    )
+    CATT_TASHKEEL_ALLOW_GITHUB_FALLBACK: bool = (
+        os.getenv("CATT_TASHKEEL_ALLOW_GITHUB_FALLBACK", "false").lower() == "true"
+    )
 
     # ========== NEURAL MACHINE TRANSLATION (NMT) ==========
     NMT_MODEL_LOCAL_PATH: str = os.getenv("NMT_MODEL_LOCAL_PATH", "/model-cache/nmt-v4")
@@ -217,6 +223,9 @@ class Settings(BaseSettings):
     NMT_MODEL_KEY: str = os.getenv("NMT_MODEL_KEY", "nmt-v4")
     NMT_HF_FALLBACK: str = os.getenv(
         "NMT_HF_FALLBACK", "facebook/nllb-200-distilled-600M"
+    )
+    NMT_ALLOW_HF_FALLBACK: bool = (
+        os.getenv("NMT_ALLOW_HF_FALLBACK", "false").lower() == "true"
     )
     # stage2_only: stop after stage-2 retry
     # stage3_updated: continue to stage-3 only when updated Arabic/mixed-token score is high

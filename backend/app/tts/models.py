@@ -183,6 +183,70 @@ class SilmaTTSModelManager(Task):
             os.environ.get("CATT_TASHKEEL_MODEL_DIR"),
         )
 
+    def _ensure_catt_models_cached(self) -> None:
+        """Pre-fetch catt_tashkeel ONNX artifacts from S3 (F9) before first synthesis."""
+        for model_type in ("ed_model", "eo_model"):
+            target_dir = Path(os.environ.get("CATT_TASHKEEL_MODEL_DIR", "")) / model_type
+            encoder_path = target_dir / "encoder.onnx"
+            decoder_path = target_dir / "decoder.onnx"
+            if encoder_path.exists() and decoder_path.exists():
+                continue
+            if not self._download_catt_models_from_s3(model_type, target_dir.parent):
+                logger.info(
+                    "[TTS][CACHE] catt_tashkeel %s not on S3 — will resolve at first use",
+                    model_type,
+                )
+
+    def _download_catt_models_from_s3(self, model_type: str, model_root: Path) -> bool:
+        """Download a catt_tashkeel ONNX zip from the models bucket and extract it."""
+        from app.config import settings
+
+        if settings.STORAGE_BACKEND.lower() != "s3":
+            return False
+
+        prefix = (settings.CATT_TASHKEEL_S3_PREFIX or "").strip("/")
+        bucket = (settings.S3_MODELS_BUCKET or "").strip()
+        if not prefix or not bucket:
+            return False
+
+        import boto3
+        import zipfile
+        from botocore.config import Config as BotoConfig
+
+        zip_name = f"{model_type}_onnx.zip"
+        s3_key = f"{prefix}/{zip_name}"
+        extract_dir = model_root / model_type
+        encoder_path = extract_dir / "encoder.onnx"
+        decoder_path = extract_dir / "decoder.onnx"
+        if encoder_path.exists() and decoder_path.exists():
+            return True
+
+        client = boto3.client(
+            "s3",
+            endpoint_url=settings.S3_ENDPOINT_URL or None,
+            aws_access_key_id=settings.S3_ACCESS_KEY_ID or settings.MINIO_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_ACCESS_KEY or settings.MINIO_SECRET_KEY,
+            config=BotoConfig(signature_version="s3v4"),
+            region_name=settings.S3_REGION or "us-east-1",
+        )
+
+        model_root.mkdir(parents=True, exist_ok=True)
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        zip_path = model_root / zip_name
+
+        try:
+            logger.info("[TTS][CACHE] Downloading catt_tashkeel from s3://%s/%s", bucket, s3_key)
+            client.download_file(bucket, s3_key, str(zip_path))
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(extract_dir)
+            logger.info("[TTS][CACHE] source=s3_hit component=catt_tashkeel model=%s", model_type)
+            return encoder_path.exists() and decoder_path.exists()
+        except Exception as exc:
+            logger.warning("[TTS] catt_tashkeel S3 download failed for %s: %s", model_type, exc)
+            return False
+        finally:
+            zip_path.unlink(missing_ok=True)
+
     def _patch_catt_tashkeel_model_dir(self) -> None:
         """Monkey-patch catt_tashkeel to keep ONNX model downloads out of site-packages."""
         try:
@@ -209,6 +273,8 @@ class SilmaTTSModelManager(Task):
         )
         model_root.mkdir(parents=True, exist_ok=True)
 
+        owner = self
+
         def _download_models(self, model_type):
             downloads = {
                 "ed_model": "https://github.com/abjadai/catt/releases/download/v2/ed_model_onnx.zip",
@@ -222,6 +288,19 @@ class SilmaTTSModelManager(Task):
             decoder_path = extract_dir / "decoder.onnx"
             if encoder_path.exists() and decoder_path.exists():
                 return
+
+            from app.config import settings
+
+            if owner._download_catt_models_from_s3(model_type, model_root):
+                return
+
+            if not settings.CATT_TASHKEEL_ALLOW_GITHUB_FALLBACK:
+                raise RuntimeError(
+                    f"catt_tashkeel model {model_type!r} not found locally or in S3 "
+                    f"(prefix={settings.CATT_TASHKEEL_S3_PREFIX!r}). "
+                    "Mirror the ONNX zip to your models bucket or set "
+                    "CATT_TASHKEEL_ALLOW_GITHUB_FALLBACK=true for break-glass use."
+                )
 
             model_root.mkdir(parents=True, exist_ok=True)
             extract_dir.mkdir(parents=True, exist_ok=True)
@@ -423,9 +502,10 @@ class SilmaTTSModelManager(Task):
         if not isinstance(_ref_text, str):
             _ref_text = str(_ref_text) if _ref_text is not None else ""
         if not _ref_text.strip():
-            # Empty ref_text triggers silma_tts auto-transcription (Whisper download).
-            # Use None so silma_tts handles it gracefully.
-            _ref_text = None
+            raise ValueError(
+                "SILMA_REFERENCE_TEXT must be set to a non-empty string. "
+                "Empty ref_text triggers silma-tts Whisper auto-transcription (runtime download)."
+            )
 
         if not _ref_audio:
             raise ValueError(

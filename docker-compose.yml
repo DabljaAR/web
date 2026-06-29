@@ -83,6 +83,9 @@ services:
       TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/model-cache/hf/transformers}
       STT_DEVICE: ${STT_DEVICE:-auto}
       STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-auto}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      STT_ALLOW_HF_FALLBACK: ${STT_ALLOW_HF_FALLBACK:-true}
+      PREWARM_STT_MODEL: ${PREWARM_STT_MODEL:-true}
       PORT: 8001
     ports:
       - "8001:8001"
@@ -93,7 +96,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 180s
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -126,10 +129,11 @@ services:
       NMT_MODEL_LOCAL_PATH: ${NMT_MODEL_LOCAL_PATH:-/model-cache/nmt-v4}
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
       NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
-      NMT_INTERNAL_CONCURRENCY: ${NMT_INTERNAL_CONCURRENCY:-4}
       NMT_LENGTH_ADJUST_ENABLED: ${NMT_LENGTH_ADJUST_ENABLED:-false}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       HF_TOKEN: ${HF_TOKEN:-}
+      NMT_ALLOW_HF_FALLBACK: ${NMT_ALLOW_HF_FALLBACK:-true}
+      PREWARM_NMT_MODEL: ${PREWARM_NMT_MODEL:-true}
       PORT: 8002
     ports:
       - "8002:8002"
@@ -140,7 +144,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 300s
     depends_on:
       rabbitmq:
         condition: service_healthy

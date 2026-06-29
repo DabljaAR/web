@@ -3,6 +3,7 @@ Name: dablja-worker
 Version: 0.1.0
 Summary: Shared RabbitMQ consumer utilities for DabljaAR pipeline workers
 Requires-Python: >=3.12
+Requires-Dist: boto3>=1.34.0
 Requires-Dist: pika>=1.3.2
 Requires-Dist: sqlalchemy>=2.0.0
 Requires-Dist: psycopg2-binary>=2.9.9

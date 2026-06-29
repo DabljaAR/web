@@ -145,7 +145,11 @@ def _optional_prewarm_models(sender=None, **kwargs):
         try:
             from app.tts.models import SilmaTTSModelManager
 
-            _ = SilmaTTSModelManager()._load_model()
+            manager = SilmaTTSModelManager()
+            manager._configure_tts_runtime_paths()
+            if _is_enabled("TTS_FORCE_TASHKEEL") or os.getenv("TTS_FORCE_TASHKEEL", "false").strip().lower() in {"1", "true", "yes", "on"}:
+                manager._ensure_catt_models_cached()
+            _ = manager._load_model()
             logger.info(
                 "[CELERY][PREWARM] TTS ready in %.1fs",
                 time.perf_counter() - t0,

@@ -37,7 +37,15 @@ sys.modules.setdefault("langdetect", MagicMock())
 _botocore_stub = MagicMock()
 _botocore_stub.config = MagicMock()
 _botocore_stub.config.Config = MagicMock
-sys.modules.setdefault("boto3", MagicMock())
+_boto3_s3_transfer = MagicMock()
+_boto3_s3_transfer.TransferConfig = MagicMock
+_boto3_s3 = MagicMock()
+_boto3_s3.transfer = _boto3_s3_transfer
+_boto3_stub = MagicMock()
+_boto3_stub.s3 = _boto3_s3
+sys.modules.setdefault("boto3", _boto3_stub)
+sys.modules.setdefault("boto3.s3", _boto3_s3)
+sys.modules.setdefault("boto3.s3.transfer", _boto3_s3_transfer)
 sys.modules.setdefault("botocore", _botocore_stub)
 sys.modules.setdefault("botocore.config", _botocore_stub.config)
 sys.modules.setdefault("groq", MagicMock())

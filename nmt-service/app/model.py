@@ -12,6 +12,7 @@ from typing import Callable, List, Optional
 import boto3
 import torch
 from botocore.config import Config as BotoConfig
+from dablja_worker.s3_model_download import download_s3_prefix
 from langdetect import detect, DetectorFactory
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
@@ -26,7 +27,7 @@ _REQUIRED_TOKENIZER_FILES = {"tokenizer.json", "tokenizer_config.json"}
 
 
 def _s3_download_fn(prefix: str, local_path: str, bucket: str) -> bool:
-    """Download NMT weights from object storage by prefix."""
+    """Download NMT weights from object storage by prefix (parallel per-key downloads)."""
     client = boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint(),
@@ -35,23 +36,17 @@ def _s3_download_fn(prefix: str, local_path: str, bucket: str) -> bool:
         config=BotoConfig(signature_version="s3v4"),
         region_name="us-east-1",
     )
-    paginator = client.get_paginator("list_objects_v2")
-    downloaded = 0
-    prefix = prefix.strip("/")
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            rel = key[len(prefix):].lstrip("/")
-            if not rel:
-                continue
-            dest = Path(local_path) / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            client.download_file(bucket, key, str(dest))
-            downloaded += 1
+    downloaded = download_s3_prefix(
+        client,
+        bucket,
+        prefix,
+        local_path,
+        max_workers=settings.S3_MODEL_DOWNLOAD_WORKERS,
+    )
     if downloaded > 0:
         logger.info(
             "[NMT] Downloaded %d files from s3://%s/%s → %s",
-            downloaded, bucket, prefix, local_path,
+            downloaded, bucket, prefix.strip("/"), local_path,
         )
     return downloaded > 0
 
@@ -101,6 +96,11 @@ def resolve_default_model(
         )
 
     logger.warning("[NMT] Falling back to HuggingFace Hub: %s", hf_fallback)
+    if not getattr(config, "NMT_ALLOW_HF_FALLBACK", False):
+        raise RuntimeError(
+            f"NMT model not available at {local_path!r} and HuggingFace fallback is disabled "
+            f"(NMT_ALLOW_HF_FALLBACK=false). Upload the model to S3 or populate the local cache."
+        )
     logger.info("[NMT][CACHE] source=hf_fallback model=%s", hf_fallback)
     return hf_fallback, "hf_fallback"
 
@@ -276,6 +276,39 @@ class NLLBTranslatorWrapper:
         mixed_penalty = NLLBTranslatorWrapper._mixed_token_penalty(text)
         return min(1.0, (1.0 - arabic_ratio) + mixed_penalty)
 
+    def _resolve_item_src_lang(
+        self,
+        text: str,
+        src_lang: Optional[str] = None,
+        tgt_lang: str = "arb_Arab",
+    ) -> tuple[Optional[str], str]:
+        """Return (src_lang, stripped). None src_lang means skip translation."""
+        tgt_lang = self.LANG_MAP.get(tgt_lang, tgt_lang)
+        if src_lang:
+            src_lang = self.LANG_MAP.get(src_lang, src_lang)
+
+        stripped = text.strip()
+        if not stripped:
+            return None, text
+
+        try:
+            detected_code = detect(stripped)
+            item_src_lang = self.LANG_MAP.get(detected_code)
+
+            has_latin = any("a" <= c <= "z" or "A" <= c <= "Z" for c in stripped)
+            if has_latin and item_src_lang == "arb_Arab":
+                item_src_lang = "eng_Latn"
+
+            if not item_src_lang:
+                item_src_lang = src_lang or "eng_Latn"
+        except Exception:
+            item_src_lang = src_lang or "eng_Latn"
+
+        if item_src_lang == tgt_lang:
+            return None, stripped
+
+        return item_src_lang, stripped
+
     def _translate_word_by_word(self, text: str, src_lang: str, tgt_lang: str) -> str:
         translated_words = []
         tgt_token_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
@@ -313,6 +346,39 @@ class NLLBTranslatorWrapper:
         )
         return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
+    def _run_inference_batch(
+        self,
+        texts: list[str],
+        src_lang: str,
+        tgt_lang: str,
+        max_length: int,
+        num_beams: int = 5,
+    ) -> list[str]:
+        if not texts:
+            return []
+
+        tgt_token_id = self.tokenizer.convert_tokens_to_ids(tgt_lang)
+        with NLLBTranslatorWrapper._tokenizer_lock:
+            self.tokenizer.src_lang = src_lang
+            inputs = self.tokenizer(
+                texts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=max_length,
+            ).to(self.device)
+        outputs = self.model.generate(
+            **inputs,
+            forced_bos_token_id=tgt_token_id,
+            max_length=max_length,
+            num_beams=num_beams,
+            early_stopping=True,
+        )
+        return [
+            self.tokenizer.decode(out, skip_special_tokens=True)
+            for out in outputs
+        ]
+
     def translate_segment(
         self,
         text: str,
@@ -339,24 +405,8 @@ class NLLBTranslatorWrapper:
         if src_lang:
             src_lang = self.LANG_MAP.get(src_lang, src_lang)
 
-        stripped = text.strip()
-        if not stripped:
-            return text
-
-        try:
-            detected_code = detect(stripped)
-            item_src_lang = self.LANG_MAP.get(detected_code)
-
-            has_latin = any("a" <= c <= "z" or "A" <= c <= "Z" for c in stripped)
-            if has_latin and item_src_lang == "arb_Arab":
-                item_src_lang = "eng_Latn"
-
-            if not item_src_lang:
-                item_src_lang = src_lang or "eng_Latn"
-        except Exception:
-            item_src_lang = src_lang or "eng_Latn"
-
-        if item_src_lang == tgt_lang:
+        item_src_lang, stripped = self._resolve_item_src_lang(text, src_lang, tgt_lang)
+        if item_src_lang is None:
             return text
 
         result = self._run_inference(stripped, item_src_lang, tgt_lang, max_length, num_beams)
@@ -386,6 +436,127 @@ class NLLBTranslatorWrapper:
             result = self._translate_word_by_word(stripped, item_src_lang, tgt_lang)
 
         return result
+
+    def translate_segments_batch(
+        self,
+        texts: list[str],
+        *,
+        src_lang: Optional[str] = None,
+        tgt_lang: str = "arb_Arab",
+        max_length: int = 512,
+        num_beams: int = 5,
+        english_ratio_threshold: float = 0.5,
+        batch_size: int = 8,
+        is_cancelled: Optional[Callable[[], bool]] = None,
+    ) -> Optional[list[str]]:
+        """Translate many segments with batched generate(), grouped by detected src_lang."""
+        if not texts:
+            return []
+
+        full_tgt_lang = self.LANG_MAP.get(tgt_lang, tgt_lang)
+        results: list[str] = list(texts)
+        work_items: list[tuple[int, str, str]] = []
+
+        for idx, text in enumerate(texts):
+            item_src_lang, stripped = self._resolve_item_src_lang(text, src_lang, full_tgt_lang)
+            if item_src_lang is None:
+                continue
+            work_items.append((idx, stripped, item_src_lang))
+
+        by_src_lang: dict[str, list[tuple[int, str]]] = {}
+        for idx, stripped, item_src_lang in work_items:
+            by_src_lang.setdefault(item_src_lang, []).append((idx, stripped))
+
+        effective_batch_size = max(1, batch_size)
+        fallback_mode = self._cfg().NMT_FALLBACK_MODE
+
+        for item_src_lang, items in by_src_lang.items():
+            for batch_start in range(0, len(items), effective_batch_size):
+                if is_cancelled and is_cancelled():
+                    return None
+
+                batch = items[batch_start : batch_start + effective_batch_size]
+                indices = [idx for idx, _ in batch]
+                batch_texts = [stripped for _, stripped in batch]
+
+                try:
+                    batch_results = self._run_inference_batch(
+                        batch_texts,
+                        item_src_lang,
+                        full_tgt_lang,
+                        max_length,
+                        num_beams,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[NMT] batch inference failed (%d segments), falling back per-segment: %s",
+                        len(batch_texts),
+                        exc,
+                    )
+                    batch_results = [
+                        self._run_inference(
+                            stripped,
+                            item_src_lang,
+                            full_tgt_lang,
+                            max_length,
+                            num_beams,
+                        )
+                        for stripped in batch_texts
+                    ]
+
+                stage2_indices: list[int] = []
+                stage2_texts: list[str] = []
+                for local_idx, global_idx in enumerate(indices):
+                    result = batch_results[local_idx]
+                    if num_beams != 1 and self._english_ratio(result) > english_ratio_threshold:
+                        stage2_indices.append(global_idx)
+                        stage2_texts.append(batch_texts[local_idx])
+                    else:
+                        results[global_idx] = result
+
+                if stage2_texts:
+                    try:
+                        stage2_results = self._run_inference_batch(
+                            stage2_texts,
+                            item_src_lang,
+                            full_tgt_lang,
+                            max_length,
+                            num_beams=1,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[NMT] stage-2 batch failed (%d segments), falling back per-segment: %s",
+                            len(stage2_texts),
+                            exc,
+                        )
+                        stage2_results = [
+                            self._run_inference(
+                                stripped,
+                                item_src_lang,
+                                full_tgt_lang,
+                                max_length,
+                                num_beams=1,
+                            )
+                            for stripped in stage2_texts
+                        ]
+
+                    for global_idx, result in zip(stage2_indices, stage2_results):
+                        results[global_idx] = result
+
+                if fallback_mode != "stage2_only":
+                    for global_idx, stripped in zip(indices, batch_texts):
+                        result = results[global_idx]
+                        if self._updated_quality_score(result) > english_ratio_threshold:
+                            logger.info(
+                                "[NMT] stage-3: updated_score high (%.2f) → word-by-word seg=%d",
+                                self._updated_quality_score(result),
+                                global_idx,
+                            )
+                            results[global_idx] = self._translate_word_by_word(
+                                stripped, item_src_lang, full_tgt_lang
+                            )
+
+        return results
 
     def _translate_segments(
         self,
