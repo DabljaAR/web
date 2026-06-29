@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     STT_MODEL_LOCAL_PATH: str = ""
     STT_MAX_AUDIO_DURATION: int = 3600
     STT_DEVICE: str = "auto"
+    S3_MODEL_DOWNLOAD_WORKERS: int = 8
+    STORAGE_BACKEND: str = "local"
+    STT_ALLOW_HF_FALLBACK: bool = False
+    PREWARM_STT_MODEL: bool = True
 
     # HTTP health endpoint
     PORT: int = 8001

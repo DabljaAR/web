@@ -4,7 +4,7 @@ Starts a RabbitMQ consumer (in a daemon thread) alongside a FastAPI server that
 exposes:
   POST /translate      — synchronous single-string translation
   GET  /health         — liveness check
-  GET  /readiness      — readiness check (consumer thread alive)
+  GET  /readiness      — readiness check (consumer + model when prewarm enabled)
   GET  /health/model   — NLLB model load status
 """
 import logging
@@ -12,9 +12,10 @@ import threading
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 from app.config import settings
+from app import prewarm
 from app.translate import router as translate_router
 from app.worker import start_consumer
 
@@ -33,6 +34,14 @@ async def lifespan(app: FastAPI):
     logger.info("[NMT] Starting RabbitMQ consumer thread")
     _consumer_thread = threading.Thread(target=start_consumer, name="nmt-consumer", daemon=True)
     _consumer_thread.start()
+
+    if settings.PREWARM_NMT_MODEL:
+        logger.info("[NMT] PREWARM_NMT_MODEL=true — loading NLLB at startup")
+        prewarm.start_prewarm()
+    else:
+        logger.info("[NMT] PREWARM_NMT_MODEL=false — model loads on first request")
+        prewarm.mark_ready_without_prewarm()
+
     yield
     logger.info("[NMT] Shutting down")
 
@@ -54,11 +63,22 @@ def health():
 
 @app.get("/readiness", summary="Readiness check")
 def readiness():
-    from fastapi import HTTPException
     alive = _consumer_thread is not None and _consumer_thread.is_alive()
     if not alive:
         raise HTTPException(status_code=503, detail="Consumer thread is not running")
-    return {"status": "ready", "service": "nmt", "consumer_alive": True}
+
+    if settings.PREWARM_NMT_MODEL and not prewarm.is_model_ready():
+        detail = "NLLB model is still loading"
+        if prewarm.prewarm_error():
+            detail = f"NLLB model load failed: {prewarm.prewarm_error()}"
+        raise HTTPException(status_code=503, detail=detail)
+
+    return {
+        "status": "ready",
+        "service": "nmt",
+        "consumer_alive": True,
+        "model_loaded": prewarm.is_model_ready() if settings.PREWARM_NMT_MODEL else False,
+    }
 
 
 @app.get("/", include_in_schema=False)

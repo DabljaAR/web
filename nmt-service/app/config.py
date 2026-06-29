@@ -44,8 +44,10 @@ class Settings(BaseSettings):
     # Translation quality fallback (stage2_only | stage3_updated)
     NMT_FALLBACK_MODE: str = "stage2_only"
 
-    # D3: internal segment fan-out concurrency
-    NMT_INTERNAL_CONCURRENCY: int = 4
+    NMT_BATCH_SIZE: int = 8
+    S3_MODEL_DOWNLOAD_WORKERS: int = 8
+    NMT_ALLOW_HF_FALLBACK: bool = False
+    PREWARM_NMT_MODEL: bool = True
 
     # HTTP health endpoint
     PORT: int = 8002

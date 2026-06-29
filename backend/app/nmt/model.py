@@ -98,8 +98,13 @@ def resolve_default_model(
             config.STORAGE_BACKEND, key,
         )
 
-    # 3. HuggingFace Hub — last resort
+    # 3. HuggingFace Hub — last resort (disabled in production by default)
     logger.warning("[NMT] Falling back to HuggingFace Hub: %s", hf_fallback)
+    if not getattr(config, "NMT_ALLOW_HF_FALLBACK", False):
+        raise RuntimeError(
+            f"NMT model not available at {local_path!r} and HuggingFace fallback is disabled "
+            f"(NMT_ALLOW_HF_FALLBACK=false). Upload the model to S3 or populate the local cache."
+        )
     logger.info("[NMT][CACHE] source=hf_fallback model=%s", hf_fallback)
     return hf_fallback, "hf_fallback"
 

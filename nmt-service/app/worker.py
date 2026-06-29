@@ -1,7 +1,7 @@
 """RabbitMQ consumer that processes NMT jobs dispatched by the orchestrator.
 
 Design doc references:
-  §8.2  D3 — internal segment fan-out (ThreadPoolExecutor, no Celery chord)
+  §8.2  D3 — batched in-process translation (F11; no Celery chord)
   §8.4  D8 — cancellation checkpoint between segments
   §10.3      — idempotency on redelivery
   §6         — queue name stage.nmt, routing keys job.start.nmt / job.results.nmt
@@ -11,7 +11,6 @@ Design doc references:
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -199,7 +198,25 @@ def _update_job_failed(db, job_id: str, error: str):
     db.commit()
 
 
-# ── Segment translation (D3 internal fan-out) ─────────────────────────────────
+# ── Segment translation (batched inference + optional length adjust) ───────────
+
+def _apply_length_adjust(idx: int, original: str, translated: str) -> str:
+    """Groq-based length adjustment (I/O-bound); runs sequentially after batch infer."""
+    if not settings.NMT_LENGTH_ADJUST_ENABLED or not translated or not original:
+        return translated
+    try:
+        return adjust_ar(
+            translated,
+            original,
+            scale=settings.NMT_LENGTH_ADJUST_SCALE,
+            max_iters=settings.NMT_LENGTH_ADJUST_MAX_ITERS,
+            groq_api_key=settings.GROQ_API_KEY,
+            groq_model=settings.GROQ_MODEL,
+        )
+    except Exception as exc:
+        logger.warning("[NMT] length adjust failed seg=%d: %s", idx, exc)
+        return translated
+
 
 def _translate_one_segment(
     idx: int,
@@ -228,18 +245,7 @@ def _translate_one_segment(
         translated = text
 
     # Length adjustment (Groq) — graceful fallback on failure
-    if settings.NMT_LENGTH_ADJUST_ENABLED and translated and text:
-        try:
-            translated = adjust_ar(
-                translated,
-                text,
-                scale=settings.NMT_LENGTH_ADJUST_SCALE,
-                max_iters=settings.NMT_LENGTH_ADJUST_MAX_ITERS,
-                groq_api_key=settings.GROQ_API_KEY,
-                groq_model=settings.GROQ_MODEL,
-            )
-        except Exception as exc:
-            logger.warning("[NMT] length adjust failed seg=%d: %s", idx, exc)
+    translated = _apply_length_adjust(idx, text, translated)
 
     return {
         "start": seg.get("start"),
@@ -258,42 +264,56 @@ def _translate_all_segments(
     english_ratio_threshold: float,
     cancelled_flag: list,  # [bool] — mutable so threads can see updates
 ) -> Optional[list]:
-    """Translate all segments with internal thread pool (D3).
+    """Translate all segments with batched inference (F11).
 
     Returns None if the job was cancelled mid-flight.
     """
     def is_cancelled() -> bool:
         return cancelled_flag[0]
 
-    def worker(args):
-        idx, seg = args
-        return _translate_one_segment(
-            idx, seg, source_lang, target_lang,
-            num_beams, english_ratio_threshold, is_cancelled,
-        )
+    if is_cancelled():
+        return None
 
     total = len(stt_segments)
-    with ThreadPoolExecutor(max_workers=settings.NMT_INTERNAL_CONCURRENCY) as pool:
-        future_map = {
-            pool.submit(worker, (idx, seg)): idx
-            for idx, seg in enumerate(stt_segments)
-        }
+    if total == 0:
+        return []
 
-        results: list = [None] * total
-        completed = 0
-        for future in as_completed(future_map):
-            idx = future_map[future]
-            try:
-                results[idx] = future.result()
-            except Exception:
-                results[idx] = None
-            completed += 1
-            if completed % 5 == 0 or completed == total:
-                logger.info("[NMT] job=%s progress=%d/%d segments", job_id, completed, total)
+    texts = [seg.get("text", "").strip() for seg in stt_segments]
 
-    if any(r is None for r in results):
+    try:
+        translated_texts = _translator.translate_segments_batch(
+            texts,
+            src_lang=source_lang,
+            tgt_lang=target_lang,
+            num_beams=num_beams,
+            english_ratio_threshold=english_ratio_threshold,
+            batch_size=settings.NMT_BATCH_SIZE,
+            is_cancelled=is_cancelled,
+        )
+    except Exception as exc:
+        logger.exception("[NMT] job=%s batch translation failed: %s", job_id, exc)
+        translated_texts = None
+
+    if translated_texts is None:
         logger.info("[NMT] job=%s cancelled mid-translation", job_id)
         return None
+
+    results: list = []
+    for idx, seg in enumerate(stt_segments):
+        if is_cancelled():
+            logger.info("[NMT] job=%s cancelled during length-adjust/post-process", job_id)
+            return None
+
+        translated = _apply_length_adjust(idx, texts[idx], translated_texts[idx])
+        results.append({
+            "start": seg.get("start"),
+            "end": seg.get("end"),
+            "original_text": texts[idx],
+            "translated_text": translated,
+        })
+        completed = idx + 1
+        if completed % 5 == 0 or completed == total:
+            logger.info("[NMT] job=%s progress=%d/%d segments", job_id, completed, total)
 
     return results
 

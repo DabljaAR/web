@@ -5,12 +5,12 @@ Loads the model lazily on first transcription request and reuses it across jobs.
 import logging
 import os
 import time
-from pathlib import Path
 from threading import Lock
 from typing import Optional
 
 import boto3
 from botocore.config import Config as BotoConfig
+from dablja_worker.s3_model_download import download_s3_prefix
 
 from app.config import settings
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def _download_model_from_s3(prefix: str, local_path: str, bucket: str) -> bool:
-    """Download Whisper weights from object storage (mirrors nmt-service pattern)."""
+    """Download Whisper weights from object storage (parallel per-key downloads)."""
     client = boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint(),
@@ -27,23 +27,17 @@ def _download_model_from_s3(prefix: str, local_path: str, bucket: str) -> bool:
         config=BotoConfig(signature_version="s3v4"),
         region_name="us-east-1",
     )
-    paginator = client.get_paginator("list_objects_v2")
-    downloaded = 0
-    prefix = prefix.strip("/")
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            rel = key[len(prefix):].lstrip("/")
-            if not rel:
-                continue
-            dest = Path(local_path) / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            client.download_file(bucket, key, str(dest))
-            downloaded += 1
+    downloaded = download_s3_prefix(
+        client,
+        bucket,
+        prefix,
+        local_path,
+        max_workers=settings.S3_MODEL_DOWNLOAD_WORKERS,
+    )
     if downloaded > 0:
         logger.info(
             "[STT] Downloaded %d files from s3://%s/%s → %s",
-            downloaded, bucket, prefix, local_path,
+            downloaded, bucket, prefix.strip("/"), local_path,
         )
     return downloaded > 0
 
@@ -66,6 +60,12 @@ def _resolve_model_path() -> str:
             logger.warning("[STT] S3 download for %s did not yield a valid model at %s", model_key, local)
         except Exception as exc:
             logger.error("[STT] S3 model download failed: %s", exc)
+
+    if not settings.STT_ALLOW_HF_FALLBACK:
+        raise RuntimeError(
+            f"STT model not available at {local!r} and HuggingFace fallback is disabled "
+            f"(STT_ALLOW_HF_FALLBACK=false). Upload the model to S3 or populate the local cache."
+        )
 
     logger.info("[STT] Falling back to HuggingFace model id: %s", settings.STT_MODEL_SIZE)
     return settings.STT_MODEL_SIZE

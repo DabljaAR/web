@@ -168,6 +168,7 @@ services:
       NMT_MODEL_LOCAL_PATH: ${NMT_MODEL_LOCAL_PATH:-/model-cache/nmt-v4}
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
       NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
+      NMT_ALLOW_HF_FALLBACK: ${NMT_ALLOW_HF_FALLBACK:-false}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       NMT_LENGTH_ADJUST_ENABLED: ${NMT_LENGTH_ADJUST_ENABLED:-true}
@@ -182,9 +183,11 @@ services:
       XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
       TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
       CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
+      CATT_TASHKEEL_S3_PREFIX: ${CATT_TASHKEEL_S3_PREFIX:-catt_tashkeel/onnx_models}
+      CATT_TASHKEEL_ALLOW_GITHUB_FALLBACK: ${CATT_TASHKEEL_ALLOW_GITHUB_FALLBACK:-false}
       PREWARM_STT_MODEL: ${PREWARM_STT_MODEL:-false}
       PREWARM_NMT_MODEL: ${PREWARM_NMT_MODEL:-false}
-      PREWARM_TTS_MODEL: ${PREWARM_TTS_MODEL:-false}
+      PREWARM_TTS_MODEL: ${PREWARM_TTS_MODEL:-true}
     tmpfs:
       - /tmp
     restart: unless-stopped
