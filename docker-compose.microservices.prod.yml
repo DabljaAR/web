@@ -1,0 +1,326 @@
+# Production microservices stack — RabbitMQ + orchestrator + stage workers.
+# External S3/GCS (no MinIO). No Celery / Redis / Flower.
+#
+#   docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build
+
+x-s3-env: &s3-env
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:?S3_ENDPOINT_URL is required}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID is required}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?S3_SECRET_ACCESS_KEY is required}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_SECURE: ${S3_SECURE:-true}
+  S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:?S3_MEDIA_BUCKET is required}
+  S3_MODELS_BUCKET: ${S3_MODELS_BUCKET:?S3_MODELS_BUCKET is required}
+
+x-model-cache-env: &model-cache-env
+  HF_HOME: ${HF_HOME:-/model-cache/hf}
+  HUGGINGFACE_HUB_CACHE: ${HUGGINGFACE_HUB_CACHE:-/model-cache/hf/hub}
+  TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/model-cache/hf/transformers}
+  XDG_CACHE_HOME: ${XDG_CACHE_HOME:-/model-cache/xdg-cache}
+  TORCH_HOME: ${TORCH_HOME:-/model-cache/torch}
+  CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
+  HF_TOKEN: ${HF_TOKEN:-}
+  HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+  HF_HUB_DOWNLOAD_TIMEOUT: ${HF_HUB_DOWNLOAD_TIMEOUT:-120}
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: dabljaar_caddy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "127.0.0.1:2019:2019"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required for production}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required for production}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile.minimal:/etc/caddy/Caddyfile:ro
+      - ./frontend/dist:/srv:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: dabljaar_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-dabljaar}
+    volumes:
+      - dabljaar_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-dabljaar}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: dabljaar_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-dabljaar}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: dabljaar_orchestrator
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL:?RABBITMQ_URL is required}
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}?sslmode=disable
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  stt-service:
+    build:
+      context: ./stt-service
+      dockerfile: Dockerfile
+      additional_contexts:
+        shared: ./libs/dablja-worker
+        docker_torch: ./libs/docker-torch
+    container_name: dabljaar_stt_service
+    environment:
+      <<: [*s3-env, *model-cache-env]
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      STT_MODEL_SIZE: ${STT_MODEL_SIZE:-medium}
+      STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-medium}
+      STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-medium}
+      STT_DEVICE: ${STT_DEVICE:-cpu}
+      STT_COMPUTE_TYPE: ${STT_COMPUTE_TYPE:-auto}
+      STT_ALLOW_HF_FALLBACK: ${STT_ALLOW_HF_FALLBACK:-false}
+      PREWARM_STT_MODEL: ${PREWARM_STT_MODEL:-true}
+      PORT: 8001
+    volumes:
+      - ai_model_cache:/model-cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  nmt-service:
+    build:
+      context: ./nmt-service
+      dockerfile: Dockerfile
+      additional_contexts:
+        shared: ./libs/dablja-worker
+        docker_torch: ./libs/docker-torch
+    container_name: dabljaar_nmt_service
+    environment:
+      <<: [*s3-env, *model-cache-env]
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
+      NMT_MODEL_LOCAL_PATH: ${NMT_MODEL_LOCAL_PATH:-/model-cache/nmt-v4}
+      NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
+      NMT_ALLOW_HF_FALLBACK: ${NMT_ALLOW_HF_FALLBACK:-false}
+      NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      NMT_LENGTH_ADJUST_ENABLED: ${NMT_LENGTH_ADJUST_ENABLED:-true}
+      NMT_LENGTH_ADJUST_SCALE: ${NMT_LENGTH_ADJUST_SCALE:-0.9}
+      NMT_LENGTH_ADJUST_MAX_ITERS: ${NMT_LENGTH_ADJUST_MAX_ITERS:-5}
+      PREWARM_NMT_MODEL: ${PREWARM_NMT_MODEL:-true}
+      PORT: 8002
+    volumes:
+      - ai_model_cache:/model-cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  tts-service:
+    build:
+      context: ./tts-service
+      dockerfile: Dockerfile
+      additional_contexts:
+        shared: ./libs/dablja-worker
+        docker_torch: ./libs/docker-torch
+    container_name: dabljaar_tts_service
+    environment:
+      <<: [*s3-env, *model-cache-env]
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
+      SILMA_REFERENCE_AUDIO: ${SILMA_REFERENCE_AUDIO:-}
+      SILMA_REFERENCE_TEXT: ${SILMA_REFERENCE_TEXT:-}
+      TTS_DEFAULT_SPEED: ${TTS_DEFAULT_SPEED:-0.9}
+      TTS_DEFAULT_CFG_STRENGTH: ${TTS_DEFAULT_CFG_STRENGTH:-2.0}
+      TTS_DEFAULT_NFE_STEP: ${TTS_DEFAULT_NFE_STEP:-64}
+      TTS_DEFAULT_SWAY_COEF: ${TTS_DEFAULT_SWAY_COEF:--1.0}
+      TTS_DEFAULT_TARGET_RMS: ${TTS_DEFAULT_TARGET_RMS:-0.12}
+      TTS_ENABLE_NORMALIZER: ${TTS_ENABLE_NORMALIZER:-true}
+      TTS_FORCE_TASHKEEL: ${TTS_FORCE_TASHKEEL:-false}
+      PREWARM_TTS_MODEL: ${PREWARM_TTS_MODEL:-true}
+      PORT: 8005
+    volumes:
+      - ai_model_cache:/model-cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  media-service:
+    build:
+      context: ./media-service
+      dockerfile: Dockerfile
+      additional_contexts:
+        shared: ./libs/dablja-worker
+    container_name: dabljaar_media_service
+    environment:
+      <<: *s3-env
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      AWS_ENDPOINT_URL: ${S3_ENDPOINT_URL}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${S3_REGION:-us-east-1}
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET}
+      MERGE_TEMP_DIR: /tmp/dubbing_merge
+      LOG_LEVEL: INFO
+      PORT: 8003
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+      args:
+        INSTALL_AI: "false"
+    container_name: dabljaar_backend
+    ports: []
+    volumes: []
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      tts-service:
+        condition: service_started
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+    environment:
+      INSTALL_AI: "false"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      TTS_SERVICE_URL: http://tts-service:8005
+      STT_SERVICE_URL: http://stt-service:8001
+      <<: *s3-env
+      PIPELINE_SEGMENTS_MODE: ${PIPELINE_SEGMENTS_MODE:-single}
+      NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
+      ENVIRONMENT: production
+      DEBUG: "false"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+volumes:
+  dabljaar_postgres_data:
+  ai_model_cache:
+  caddy_data:
+  caddy_config:
+
+networks:
+  dabljaar_network:
+    driver: bridge

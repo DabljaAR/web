@@ -6,7 +6,7 @@ This guide documents backend deployment and runtime configuration for local and 
 
 - Docker and Docker Compose
 - Python 3.12+ (for local non-Docker runs)
-- PostgreSQL and Redis credentials, plus object storage credentials (MinIO or external S3/GCS)
+- PostgreSQL credentials, RabbitMQ credentials, and object storage credentials (MinIO for dev or external S3/GCS for prod)
 
 ## Environment Setup
 
@@ -22,19 +22,8 @@ Set at least:
 - `SECRET_KEY`
 - `DOMAIN`
 - `ACME_EMAIL`
-
-For standard production compose, also set MinIO credentials:
-
-- `MINIO_ROOT_USER`
-- `MINIO_ROOT_PASSWORD`
-
-For minimal production compose, set external S3/GCS credentials instead:
-
-- `S3_ENDPOINT_URL`
-- `S3_ACCESS_KEY_ID`
-- `S3_SECRET_ACCESS_KEY`
-- `S3_MEDIA_BUCKET`
-- `S3_MODELS_BUCKET`
+- `RABBITMQ_URL` and `RABBITMQ_DEFAULT_PASS` (microservices prod)
+- External S3: `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_MEDIA_BUCKET`, `S3_MODELS_BUCKET`
 
 ## Dependency Profiles
 
@@ -44,50 +33,41 @@ Backend dependencies are split by concern:
 - AI workers (STT/NMT/TTS): `uv sync --group ai`
 - Dev/test tooling: `uv sync --group dev`
 
-In Docker, AI dependencies are controlled via build arg:
+In Docker, the **backend API** uses `INSTALL_AI=false`. AI inference runs in `stt-service`, `nmt-service`, and `tts-service`.
 
-```yaml
-build:
-  context: ./backend
-  dockerfile: Dockerfile.prod
-  args:
-    INSTALL_AI: "true"
-```
+## Production Compose (microservices — recommended)
 
-## Production Compose
-
-Start the production stack:
+Start the production microservices stack:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build
 ```
 
-### Minimal production compose (AI-only + external object storage)
+This stack includes: `caddy`, `postgres`, `rabbitmq`, `orchestrator`, `stt-service`, `nmt-service`, `tts-service`, `media-service`, `backend`.
 
-Use this mode when you want production deployment without local MinIO and without the media worker:
+The dubbing pipeline runs over **RabbitMQ** (not Celery). Backend publishes `job.created` after media preprocess; the Go orchestrator coordinates STT → NMT → TTS → merge.
+
+Check health:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml ps
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml logs backend --tail=100
+```
+
+### Legacy production compose (Celery — deprecated)
+
+The Celery-based stack remains for rollback only:
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.prod.minimal.yml up -d --build
 ```
 
-This stack keeps: `caddy`, `postgres`, `redis`, `backend`, `celery-worker-ai`, `flower`.
-This stack removes: `minio`, `celery-worker-media`.
+This stack keeps: `caddy`, `postgres`, `redis`, `backend`, `celery-worker-ai`, `flower`. It does **not** run the RabbitMQ orchestrator or microservices and cannot complete `fullDubbing` via the new pipeline.
 
-Required object-storage env vars for this mode:
-
-- `STORAGE_BACKEND=s3`
-- `S3_ENDPOINT_URL=https://storage.googleapis.com`
-- `S3_ACCESS_KEY_ID`
-- `S3_SECRET_ACCESS_KEY`
-- `S3_REGION=us-east-1`
-- `S3_MEDIA_BUCKET`
-- `S3_MODELS_BUCKET`
-
-Check health:
+### Standard production compose (MinIO + Celery)
 
 ```bash
-docker compose ps
-docker compose logs backend --tail=100
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
 ## Database Migrations
@@ -98,20 +78,12 @@ Apply migrations after deploy:
 docker compose exec backend alembic upgrade head
 ```
 
-For CI/CD VM deploys (`.github/workflows/deploy-gcp.yml`), migrations are run automatically before backend/workers are started:
+For CI/CD VM deploys (`.github/workflows/deploy-gcp.yml`), migrations run automatically before services start:
 
 ```bash
-docker compose ... up -d postgres redis minio
-docker compose ... run --rm --entrypoint sh backend -lc "alembic upgrade head"
-docker compose ... up -d --build backend celery-worker-media celery-worker-ai flower caddy
-```
-
-For minimal production compose:
-
-```bash
-docker compose --env-file .env.production -f docker-compose.prod.minimal.yml up -d postgres redis
-docker compose --env-file .env.production -f docker-compose.prod.minimal.yml run --rm --entrypoint sh backend -lc "alembic upgrade head"
-docker compose --env-file .env.production -f docker-compose.prod.minimal.yml up -d --build backend celery-worker-ai flower caddy
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d postgres rabbitmq
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml run --rm --entrypoint sh backend -lc "alembic upgrade head"
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build orchestrator stt-service nmt-service tts-service media-service backend caddy
 ```
 
 ## Common Issues
@@ -126,29 +98,26 @@ Check:
 
 - Migration errors in backend logs
 - API reachability on `/api/health`
-- Postgres readiness (service health + startup ordering)
+- Postgres and RabbitMQ readiness
 
-In GitHub Actions deploys, backend and caddy logs are dumped automatically on health-check failure to speed up diagnosis.
+In GitHub Actions deploys, backend and caddy logs are dumped automatically on health-check failure.
 
-### Worker queue not processing
+### Pipeline jobs stuck in QUEUED
 
 Verify:
 
-- Redis healthy
-- Worker online in Flower
-- Queue names in worker command match task routes
+- RabbitMQ healthy (`docker compose ps rabbitmq`)
+- Orchestrator running and connected
+- Stage workers passing `/readiness` (STT/TTS cold start can take several minutes on first deploy)
+
+Standalone `POST /api/tts/synthesize` proxies to `tts-service` via `TTS_SERVICE_URL` — no Celery worker required.
 
 ## Recommended Deployment Flow
 
 1. Build images
-2. Start infra services (postgres/redis/minio)
+2. Start infra (`postgres`, `rabbitmq`)
 3. Run migrations
-4. Start backend + workers
-5. Verify health and queue processing
+4. Start orchestrator + stage workers + backend + caddy
+5. Verify backend health and worker readiness
 
-Minimal flow variant:
-
-1. Start infra services (postgres/redis)
-2. Run migrations
-3. Start backend + AI worker (+ Flower/Caddy)
-4. Verify health and queue processing
+See also: [microservices_migration.md](microservices_migration.md), [microservices_lld.md](microservices_lld.md).

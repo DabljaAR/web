@@ -2,10 +2,13 @@
 The main web platform for the DabljaAR website.
 
 ## Structure
-- `backend/`: FastAPI backend — auth, media, AI pipeline workers.
-- `frontend/`: React + Vite SPA.
-- `docs/`: Technical documentation.
-- `infra/`: Terraform infrastructure (GCP).
+- `backend/`: FastAPI API — auth, media preprocess, job creation, status polling
+- `orchestrator/`: Go saga coordinator (RabbitMQ pipeline)
+- `stt-service/`, `nmt-service/`, `tts-service/`, `media-service/`: AMQP stage workers
+- `frontend/`: React + Vite SPA
+- `docs/`: Technical documentation
+- `infra/`: Terraform infrastructure (GCP)
+- `libs/dablja-worker/`: Shared Python worker library
 
 ## Documentation
 
@@ -18,7 +21,8 @@ Detailed technical docs live in [`docs/`](docs/):
 - [`docs/deployment.md`](docs/deployment.md) — deployment guide and environment config
 - [`docs/pipeline.md`](docs/pipeline.md) — AI dubbing pipeline details
 - [`docs/media.md`](docs/media.md) — media processing and storage
-- [`docs/docker_setup.md`](docs/docker_setup.md) — Docker Compose setup
+- [`docs/microservices_migration.md`](docs/microservices_migration.md) — microservices migration design
+- [`docs/microservices_lld.md`](docs/microservices_lld.md) — low-level design (services, queues, contracts)
 
 ## Quick Start (Ubuntu 22.04 Native Dev)
 
@@ -56,7 +60,8 @@ uv sync --group dev
 The script is idempotent and manages local runtime files under `.runtime/`.
 
 ## Technologies Used
-- Backend: Python, FastAPI, SQLAlchemy, Alembic, Celery, PostgreSQL, Redis — managed with uv
+- Backend: Python, FastAPI, SQLAlchemy, Alembic, PostgreSQL, RabbitMQ — managed with uv
+- Pipeline: Go orchestrator + Python microservices (STT/NMT/TTS/merge)
 - Frontend: TypeScript, React, Vite, Tailwind CSS
 
 ## Quick Start (with docker-compose)
@@ -73,18 +78,13 @@ The script is idempotent and manages local runtime files under `.runtime/`.
 
 ```bash
 cp .env.production.example .env.production
-# Edit .env.production and set DOMAIN and secrets
+# Edit .env.production: DOMAIN, secrets, RABBITMQ_URL, S3 credentials
 
 docker compose --env-file .env.production \
-   -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+   -f docker-compose.microservices.prod.yml up -d --build
 ```
 
-Optional GPU overlay for AI worker:
-
-```bash
-docker compose --env-file .env.production \
-   -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d --build
-```
+Legacy Celery stack (deprecated): `docker-compose.prod.minimal.yml` — see [docs/deployment.md](docs/deployment.md).
 
 ## CI/CD with GitHub Actions
 
