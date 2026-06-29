@@ -30,17 +30,31 @@ fi
 purge_cuda_torch_artifacts() {
   echo "install_cpu.sh: purging CUDA torch and companion wheels"
   pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
-  local pkgs=""
-  pkgs="$(pip freeze 2>/dev/null \
-    | grep -iE '^(nvidia-|triton|cuda-toolkit|cuda-bindings|cuda-pathfinder)' \
-    | cut -d= -f1 \
-    | sort -u \
-    | tr '\n' ' ' \
-    || true)"
-  if [[ -n "${pkgs// }" ]]; then
-    # shellcheck disable=SC2086
-    pip uninstall -y ${pkgs} 2>/dev/null || true
-  fi
+
+  # Repeated passes — some NVIDIA wheels are interdependent.
+  for _ in 1 2 3 4 5; do
+    mapfile -t pkgs < <(
+      pip freeze 2>/dev/null \
+        | grep -iE '(^nvidia|^triton|^cuda-)' \
+        | cut -d= -f1 \
+        | sort -u \
+        || true
+    )
+    if ((${#pkgs[@]} == 0)); then
+      break
+    fi
+    pip uninstall -y "${pkgs[@]}" 2>/dev/null || true
+  done
+
+  # Namespace dir can remain after pip uninstall (silma-tts / PyPI CUDA torch).
+  python - <<'PY'
+import shutil, site, pathlib
+for root in site.getsitepackages():
+    nvidia = pathlib.Path(root) / "nvidia"
+    if nvidia.is_dir():
+        shutil.rmtree(nvidia)
+        print(f"install_cpu.sh: removed {nvidia}")
+PY
 }
 
 purge_cuda_torch_artifacts
