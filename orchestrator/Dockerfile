@@ -2,10 +2,12 @@ FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
-COPY . .
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Use vendored deps — no network access needed during build
-RUN go build -mod=vendor -o /orchestrator-server cmd/server/main.go
+COPY . .
+RUN go mod vendor \
+    && go build -mod=vendor -o /orchestrator-server cmd/server/main.go
 
 # Minimal production image
 FROM alpine:latest
