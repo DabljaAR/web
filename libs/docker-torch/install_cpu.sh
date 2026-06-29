@@ -6,13 +6,17 @@
 #   RUN bash /tmp/docker-torch/install_cpu.sh
 #
 # Environment (optional):
-#   TORCH_CPU_VERSION   — pin e.g. 2.2.0 (default: 2.2.0)
-#   PYTORCH_CPU_INDEX   — wheel index (default: https://download.pytorch.org/whl/cpu)
+#   TORCH_CPU_VERSION        — pin e.g. 2.2.0 (default: 2.2.0)
+#   TORCHVISION_CPU_VERSION  — companion wheel (default: 0.17.0 for torch 2.2.x)
+#   TORCHAUDIO_CPU_VERSION   — companion wheel (default: same as TORCH_CPU_VERSION)
+#   PYTORCH_CPU_INDEX        — wheel index (default: https://download.pytorch.org/whl/cpu)
 #   PIP_TIMEOUT         — seconds per pip attempt (default: 600)
 #   PIP_RETRIES         — pip --retries (default: 3)
 set -euo pipefail
 
 TORCH_CPU_VERSION="${TORCH_CPU_VERSION:-2.2.0}"
+TORCHVISION_CPU_VERSION="${TORCHVISION_CPU_VERSION:-0.17.0}"
+TORCHAUDIO_CPU_VERSION="${TORCHAUDIO_CPU_VERSION:-${TORCH_CPU_VERSION}}"
 PYTORCH_CPU_INDEX="${PYTORCH_CPU_INDEX:-https://download.pytorch.org/whl/cpu}"
 PIP_TIMEOUT="${PIP_TIMEOUT:-600}"
 PIP_RETRIES="${PIP_RETRIES:-3}"
@@ -59,13 +63,20 @@ PY
 
 purge_cuda_torch_artifacts
 
-echo "install_cpu.sh: installing torch==${TORCH_CPU_VERSION} from ${PYTORCH_CPU_INDEX}"
+echo "install_cpu.sh: installing torch==${TORCH_CPU_VERSION} torchvision==${TORCHVISION_CPU_VERSION} torchaudio==${TORCHAUDIO_CPU_VERSION} from ${PYTORCH_CPU_INDEX}"
 
 pip install --no-cache-dir \
   --timeout "${PIP_TIMEOUT}" \
   --retries "${PIP_RETRIES}" \
   "torch==${TORCH_CPU_VERSION}" \
+  "torchvision==${TORCHVISION_CPU_VERSION}" \
+  "torchaudio==${TORCHAUDIO_CPU_VERSION}" \
   --index-url "${PYTORCH_CPU_INDEX}"
+
+python -c "
+import torch, torchaudio, torchvision
+print(f'OK: torch {torch.__version__}, torchvision {torchvision.__version__}, torchaudio {torchaudio.__version__}')
+"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${SCRIPT_DIR}/verify_cpu_torch.py" ]]; then
