@@ -329,12 +329,6 @@ jobs:
             return 1
           }
 
-          # Prefer compose --wait when available; fall back to per-service probes.
-          if $COMPOSE up --help 2>&1 | grep -q -- '--wait'; then
-            echo "Waiting for compose healthchecks (--wait --wait-timeout 900)"
-            $COMPOSE up -d --wait --wait-timeout 900 || true
-          fi
-
           wait_for_orchestrator_running 30
           wait_for_readiness media-service http://localhost:8003/readiness media 12 10
           wait_for_readiness stt-service http://localhost:8001/readiness stt 60 10
@@ -342,9 +336,9 @@ jobs:
           wait_for_readiness tts-service http://localhost:8005/readiness tts 90 10
           wait_for_backend_health 40
 
-          # Reload Caddy to pick up frontend/dist without dropping active connections.
+          # Restart Caddy so it fully re-reads config + DOMAIN env and bind-mounted frontend/dist.
           $COMPOSE exec -T caddy caddy validate --config /etc/caddy/Caddyfile
-          $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+          $COMPOSE restart caddy
 
           health_checks_start="$(date +%s)"
 
@@ -377,13 +371,25 @@ jobs:
           fi
 
           spa_root_healthy=false
+          spa_headers_healthy=false
           for _ in 1 2 3 4 5 6 7 8; do
+            spa_headers="$(curl -fsS --max-time 15 -I "https://${DOMAIN_VALUE}/" 2>/dev/null || true)"
+            if echo "$spa_headers" | grep -Eqi 'strict-transport-security'; then
+              spa_headers_healthy=true
+            fi
             if curl -fsS --max-time 15 "https://${DOMAIN_VALUE}/" | grep -Eqi '<!doctype html|<html'; then
               spa_root_healthy=true
+            fi
+            if [ "$spa_root_healthy" = "true" ] && [ "$spa_headers_healthy" = "true" ]; then
               break
             fi
             sleep 5
           done
+
+          if [ "$spa_headers_healthy" != "true" ]; then
+            echo "spa-headers-fail: GET / missing Strict-Transport-Security (Caddy not routing {$DOMAIN} site block)"
+            exit 1
+          fi
 
           if [ "$spa_root_healthy" != "true" ]; then
             echo "spa-static-fail: public SPA root check failed on https://${DOMAIN_VALUE}/"

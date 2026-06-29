@@ -92,11 +92,36 @@ docker compose --env-file .env.production -f docker-compose.microservices.prod.y
 ```
 
 5. Waits for orchestrator, stage workers (`/readiness`), and backend health (via `compose exec`, not host ports)
-6. Reloads Caddy and verifies edge HTTPS + SPA routes
+6. Restarts Caddy and verifies edge HTTPS + SPA routes (including `Strict-Transport-Security` on `/`)
 
 Deploy logs are appended to `~/web/deploy.log` on the VM. On failure, service logs and `compose ps -a` are printed automatically.
 
 ## Common Issues
+
+### Site returns 404 or blank page (no security headers)
+
+If `GET /` returns **404** with only `Server: Caddy` and **no** `Strict-Transport-Security` header, Caddy is not applying the `{$DOMAIN}` site block from `Caddyfile.minimal` (DNS is usually fine).
+
+On the VM (`cd ~/web`):
+
+```bash
+# Broken: no Strict-Transport-Security. Working: header present.
+curl -sI https://app.dabljaar.tech/ | head -20
+
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml ps -a
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml exec caddy env | grep -E 'DOMAIN|ACME'
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml exec caddy test -f /srv/index.html && echo OK || echo MISSING
+ls -la frontend/dist/index.html
+tail -200 ~/web/deploy.log
+```
+
+**Recovery:**
+
+```bash
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build --remove-orphans
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml restart caddy
+curl -sI https://app.dabljaar.tech/ | grep -i strict
+```
 
 ### PostgreSQL authentication failed
 
