@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dablja-worker"
-version = "0.1.0"
+version = "0.2.0"
 description = "Shared RabbitMQ consumer utilities for DabljaAR pipeline workers"
 requires-python = ">=3.12"
 dependencies = [

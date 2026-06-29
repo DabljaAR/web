@@ -4,6 +4,7 @@ Public API (backwards-compatible with the old per-service dablja_worker.py):
 
     from dablja_worker import consume_loop, make_engine, classify_failure, check_cancelled
 """
+__version__ = "0.2.0"
 from dablja_worker.ack import finish_job_message, safe_ack
 from dablja_worker.consumer import (
     consume_loop,

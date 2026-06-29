@@ -36,6 +36,8 @@ services:
   rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: dabljaar_test_rabbitmq
+    volumes:
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
