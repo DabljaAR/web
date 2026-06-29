@@ -16,3 +16,9 @@ def test_patch_torch_xpu_compat_is_idempotent():
     xpu = torch.xpu
     _patch_torch_xpu_compat()
     assert torch.xpu is xpu
+
+
+def test_patch_torch_xpu_compat_allows_manual_seed(monkeypatch):
+    monkeypatch.delattr(torch, "xpu", raising=False)
+    _patch_torch_xpu_compat()
+    torch.manual_seed(42)

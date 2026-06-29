@@ -2,6 +2,7 @@
 """Fail the build if torch is not a CPU-only wheel (guards against PyPI CUDA reinstall)."""
 from __future__ import annotations
 
+import os
 import sys
 
 
@@ -34,12 +35,37 @@ def main() -> int:
             "nvidia.* packages are present — likely a CUDA torch wheel from PyPI"
         )
 
+    for pkg_name, env_var in (
+        ("torchaudio", "TORCH_CPU_VERSION"),
+        ("torchvision", "TORCHVISION_CPU_VERSION"),
+    ):
+        try:
+            mod = __import__(pkg_name)
+        except ImportError as exc:
+            errors.append(f"{pkg_name} is not installed: {exc}")
+            continue
+
+        expected = os.environ.get(env_var, "").strip()
+        if expected:
+            version = getattr(mod, "__version__", "")
+            if version and not version.startswith(expected):
+                errors.append(
+                    f"{pkg_name} {version!r} does not match expected {expected!r} "
+                    f"(from {env_var})"
+                )
+
     if errors:
         for msg in errors:
             print(f"ERROR: {msg}", file=sys.stderr)
         return 1
 
-    print(f"OK: torch {torch.__version__} (cpu-only, cuda={torch.version.cuda})")
+    import torchaudio
+    import torchvision
+
+    print(
+        f"OK: torch {torch.__version__}, torchaudio {torchaudio.__version__}, "
+        f"torchvision {torchvision.__version__} (cpu-only, cuda={torch.version.cuda})"
+    )
     return 0
 
 

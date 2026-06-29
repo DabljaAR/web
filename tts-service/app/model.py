@@ -29,6 +29,14 @@ class _TorchXPUStub:
     def is_available() -> bool:
         return False
 
+    @staticmethod
+    def _is_in_bad_fork() -> bool:
+        return False
+
+    @staticmethod
+    def manual_seed_all(seed: int) -> None:
+        pass
+
 
 def _patch_torch_xpu_compat() -> None:
     """silma-tts probes torch.xpu at import time; CPU torch 2.2 lacks that namespace."""

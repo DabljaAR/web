@@ -27,8 +27,9 @@ RUN chmod +x /tmp/docker-onnx/install_cpu_onnx.sh \
     && bash /tmp/docker-onnx/install_cpu_onnx.sh
 
 # Guard: requirements must not leave CUDA torch or GPU ONNX wheels in the image.
-RUN python /tmp/docker-torch/verify_cpu_torch.py \
-    && python /tmp/docker-onnx/verify_cpu_onnx.py
+RUN TORCH_CPU_VERSION=2.2.0 python /tmp/docker-torch/verify_cpu_torch.py \
+    && python /tmp/docker-onnx/verify_cpu_onnx.py \
+    && python -c "import torchaudio; import silma_tts"
 
 FROM python:3.12-slim
 
