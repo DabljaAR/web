@@ -4,7 +4,6 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
-
     DATABASE_URL: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/dabljaar"
 
     RABBITMQ_HEARTBEAT: int = 600
@@ -22,20 +21,18 @@ class Settings(BaseSettings):
     S3_REGION: str = "us-east-1"
     S3_MEDIA_BUCKET: str = "dablaja-videos"
 
-    SILMA_DEVICE: str = "auto"
-    SILMA_REFERENCE_AUDIO: str = ""
-    SILMA_REFERENCE_TEXT: str = (
-        "مرحبا بك في موقع جملة. استمتع بالتسوق الإلكتروني عبر الإنترنت "
-        "بكل سهولة وأمان مع خدمة التوصيل لكل ولايات الوطن"
-    )
-    TTS_DEFAULT_SPEED: float = 0.9
-    TTS_DEFAULT_CFG_STRENGTH: float = 2.0
-    TTS_DEFAULT_NFE_STEP: int = 32
-    TTS_DEFAULT_SWAY_COEF: float = -1.0
-    TTS_DEFAULT_TARGET_RMS: float = 0.12
-    TTS_ENABLE_NORMALIZER: bool = True
-    TTS_FORCE_TASHKEEL: bool = False
-    TTS_INTERNAL_CONCURRENCY: int = 1
+    OMNIVOICE_MODEL_NAME: str = "k2-fsa/OmniVoice"
+    OMNIVOICE_DEVICE: str = "auto"
+    OMNIVOICE_DTYPE: str = "float16"
+    OMNIVOICE_NUM_STEP: int = 32
+    OMNIVOICE_GUIDANCE_SCALE: float = 2.0
+    OMNIVOICE_SPEED: float = 1.0
+
+    SAMPLE_RATE: int = 24000
+
+    TTS_REFERENCE_AUDIO_PATH: str = ""
+    TTS_REFERENCE_AUDIO_TEXT: str = ""
+    TTS_VOICE_INSTRUCT: str = ""
 
     DUBBING_MAX_STRETCH_RATIO: float = 1.2
     DUBBING_MIN_STRETCH_RATIO: float = 0.8
@@ -46,9 +43,7 @@ class Settings(BaseSettings):
     HF_TOKEN: str = ""
     CATT_TASHKEEL_MODEL_DIR: str = ""
 
-    PREWARM_TTS_MODEL: bool = True
-
-    PORT: int = 8005
+    PORT: int = 8003
     LOG_LEVEL: str = "INFO"
 
     class Config:
