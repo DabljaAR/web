@@ -29,9 +29,11 @@ class Settings(BaseSettings):
     @property
     def sqlalchemy_url(self) -> str:
         url = self.DATABASE_URL
-        if url.startswith("postgres://"):
+        if url.startswith("postgresql+psycopg2://"):
+            url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        if url.startswith("postgresql://") and "+asyncpg" not in url and "+psycopg2" not in url:
+        elif url.startswith("postgresql://") and "+asyncpg" not in url:
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return url
 
