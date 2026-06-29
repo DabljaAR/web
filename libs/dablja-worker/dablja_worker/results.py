@@ -73,6 +73,12 @@ def publish_result_reliable(
 ) -> None:
     """Publish a result on a fresh connection with retries (decoupled from consumer channel)."""
     last_exc: Optional[Exception] = None
+    logger.info(
+        "[worker] Publishing %s for job %s via fresh connection (attempts=%d)",
+        status,
+        job_id,
+        max_attempts,
+    )
 
     for attempt in range(1, max_attempts + 1):
         connection = None

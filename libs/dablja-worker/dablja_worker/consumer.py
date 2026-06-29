@@ -76,7 +76,15 @@ def consume_loop(
     backoff = initial_backoff_s
     while True:
         try:
-            logger.info("[%s] Connecting to RabbitMQ: %s", service_name, rabbitmq_url)
+            from dablja_worker import __version__ as worker_lib_version
+
+            logger.info(
+                "[%s] Connecting to RabbitMQ: %s (dablja-worker=%s, heartbeat=%ss)",
+                service_name,
+                rabbitmq_url,
+                worker_lib_version,
+                heartbeat,
+            )
             params = pika.URLParameters(rabbitmq_url)
             params.heartbeat = heartbeat
             params.blocked_connection_timeout = 300

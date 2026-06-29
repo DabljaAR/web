@@ -10,6 +10,7 @@ from app import prewarm
 from app.config import settings
 from app.routes import router as tts_router
 from app.worker import start_consumer
+from dablja_worker import __version__ as DABLJA_WORKER_VERSION
 
 logging.basicConfig(
     level=settings.LOG_LEVEL,
@@ -23,7 +24,7 @@ _consumer_thread: threading.Thread | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _consumer_thread
-    logger.info("[TTS] Starting RabbitMQ consumer thread")
+    logger.info("[TTS] Starting RabbitMQ consumer thread (dablja-worker=%s)", DABLJA_WORKER_VERSION)
     _consumer_thread = threading.Thread(target=start_consumer, name="tts-consumer", daemon=True)
     _consumer_thread.start()
 
