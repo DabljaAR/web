@@ -19,11 +19,16 @@ COPY requirements-base.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --default-timeout=600 --retries=3 -r requirements-base.txt
 
-# silma-tts pulls CUDA torch from PyPI — reinstall CPU torch and purge NVIDIA wheels.
+# silma-tts pulls CUDA torch and onnxruntime-gpu — reinstall CPU stacks after requirements.
 RUN TORCH_CPU_VERSION=2.2.0 bash /tmp/docker-torch/install_cpu.sh
 
-# Guard: requirements must not leave a CUDA torch wheel in the image.
-RUN python /tmp/docker-torch/verify_cpu_torch.py
+COPY --from=docker_onnx install_cpu_onnx.sh verify_cpu_onnx.py /tmp/docker-onnx/
+RUN chmod +x /tmp/docker-onnx/install_cpu_onnx.sh \
+    && bash /tmp/docker-onnx/install_cpu_onnx.sh
+
+# Guard: requirements must not leave CUDA torch or GPU ONNX wheels in the image.
+RUN python /tmp/docker-torch/verify_cpu_torch.py \
+    && python /tmp/docker-onnx/verify_cpu_onnx.py
 
 FROM python:3.12-slim
 

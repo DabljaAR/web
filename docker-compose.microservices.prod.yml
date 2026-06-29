@@ -198,6 +198,7 @@ services:
       additional_contexts:
         shared: ./libs/dablja-worker
         docker_torch: ./libs/docker-torch
+        docker_onnx: ./libs/docker-onnx
     container_name: dabljaar_tts_service
     environment:
       <<: [*s3-env, *model-cache-env]
