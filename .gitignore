@@ -145,6 +145,10 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
+# Python virtual environments
+.venv
+.venv-tts/
+
 # minio
 data/
 !frontend/**/data/

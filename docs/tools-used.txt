@@ -1,0 +1,139 @@
+4.2 Description of Software Tools Used
+
+Frontend Frameworks
+
+● React.js
+A powerful JavaScript library for building interactive web user interfaces. React relies on a component-based structure that encourages code reuse and easier maintenance. It uses a virtual DOM to boost rendering efficiency and is ideal for single-page applications with dynamic content. Backed by a strong ecosystem, it's widely used across modern web projects.
+
+● Vite
+A fast, modern build tool for frontend projects. Vite offers instant server start with hot module replacement and optimised production builds, significantly improving the development experience for single-page applications.
+
+● TypeScript
+A typed superset of JavaScript that compiles to plain JavaScript. TypeScript adds static type checking to catch errors early, improves code readability, and enables better tooling support across the codebase.
+
+● Zustand
+A lightweight, scalable state management library for React. Zustand provides a minimal API to create global stores with built-in support for middleware, persistence, and subscriptions without boilerplate.
+
+● React Router
+A standard routing library for React applications. React Router enables declarative client-side routing with nested routes, URL parameters, lazy loading, and seamless navigation in single-page applications.
+
+● Tailwind CSS
+A utility-first CSS framework that enables rapid UI development. Tailwind provides low-level utility classes that compose into custom designs without leaving the HTML, resulting in highly maintainable and consistent styles.
+
+● Vitest
+A blazing-fast unit test framework for Vite-based projects. Vitest provides a Jest-compatible API with native Vite integration, instant watch mode, and built-in coverage reporting.
+
+● ESLint
+A static code analysis tool for identifying problematic patterns in JavaScript and TypeScript code. ESLint enforces consistent coding conventions and catches potential bugs during development.
+
+● SweetAlert2
+A library for creating customisable, responsive alert dialogs and modals. SweetAlert2 replaces the browser's native alert, confirm, and prompt dialogs with rich, themeable popups.
+
+● React Hot Toast
+A lightweight toast notification library for React. It provides an API for displaying success, error, loading, and custom notifications with minimal configuration and automatic stacking.
+
+Backend & API Frameworks
+
+● Node.js
+A JavaScript runtime environment that runs on Chrome's V8 engine, enabling backend development using JavaScript. Node.js supports asynchronous, event-driven programming, making it suitable for real-time applications and high-concurrency systems.
+
+● Express.js
+Built on top of Node.js, Express is a minimalist backend framework that simplifies the creation of web servers and RESTful APIs. It offers routing, middleware integration, and flexibility for backend web development.
+
+● FastAPI
+A fast, modern web framework for Python, optimised for building APIs with automatic documentation. FastAPI supports asynchronous I/O, type annotations, and data validation via Pydantic, making it a top choice for performance-driven applications integrating AI models or databases.
+
+● Uvicorn
+An ASGI server for Python, designed to serve FastAPI applications with high performance. Uvicorn leverages uvloop and httptools for efficient request handling and supports HTTP/1.1 and WebSocket protocols.
+
+● Python
+The core programming language used across the backend, AI pipeline, and automation scripts. Python's rich ecosystem of libraries and frameworks enabled rapid development of the FastAPI server, Celery workers, and machine learning inference modules.
+
+● Go
+A statically typed, compiled programming language used to build the orchestrator service. Go provides excellent concurrency support through goroutines and channels, making it well-suited for managing high-throughput message queues and long-running worker orchestration.
+
+● GORM
+A full-featured ORM library for Go that provides object-relational mapping for PostgreSQL. GORM simplifies database interactions by mapping Go structs to database tables, handling CRUD operations, and supporting associations, hooks, and migrations.
+
+Databases & Middleware
+
+● PostgreSQL
+A powerful, open-source object-relational database system. PostgreSQL is used as the primary database for storing user accounts, video metadata, job records, transcription data, and application state across the platform.
+
+● SQLAlchemy
+A comprehensive SQL toolkit and ORM for Python. SQLAlchemy 2.0 provides an async-capable, type-annotated interface for database operations, enabling seamless integration with FastAPI and Alembic migrations.
+
+● Alembic
+A database migration tool built on top of SQLAlchemy. Alembic enables version-controlled schema changes, allowing the team to evolve the database structure alongside application code in a reproducible manner.
+
+● Redis
+An in-memory data structure store used as the Celery message broker and result backend. Redis also serves as a caching layer for frequently accessed data and session storage.
+
+● RabbitMQ
+A message broker that implements the AMQP protocol. RabbitMQ is used for event-driven communication between the Go orchestrator and Python workers, enabling reliable, asynchronous task dispatch with queue-based routing.
+
+● MinIO
+An S3-compatible object storage server. MinIO stores uploaded videos, extracted audio, thumbnail images, dubbed video outputs, and AI model files, providing scalable storage with an Amazon S3-compatible API.
+
+● aioboto3
+An async-compatible Python client for interacting with S3-compatible storage services. aioboto3 is used throughout the backend for uploading, downloading, and managing files in MinIO buckets.
+
+AI/ML Pipeline Tools
+
+● Faster-Whisper
+A reimplementation of OpenAI's Whisper automatic speech recognition model using CTranslate2. Faster-Whisper offers up to four times faster transcription with lower memory usage compared to the original Whisper implementation, making it suitable for real-time and batch transcription of Arabic and multilingual audio.
+
+● NLLB-200-Distilled (Facebook/Meta)
+A distilled version of Meta's No Language Left Behind machine translation model. This model translates the transcribed text into Modern Standard Arabic and other target languages, with support for hundreds of languages and optimised inference via Hugging Face Transformers.
+
+● SILMA-TTS
+A text-to-speech engine specialised for Arabic speech synthesis. SILMA-TTS produces natural-sounding Arabic audio from translated text, supporting MSA and Egyptian Arabic dialects with configurable speaking speed and voice characteristics.
+
+● PyTorch
+An open-source machine learning framework used for running deep learning models. PyTorch provides the runtime for Faster-Whisper, NLLB, and SILMA-TTS inference, with support for CPU and GPU execution.
+
+● Hugging Face Transformers
+A library providing pretrained models and utilities for natural language processing. Transformers is used to load and run the NLLB translation model, manage model caching, and interface with Hugging Face Hub for model distribution.
+
+● Groq AI API
+An external AI API service used as an optional fallback for neural machine translation when the local NLLB model is unavailable or when higher-quality translation is required. Integration is controlled via environment variables and supports both stage2-only and full-pipeline fallback modes.
+
+DevOps & Infrastructure Tools
+
+● Docker & Docker Compose
+Containerisation platforms used to package and deploy all services in isolated, reproducible environments. Docker Compose orchestrates multi-service deployments, including PostgreSQL, Redis, RabbitMQ, MinIO, the FastAPI backend, Celery workers, and the frontend.
+
+● Caddy
+An open-source web server with automatic HTTPS and reverse proxy capabilities. Caddy routes API traffic to the FastAPI backend, serves the built SPA frontend, and provides TLS termination with automatic certificate management.
+
+● Terraform
+An infrastructure-as-code tool for provisioning cloud resources. Terraform manages compute instances, networking, storage, IAM roles, and firewall rules across the production infrastructure in a declarative, version-controlled manner.
+
+● FFmpeg
+A multimedia framework for handling video, audio, and other media files. FFmpeg is used extensively for extracting audio from videos, transcoding to HLS format, applying time-stretching with audio filters, merging TTS audio segments into videos, and generating thumbnails.
+
+● Celery
+A distributed task queue for asynchronous job processing. Celery manages the AI pipeline workflow — dispatching transcription, translation, speech synthesis, and media processing tasks across dedicated worker queues with retry logic and progress tracking.
+
+● Flower
+A web-based monitoring tool for Celery clusters. Flower provides a real-time dashboard to inspect worker status, task queues, active tasks, and task results across all Celery workers.
+
+● Git & GitHub
+Git is a distributed version control system used to track changes in source code, manage project versions, and support collaborative software development. GitHub is a cloud-based platform built around Git that provides repository hosting, collaboration tools, issue tracking, pull requests, and CI workflow management.
+
+● uv (Astral)
+A fast Python package installer and resolver. uv replaces pip and pip-tools for managing Python dependencies, offering significantly faster dependency resolution and installation in both development and Docker build environments.
+
+● nvm
+Node Version Manager for managing multiple Node.js versions. nvm enables the frontend development environment to use the required Node.js version (24.x) consistently across developer machines.
+
+Development & Collaboration Tools
+
+● pytest
+A testing framework for Python that supports fixtures, parameterisation, async tests (via pytest-asyncio), and extensive plugin integration. Tests cover API endpoints, service logic, database operations, and AI pipeline components.
+
+● ruff
+A fast Python linter and code formatter written in Rust. Ruff enforces PEP 8 compliance, import sorting, and custom lint rules across the backend codebase with near-instant execution.
+
+● mypy
+A static type checker for Python that validates type annotations. Mypy catches type-related errors before runtime, improving code quality and maintainability across the backend.

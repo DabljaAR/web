@@ -18,3 +18,11 @@ services:
       context: ./stt-service
       dockerfile: Dockerfile.gpu
     gpus: all
+
+  tts-service:
+    build:
+      context: ./tts-service
+      dockerfile: Dockerfile.gpu
+    gpus: all
+    environment:
+      OMNIVOICE_DEVICE: cuda

@@ -1,0 +1,138 @@
+# Docker Compose for integration tests
+# Exposes infrastructure ports to the host so the test runner can connect directly.
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   ./backend/run_integration_tests.sh
+#   docker compose -f docker-compose.test.yml down -v
+name: dabljaar-test
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dabljaar_test_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: dabljaar
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dabljaar"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - test_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: dabljaar_test_redis
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      - test_network
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: dabljaar_test_rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - test_network
+
+  minio:
+    image: minio/minio:latest
+    container_name: dabljaar_test_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test_network
+
+  # Go Orchestrator — runs the pipeline state machine
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: dabljaar_test_orchestrator
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/dabljaar?sslmode=disable"
+      HEALTH_PORT: "8082"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - test_network
+
+  # FastAPI backend — needed for MinIO bucket setup and database migrations
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        INSTALL_AI: "false"
+    container_name: dabljaar_test_backend
+    environment:
+      INSTALL_AI: "false"
+      ENVIRONMENT: test
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/dabljaar
+      SECRET_KEY: test-secret-key-for-integration-tests
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: dablaja-videos
+      MINIO_SECURE: "false"
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: "no"
+    networks:
+      - test_network
+    command: >
+      sh -c "
+        echo '=== Running database migrations ===' &&
+        alembic upgrade head &&
+        echo '=== Starting FastAPI ===' &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000
+      "
+
+networks:
+  test_network:
+    driver: bridge

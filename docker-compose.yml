@@ -152,6 +152,44 @@ services:
     networks:
       - dabljaar_network
 
+  # ─── TTS Microservice (Text-to-Speech via OmniVoice) ──────────────────────
+  tts-service:
+    build:
+      context: .
+      dockerfile: tts-service/Dockerfile
+    container_name: dabljaar_tts_service
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/dabljaar"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      OMNIVOICE_MODEL_NAME: ${OMNIVOICE_MODEL_NAME:-k2-fsa/OmniVoice}
+      OMNIVOICE_DEVICE: ${OMNIVOICE_DEVICE:-auto}
+      OMNIVOICE_DTYPE: ${OMNIVOICE_DTYPE:-float16}
+      OMNIVOICE_NUM_STEP: ${OMNIVOICE_NUM_STEP:-32}
+      OMNIVOICE_GUIDANCE_SCALE: ${OMNIVOICE_GUIDANCE_SCALE:-2.0}
+      OMNIVOICE_SPEED: ${OMNIVOICE_SPEED:-1.0}
+      HF_HOME: ${HF_HOME:-/model-cache/hf}
+      HF_TOKEN: ${HF_TOKEN:-}
+      PORT: 8003
+    ports:
+      - "8003:8003"
+    volumes:
+      - nmt_model_cache:/model-cache
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
   # ─── Go Orchestrator ──────────────────────────────────────────────────────
   orchestrator:
     build:
