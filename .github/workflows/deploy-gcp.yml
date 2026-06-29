@@ -18,6 +18,7 @@ on:
       - tts-service/**
       - media-service/**
       - libs/dablja-worker/**
+      - libs/docker-torch/**
       - docker-compose.microservices.prod.yml
       - Caddyfile.minimal
       - .github/workflows/deploy-gcp.yml
@@ -33,7 +34,7 @@ jobs:
   deploy:
     name: deploy-gcp
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     environment: production
     env:
       TARGET_BRANCH: main
@@ -78,6 +79,8 @@ jobs:
           ENV_FILE: ${{ env.ENV_FILE }}
           BOOTSTRAP_MARKER: ${{ env.BOOTSTRAP_MARKER }}
           REQUIRE_BOOTSTRAP_MARKER: ${{ env.REQUIRE_BOOTSTRAP_MARKER }}
+          DEPLOY_SHA: ${{ github.sha }}
+          DEPLOY_REASON: ${{ github.event.inputs.reason || github.event.head_commit.message || 'push' }}
           REPO_SSH_URL: ${{ secrets.GIT_REPO_SSH_URL }}
           REPO_FALLBACK: git@github.com:${{ github.repository }}.git
         run: |
@@ -85,7 +88,7 @@ jobs:
           VM_PORT="${VM_PORT:-22}"
 
           ssh -p "$VM_PORT" "$VM_USER@$VM_HOST" \
-            "TARGET_BRANCH='$TARGET_BRANCH' APP_DIR='$APP_DIR' ENV_FILE='$ENV_FILE' BOOTSTRAP_MARKER='$BOOTSTRAP_MARKER' REQUIRE_BOOTSTRAP_MARKER='$REQUIRE_BOOTSTRAP_MARKER' REPO_SSH_URL='$REPO_SSH_URL' REPO_FALLBACK='$REPO_FALLBACK' bash -se" <<'EOF'
+            "TARGET_BRANCH='$TARGET_BRANCH' APP_DIR='$APP_DIR' ENV_FILE='$ENV_FILE' BOOTSTRAP_MARKER='$BOOTSTRAP_MARKER' REQUIRE_BOOTSTRAP_MARKER='$REQUIRE_BOOTSTRAP_MARKER' DEPLOY_SHA='$DEPLOY_SHA' DEPLOY_REASON='$DEPLOY_REASON' REPO_SSH_URL='$REPO_SSH_URL' REPO_FALLBACK='$REPO_FALLBACK' bash -se" <<'EOF'
           set -euo pipefail
 
           if ! command -v git >/dev/null 2>&1; then
@@ -105,6 +108,11 @@ jobs:
             "~"|"~/"*) APP_DIR="${HOME}${APP_DIR#\~}" ;;
           esac
 
+          DEPLOY_LOG="$APP_DIR/deploy.log"
+          mkdir -p "$APP_DIR"
+          exec > >(tee -a "$DEPLOY_LOG") 2>&1
+          echo "=== deploy started at $(date -Is) sha=${DEPLOY_SHA:-unknown} reason=${DEPLOY_REASON:-unknown} ==="
+
           if [ "${REQUIRE_BOOTSTRAP_MARKER:-false}" = "true" ] && [ ! -f "$BOOTSTRAP_MARKER" ]; then
             echo "Required bootstrap marker is missing: $BOOTSTRAP_MARKER"
             exit 1
@@ -116,7 +124,6 @@ jobs:
 
           # Bootstrap repository on first deploy if it does not exist yet.
           if [ ! -d "$APP_DIR/.git" ]; then
-            mkdir -p "$APP_DIR"
             git clone -b "$TARGET_BRANCH" "$REPO_URL" "$APP_DIR" || {
               echo "Failed to clone repository. Ensure VM has GitHub SSH access for private repo."
               echo "Tried URL: $REPO_URL"
@@ -141,6 +148,8 @@ jobs:
 
           require_env DOMAIN
           require_env ACME_EMAIL
+          require_env SECRET_KEY
+          require_env POSTGRES_PASSWORD
           require_env RABBITMQ_URL
           require_env RABBITMQ_DEFAULT_PASS
           require_env S3_ENDPOINT_URL
@@ -155,10 +164,6 @@ jobs:
             exit 1
           fi
 
-          git fetch --prune origin
-          git checkout "$TARGET_BRANCH"
-          git pull --ff-only origin "$TARGET_BRANCH"
-
           COMPOSE_CMD="docker compose"
           if ! docker compose version >/dev/null 2>&1; then
             if command -v docker-compose >/dev/null 2>&1; then
@@ -170,15 +175,39 @@ jobs:
           fi
 
           COMPOSE_FILES="-f docker-compose.microservices.prod.yml"
+          COMPOSE="$COMPOSE_CMD --env-file $ENV_FILE $COMPOSE_FILES"
 
           print_diagnostics() {
-            echo "=== deploy diagnostics: compose ps ==="
-            $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES ps || true
-            echo "=== deploy diagnostics: backend/caddy/orchestrator/stt logs ==="
-            $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES logs --tail=200 backend caddy orchestrator stt-service || true
+            echo "=== deploy diagnostics: compose ps -a ==="
+            $COMPOSE ps -a || true
+            echo "=== deploy diagnostics: service logs ==="
+            $COMPOSE logs --tail=200 \
+              backend caddy orchestrator rabbitmq \
+              stt-service nmt-service tts-service media-service || true
             echo "=== deploy diagnostics: container health states ==="
-            docker ps -q | xargs -r docker inspect --format '{{.Name}} {{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' || true
+            docker ps -aq | xargs -r docker inspect --format '{{.Name}} {{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}} {{.State.Status}}' || true
           }
+
+          on_exit() {
+            local status=$?
+            trap - EXIT
+            if [ "$status" -ne 0 ]; then
+              echo "=== deploy failed with exit code $status at $(date -Is) ==="
+              print_diagnostics
+            else
+              echo "=== deploy succeeded at $(date -Is) ==="
+            fi
+            exit "$status"
+          }
+          trap on_exit EXIT
+
+          git fetch --prune origin
+          if [ -z "${DEPLOY_SHA:-}" ]; then
+            echo "DEPLOY_SHA is required"
+            exit 1
+          fi
+          git checkout "$DEPLOY_SHA"
+          git reset --hard "$DEPLOY_SHA"
 
           # Build frontend static assets to host path mounted by Caddy at /srv.
           if [ -d "$APP_DIR/frontend/node_modules" ] && [ ! -w "$APP_DIR/frontend/node_modules" ]; then
@@ -225,60 +254,99 @@ jobs:
             caddy validate --config /etc/caddy/Caddyfile
 
           # Start infra first so migrations can run cleanly.
-          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES up -d postgres rabbitmq
+          $COMPOSE up -d postgres rabbitmq
 
-          # Run DB migrations before starting app services.
-          # Use a direct entrypoint override to avoid the backend entrypoint running app startup command paths.
-          if command -v timeout >/dev/null 2>&1; then
-            timeout 600 $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES run --rm --entrypoint sh backend -lc "alembic upgrade head"
-          else
-            $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES run --rm --entrypoint sh backend -lc "alembic upgrade head"
-          fi
+          run_migrations() {
+            local migrate_cmd='alembic upgrade head'
+            local migrate_name="dabljaar_migrate_$(date +%s)"
+            echo "Building backend image for migrations at ${DEPLOY_SHA}"
+            $COMPOSE build backend
+            echo "Running migrations via one-off backend container ($migrate_name)"
+            if command -v timeout >/dev/null 2>&1; then
+              timeout 600 $COMPOSE run --rm --no-deps --name "$migrate_name" \
+                --entrypoint sh backend -lc "$migrate_cmd"
+            else
+              $COMPOSE run --rm --no-deps --name "$migrate_name" \
+                --entrypoint sh backend -lc "$migrate_cmd"
+            fi
+          }
+          run_migrations
 
-          # Start pipeline + API services after schema is up to date.
+          # Full stack reconcile — matches manual production deploy command.
           compose_up_start="$(date +%s)"
-          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES up -d --build \
-            orchestrator stt-service nmt-service tts-service media-service backend caddy
+          export COMPOSE_PARALLEL_LIMIT=1
+          $COMPOSE up -d --build --remove-orphans
           compose_up_end="$(date +%s)"
           compose_up_seconds="$((compose_up_end - compose_up_start))"
-          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES ps
+          $COMPOSE ps
 
-          # Wait for at least one AI worker readiness (STT cold start can take minutes).
-          stt_ready=false
-          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 28 32 36 40 44 48 52 56 60; do
-            if $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES exec -T stt-service curl -fsS http://localhost:8001/readiness >/dev/null 2>&1; then
-              stt_ready=true
-              break
-            fi
-            sleep 10
-          done
+          wait_for_readiness() {
+            local service="$1"
+            local url="$2"
+            local label="$3"
+            local max_attempts="${4:-60}"
+            local sleep_s="${5:-10}"
+            local attempt=1
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if $COMPOSE exec -T "$service" curl -fsS "$url" >/dev/null 2>&1; then
+                echo "$label readiness check passed"
+                return 0
+              fi
+              sleep "$sleep_s"
+              attempt=$((attempt + 1))
+            done
+            echo "internal-${label}-fail: ${service} readiness check failed after deploy"
+            return 1
+          }
 
-          if [ "$stt_ready" != "true" ]; then
-            echo "internal-stt-fail: stt-service readiness check failed after deploy"
-            print_diagnostics
-            exit 1
+          wait_for_backend_health() {
+            local max_attempts="${1:-40}"
+            local attempt=1
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if $COMPOSE exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()" >/dev/null 2>&1; then
+                echo "backend health check passed"
+                return 0
+              fi
+              sleep 5
+              attempt=$((attempt + 1))
+            done
+            echo "internal-backend-fail: backend health check failed after deploy"
+            return 1
+          }
+
+          wait_for_orchestrator_running() {
+            local max_attempts="${1:-30}"
+            local attempt=1
+            while [ "$attempt" -le "$max_attempts" ]; do
+              if $COMPOSE ps --status running -q orchestrator 2>/dev/null | grep -q .; then
+                echo "orchestrator container is running"
+                return 0
+              fi
+              sleep 5
+              attempt=$((attempt + 1))
+            done
+            echo "internal-orchestrator-fail: orchestrator is not running after deploy"
+            return 1
+          }
+
+          # Prefer compose --wait when available; fall back to per-service probes.
+          if $COMPOSE up --help 2>&1 | grep -q -- '--wait'; then
+            echo "Waiting for compose healthchecks (--wait --wait-timeout 900)"
+            $COMPOSE up -d --wait --wait-timeout 900 || true
           fi
 
-          # Ensure Caddy reloads after frontend dist + backend rollout.
-          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES exec -T caddy caddy validate --config /etc/caddy/Caddyfile
-          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES restart caddy
+          wait_for_orchestrator_running 30
+          wait_for_readiness media-service http://localhost:8003/readiness media 12 10
+          wait_for_readiness stt-service http://localhost:8001/readiness stt 60 10
+          wait_for_readiness nmt-service http://localhost:8002/readiness nmt 60 10
+          wait_for_readiness tts-service http://localhost:8005/readiness tts 90 10
+          wait_for_backend_health 40
+
+          # Reload Caddy to pick up frontend/dist without dropping active connections.
+          $COMPOSE exec -T caddy caddy validate --config /etc/caddy/Caddyfile
+          $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile
 
           health_checks_start="$(date +%s)"
-
-          backend_healthy=false
-          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-            if curl -fsS http://localhost:8000/api/health >/dev/null; then
-              backend_healthy=true
-              break
-            fi
-            sleep 5
-          done
-
-          if [ "$backend_healthy" != "true" ]; then
-            echo "internal-backend-fail: backend health check failed after deploy"
-            print_diagnostics
-            exit 1
-          fi
 
           edge_api_healthy=false
           for _ in 1 2 3 4 5 6 7 8; do
@@ -291,7 +359,6 @@ jobs:
 
           if [ "$edge_api_healthy" != "true" ]; then
             echo "internal-edge-fail: caddy API route not healthy on localhost with host header"
-            print_diagnostics
             exit 1
           fi
 
@@ -306,7 +373,6 @@ jobs:
 
           if [ "$external_api_healthy" != "true" ]; then
             echo "external-edge-fail: public API health check failed on https://${DOMAIN_VALUE}/api/health"
-            print_diagnostics
             exit 1
           fi
 
@@ -321,15 +387,16 @@ jobs:
 
           if [ "$spa_root_healthy" != "true" ]; then
             echo "spa-static-fail: public SPA root check failed on https://${DOMAIN_VALUE}/"
-            print_diagnostics
             exit 1
           fi
 
           health_checks_end="$(date +%s)"
           health_checks_seconds="$((health_checks_end - health_checks_start))"
 
+          DEPLOYED_SHA="$(git rev-parse --short HEAD)"
           echo "deployment timing: frontend_build=${frontend_build_seconds}s compose_up=${compose_up_seconds}s health_gates=${health_checks_seconds}s"
-          git rev-parse --short HEAD
+          echo "deployed ${DEPLOYED_SHA}"
+          $COMPOSE ps
           EOF
 
       - name: Deployment summary
@@ -342,4 +409,5 @@ jobs:
             echo "- Target branch: ${{ env.TARGET_BRANCH }}"
             echo "- Target VM path: ${{ env.APP_DIR }}"
             echo "- Compose profile: docker-compose.microservices.prod.yml"
+            echo "- Deploy log on VM: \`${{ env.APP_DIR }}/deploy.log\`"
           } >> "$GITHUB_STEP_SUMMARY"

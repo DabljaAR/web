@@ -80,13 +80,21 @@ Apply migrations after deploy:
 docker compose exec backend alembic upgrade head
 ```
 
-For CI/CD VM deploys (`.github/workflows/deploy-gcp.yml`), migrations run automatically before services start:
+For CI/CD VM deploys ([`.github/workflows/deploy-gcp.yml`](../.github/workflows/deploy-gcp.yml)), the workflow:
+
+1. Checks out the exact triggering commit (`GITHUB_SHA`) on the VM
+2. Builds the frontend static assets
+3. Starts `postgres` and `rabbitmq`, builds the backend image, then runs migrations in a one-off `run --no-deps` container (unique name — no conflict with `dabljaar_backend`)
+4. Reconciles the **full** microservices stack:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d postgres rabbitmq
-docker compose --env-file .env.production -f docker-compose.microservices.prod.yml run --rm --entrypoint sh backend -lc "alembic upgrade head"
-docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build orchestrator stt-service nmt-service tts-service media-service backend caddy
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build --remove-orphans
 ```
+
+5. Waits for orchestrator, stage workers (`/readiness`), and backend health (via `compose exec`, not host ports)
+6. Reloads Caddy and verifies edge HTTPS + SPA routes
+
+Deploy logs are appended to `~/web/deploy.log` on the VM. On failure, service logs and `compose ps -a` are printed automatically.
 
 ## Common Issues
 
@@ -116,10 +124,10 @@ Standalone `POST /api/tts/synthesize` proxies to `tts-service` via `TTS_SERVICE_
 
 ## Recommended Deployment Flow
 
-1. Build images
+1. Build frontend assets (CI) or ensure `frontend/dist` exists
 2. Start infra (`postgres`, `rabbitmq`)
-3. Run migrations
-4. Start orchestrator + stage workers + backend + caddy
-5. Verify backend health and worker readiness
+3. Run migrations (`compose build backend`, then one-off `run --no-deps` with a unique container name)
+4. Full stack: `docker compose … up -d --build --remove-orphans`
+5. Verify worker `/readiness`, backend health, and Caddy edge routes
 
 See also: [microservices_migration.md](microservices_migration.md), [microservices_lld.md](microservices_lld.md).
