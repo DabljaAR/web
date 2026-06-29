@@ -205,6 +205,8 @@ services:
     build:
       context: ./media-service
       dockerfile: Dockerfile
+      additional_contexts:
+        shared: ./libs/dablja-worker
     container_name: dabljaar_media_service
     environment:
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
@@ -214,11 +216,12 @@ services:
       AWS_SECRET_ACCESS_KEY: minioadmin
       S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
       MERGE_TEMP_DIR: /tmp/dubbing_merge
+      LOG_LEVEL: INFO
       PORT: 8003
     ports:
       - "8003:8003"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8003/readiness"]
       interval: 30s
       timeout: 10s
       retries: 3

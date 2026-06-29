@@ -78,7 +78,7 @@ flowchart TB
     MQ -->|job.start.stt| STT["stt service"]
     MQ -->|job.start.nmt| NMT["nmt service"]
     MQ -->|job.start.tts| TTS["tts service"]
-    MQ -->|job.start.merge| MERGE["merge worker\n(in media or tts)"]
+    MQ -->|job.start.merge| MERGE["media-service\n(merge stage, :8003)"]
 
     STT -->|job.results.stt| MQ
     NMT -->|job.results.nmt| MQ
@@ -131,7 +131,7 @@ This is the explicit pattern catalog the design follows, with where each is real
 |---------|------|---------|----------|---------|
 | **frontend** | UI | — | REST to backend | React/Vite |
 | **backend** | auth, users, billing, videos, job creation, status reads | REST | `job.created`, media trigger, DB | FastAPI |
-| **media** | FFmpeg preprocess (audio extract, HLS, thumbnail), final merge | media trigger / `job.start.merge` | DB, S3, `job.results.merge` | Python |
+| **media** | FFmpeg preprocess (backend), final merge mux | media-service `stage.merge` | DB, S3, `job.results.merge` | Python |
 | **stt** | Whisper transcription | `job.start.stt` | DB, `job.results.stt` | Python + faster-whisper |
 | **nmt** | NLLB translation incl. internal segment fan-out + Groq length adjust | `job.start.nmt` | DB, `job.results.nmt` | Python + transformers |
 | **tts** | SILMA synthesis incl. internal per-segment loop + audio combine | `job.start.tts` | DB, S3, `job.results.tts` | Python + silma-tts |
@@ -167,7 +167,7 @@ Trigger (backend -> orchestrator):
 | `stage.nmt` | `job.start.nmt` | nmt workers | new |
 | `stage.tts` | `job.start.tts` | tts workers | new |
 | `stage.media` | `job.start.media` | media workers | new (preprocess optional path) |
-| `stage.merge` | `job.start.merge` | merge worker | new |
+| `stage.merge` | `job.start.merge` | media-service | new |
 | `orchestrator.dlq` | DLX | manual / alerting | existing |
 
 **QoS:** every stage queue uses `prefetch=1` (one unacked message per consumer). This is the natural backpressure mechanism — slow workers leave messages safely in RabbitMQ instead of in RAM.
@@ -484,10 +484,11 @@ Canonical LLD: [docs/microservices_lld.md](microservices_lld.md)
 
 - [x] Build `tts-service` (port 8005) — extract SilmaTTSModelManager + audio_combine from backend.
 - [x] Wire `media-service` merge worker for `fullDubbing` (orchestrator merge stage restored).
+- [x] **media-service merge production hardening:** mux-only path (`combined_audio_key`), `dablja-worker`, `/readiness`, unit tests + CI, multi-stage Docker.
 - [x] Orchestrator: restore `JobTypeDubbingMerge` in `stageOrder["fullDubbing"]`.
 - [x] Remove `tts_bridge.py`, Celery TTS tasks, Redis counter from backend.
 - [ ] Decommission Celery/Redis/Flower; ship `docker-compose.microservices.prod.yml`.
-- [x] E2E scripts: `translationAndTTS`, `fullDubbing`, cancel mid-TTS (`test_e2e_*.sh`).
+- [x] E2E scripts: `translationAndTTS`, `fullDubbing`, cancel mid-TTS, merge-only smoke (`test_e2e_*.sh`).
 
 ### Phase 3 (Post-K8s) — Kubernetes + data ownership
 

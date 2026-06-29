@@ -3,24 +3,26 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    # Database
-    DATABASE_URL: str
+    DATABASE_URL: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/dabljaar"
 
-    # RabbitMQ
     RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
+    RABBITMQ_HEARTBEAT: int = 600
+    RABBITMQ_BLOCKED_TIMEOUT: int = 300
+    RABBITMQ_MAX_RETRIES: int = 30
+    RABBITMQ_PREFETCH: int = 1
 
-    # MinIO / S3
     AWS_ENDPOINT_URL: str = "http://localhost:9000"
     AWS_ACCESS_KEY_ID: str = "minioadmin"
     AWS_SECRET_ACCESS_KEY: str = "minioadmin"
     AWS_DEFAULT_REGION: str = "us-east-1"
     S3_MEDIA_BUCKET: str = "dablaja-videos"
 
-    # Merge stage
     MERGE_TEMP_DIR: str = "/tmp/dubbing_merge"
+    DUBBING_OUTPUT_AUDIO_CODEC: str = "aac"
+    DUBBING_OUTPUT_AUDIO_BITRATE: str = "192k"
 
-    # Server
     PORT: int = 8003
+    LOG_LEVEL: str = "INFO"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -29,7 +31,7 @@ class Settings(BaseSettings):
         url = self.DATABASE_URL
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        if url.startswith("postgresql://") and "+asyncpg" not in url:
+        if url.startswith("postgresql://") and "+asyncpg" not in url and "+psycopg2" not in url:
             url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return url
 
