@@ -17,6 +17,7 @@ from dablja_worker.job_state import (
     mark_failed,
 )
 from dablja_worker.results import publish_result
+from dablja_worker.s3_model_download import download_s3_prefix
 
 __all__ = [
     # consumer.py
@@ -31,4 +32,6 @@ __all__ = [
     "mark_failed",
     # results.py
     "publish_result",
+    # s3_model_download.py
+    "download_s3_prefix",
 ]
