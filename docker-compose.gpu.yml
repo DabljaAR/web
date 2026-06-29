@@ -10,3 +10,14 @@ services:
       additional_contexts:
         shared: ./libs/dablja-worker
     gpus: all
+
+  tts-service:
+    build:
+      context: ./tts-service
+      dockerfile: Dockerfile.gpu
+      additional_contexts:
+        shared: ./libs/dablja-worker
+    environment:
+      SILMA_DEVICE: cuda
+      PREWARM_TTS_MODEL: "true"
+    gpus: all

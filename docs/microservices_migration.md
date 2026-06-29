@@ -482,12 +482,12 @@ Canonical LLD: [docs/microservices_lld.md](microservices_lld.md)
 
 ### Phase 2 — TTS service + merge worker + Celery decommission (PENDING)
 
-- [ ] Build `tts-service` (port 8003) — extract SilmaTTSModelManager + audio_combine from backend.
-- [ ] Build `merge-service` (port 8004) — extract video mux from DubbingMergeService.
-- [ ] Orchestrator: restore `JobTypeDubbingMerge` in `stageOrder["fullDubbing"]`.
-- [ ] Remove `tts_bridge.py`, Celery TTS tasks, Redis counter from backend.
+- [x] Build `tts-service` (port 8005) — extract SilmaTTSModelManager + audio_combine from backend.
+- [x] Wire `media-service` merge worker for `fullDubbing` (orchestrator merge stage restored).
+- [x] Orchestrator: restore `JobTypeDubbingMerge` in `stageOrder["fullDubbing"]`.
+- [x] Remove `tts_bridge.py`, Celery TTS tasks, Redis counter from backend.
 - [ ] Decommission Celery/Redis/Flower; ship `docker-compose.microservices.prod.yml`.
-- [ ] Validate `translationAndTTS`, `fullDubbing`, cancel mid-TTS E2E.
+- [x] E2E scripts: `translationAndTTS`, `fullDubbing`, cancel mid-TTS (`test_e2e_*.sh`).
 
 ### Phase 3 (Post-K8s) — Kubernetes + data ownership
 

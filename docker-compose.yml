@@ -156,6 +156,84 @@ services:
     networks:
       - dabljaar_network
 
+  # ─── TTS Microservice (SILMA-TTS synthesis) ───────────────────────────────
+  tts-service:
+    build:
+      context: ./tts-service
+      dockerfile: Dockerfile
+      additional_contexts:
+        shared: ./libs/dablja-worker
+        docker_torch: ./libs/docker-torch
+    container_name: dabljaar_tts_service
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/dabljaar"
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      HF_HOME: ${HF_HOME:-/model-cache/hf}
+      HF_TOKEN: ${HF_TOKEN:-}
+      SILMA_DEVICE: ${SILMA_DEVICE:-auto}
+      TTS_DEFAULT_NFE_STEP: ${TTS_DEFAULT_NFE_STEP:-32}
+      CATT_TASHKEEL_MODEL_DIR: ${CATT_TASHKEEL_MODEL_DIR:-/model-cache/catt_tashkeel/onnx_models}
+      PREWARM_TTS_MODEL: ${PREWARM_TTS_MODEL:-true}
+      PORT: 8005
+    ports:
+      - "8005:8005"
+    volumes:
+      - ai_model_cache:/model-cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/readiness"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 600s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
+  # ─── Media Microservice (preprocess + dubbing merge stage) ────────────────
+  media-service:
+    build:
+      context: ./media-service
+      dockerfile: Dockerfile
+    container_name: dabljaar_media_service
+    environment:
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/dabljaar"
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-dablaja-videos}
+      MERGE_TEMP_DIR: /tmp/dubbing_merge
+      PORT: 8003
+    ports:
+      - "8003:8003"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
   # ─── Go Orchestrator ──────────────────────────────────────────────────────
   orchestrator:
     build:
@@ -189,7 +267,6 @@ services:
       ACCESS_TOKEN_EXPIRE_MINUTES: 60
       REFRESH_TOKEN_EXPIRE_DAYS: 7
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
-      ENABLE_TTS_BRIDGE: "false"
       STT_SERVICE_URL: "http://stt-service:8001"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin

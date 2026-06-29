@@ -493,7 +493,7 @@ This is the format the future `tts-service` reads (`job.input_data â†’ task_id â
 **Not built in Phase 1.** Fully specified here for continuity.
 
 **Location:** `tts-service/` (to be created)  
-**Port:** 8003  
+**Port:** 8005  
 **Queue:** `stage.tts` (binding key: `job.start.tts`)  
 **Runtime:** Python 3.12 + silma-tts + torch (GPU)
 

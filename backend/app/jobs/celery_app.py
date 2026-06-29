@@ -39,7 +39,6 @@ _INSTALL_AI = os.getenv("INSTALL_AI", "false").lower() == "true"
 _base_imports = ["app.jobs.tasks.media"]
 _ai_imports = (
     [
-        "app.jobs.tasks.pipeline",
         "app.tts.models",
     ]
     if _INSTALL_AI
@@ -74,8 +73,6 @@ celery_app.conf.update(
     # Queue routing (STT and NMT are handled by their respective microservices via RabbitMQ)
     task_routes={
         "app.jobs.tasks.media.*":                              {"queue": "media"},
-        "app.jobs.tasks.pipeline.tts_synthesize_segment":      {"queue": "ai_tts"},
-        "app.jobs.tasks.pipeline.tts_combine_results":         {"queue": "ai_tts"},
         "app.jobs.tasks.tts.synthesize":                       {"queue": "ai_tts"},
     },
 

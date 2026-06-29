@@ -6,6 +6,9 @@ on:
     paths:
       - orchestrator/**
       - libs/dablja-worker/**
+      - stt-service/**
+      - nmt-service/**
+      - tts-service/**
       - .github/workflows/go-tests.yml
 
 permissions:
@@ -91,4 +94,29 @@ jobs:
           pip install pytest sqlalchemy psycopg2-binary pika
 
       - name: Run STT unit tests
+        run: pytest tests/ -v --tb=short -ra
+
+  tts-unit-tests:
+    name: tts-service-unit-tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: tts-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install shared lib and test dependencies
+        run: |
+          pip install ../libs/dablja-worker
+          pip install pytest sqlalchemy psycopg2-binary pika pydantic-settings python-dotenv
+
+      - name: Run TTS unit tests
         run: pytest tests/ -v --tb=short -ra
