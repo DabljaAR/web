@@ -27,12 +27,23 @@ if ! command -v pip >/dev/null 2>&1; then
   exit 1
 fi
 
-# If a CUDA build is already present (e.g. bad layer cache), remove it so pip
-# cannot treat torch as already satisfied.
-if python -c "import torch" >/dev/null 2>&1; then
-  echo "install_cpu.sh: removing pre-existing torch before CPU install"
-  pip uninstall -y torch torchvision torchaudio >/dev/null 2>&1 || true
-fi
+purge_cuda_torch_artifacts() {
+  echo "install_cpu.sh: purging CUDA torch and companion wheels"
+  pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+  local pkgs=""
+  pkgs="$(pip freeze 2>/dev/null \
+    | grep -iE '^(nvidia-|triton|cuda-toolkit|cuda-bindings|cuda-pathfinder)' \
+    | cut -d= -f1 \
+    | sort -u \
+    | tr '\n' ' ' \
+    || true)"
+  if [[ -n "${pkgs// }" ]]; then
+    # shellcheck disable=SC2086
+    pip uninstall -y ${pkgs} 2>/dev/null || true
+  fi
+}
+
+purge_cuda_torch_artifacts
 
 echo "install_cpu.sh: installing torch==${TORCH_CPU_VERSION} from ${PYTORCH_CPU_INDEX}"
 

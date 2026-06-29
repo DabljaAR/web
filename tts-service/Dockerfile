@@ -19,6 +19,10 @@ COPY requirements-base.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --default-timeout=600 --retries=3 -r requirements-base.txt
 
+# silma-tts pulls CUDA torch from PyPI — reinstall CPU torch and purge NVIDIA wheels.
+RUN TORCH_CPU_VERSION=2.2.0 bash /tmp/docker-torch/install_cpu.sh
+
+# Guard: requirements must not leave a CUDA torch wheel in the image.
 RUN python /tmp/docker-torch/verify_cpu_torch.py
 
 FROM python:3.12-slim
