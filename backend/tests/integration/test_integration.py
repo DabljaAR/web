@@ -96,7 +96,7 @@ class TestDatabaseIntegration:
 
     @pytest.mark.asyncio
     async def test_database_connection(self):
-        from app.dependencies import connect_to_db, disconnect_from_db
+        from app.core.db import connect_to_db, disconnect_from_db
         try:
             await connect_to_db()
             await disconnect_from_db()
