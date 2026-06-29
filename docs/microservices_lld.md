@@ -18,8 +18,8 @@
    - 6.1 [orchestrator (Go)](#61-orchestrator-go)
    - 6.2 [stt-service](#62-stt-service)
    - 6.3 [nmt-service](#63-nmt-service)
-   - 6.4 [tts-service (Phase 2)](#64-tts-service-phase-2)
-   - 6.5 [merge-service (Phase 2)](#65-merge-service-phase-2)
+   - 6.4 [tts-service](#64-tts-service)
+   - 6.5 [media-service merge stage](#65-media-service-merge-stage)
    - 6.6 [backend](#66-backend)
 7. [Messaging topology](#7-messaging-topology)
 8. [Data flow per output_type](#8-data-flow-per-output_type)
@@ -36,10 +36,10 @@
 
 | Phase | Goal | In scope | Not in scope |
 |-------|------|----------|--------------|
-| **Phase 1 (now)** | Freeze full-app LLD; validate STT + NMT | Shared lib, STT/NMT hardening, test infra | TTS service, merge worker, Celery removal |
-| **Phase 2** | TTS + merge + Celery cutover | `tts-service`, `merge-service`, orchestrator merge stage, prod compose | K8s, Phase 3 DB ownership |
+| **Phase 1 (done)** | Freeze full-app LLD; validate STT + NMT | Shared lib, STT/NMT hardening, test infra | TTS service, merge worker, Celery removal |
+| **Phase 2 (active)** | TTS + merge + Celery cutover | `tts-service`, `media-service` merge stage, orchestrator merge stage, prod compose | K8s, Phase 3 DB ownership |
 
-During Phase 1, `fullDubbing` and `translationAndTTS` still terminate at TTS via the existing Celery bridge in the backend (`tts_bridge.py` + `pipeline.py`). This is unchanged and intentional.
+Phase 2 cutover: `fullDubbing` and `translationAndTTS` run through `tts-service` (port 8005) and `media-service` merge worker (port 8003). The Celery `tts_bridge.py` shim has been removed.
 
 ---
 
@@ -65,9 +65,9 @@ frontend ──REST──▶ backend ──job.created──▶ RabbitMQ
                    
   ─ ─ ─ ─ ─ ─ ─ Phase 2 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
   
-                   tts-service  merge-service
-                   (port 8003)  (port 8004)
-                   DB + S3      DB + S3
+                   tts-service  media-service (merge)
+                   (port 8005)  (port 8003)
+                   DB + S3      DB + S3 + ffmpeg
 ```
 
 All inter-stage pipeline communication goes through **RabbitMQ** topic exchange `dablja.jobs.exchange`. No stage-to-stage HTTP. The orchestrator is the only component that knows pipeline order.
@@ -126,13 +126,26 @@ web/
 │       ├── model.py                     # NLLBTranslatorWrapper (lazy singleton)
 │       ├── length_adjuster.py          # Groq Arabic length adjustment (optional)
 │       └── translate.py                # sync POST /translate, GET /health/model
-├── tts-service/                         # Phase 2 only — not yet created
-├── merge-service/                       # Phase 2 only — not yet created
-├── backend/                             # FastAPI monolith (auth, media, job creation, status)
+├── tts-service/                         # Phase 2: SILMA TTS + audio combine (port 8005)
+├── media-service/                       # Phase 2: merge stage + auxiliary media HTTP (port 8003)
+│   ├── Dockerfile  Dockerfile.gpu
+│   ├── requirements-base.txt
+│   ├── pytest.ini
+│   ├── tests/
+│   │   ├── conftest.py
+│   │   ├── test_worker_logic.py
+│   │   └── test_mux.py
 │   └── app/
-│       ├── shared/dablja_worker.py      # shim re-exporting from dablja_worker package
-│       ├── jobs/tasks/tts_bridge.py     # temporary: RabbitMQ→Celery bridge (Phase 2: removed)
-│       └── media/service.py            # publish_job_created() after media preprocess
+│       ├── main.py                      # FastAPI lifespan → merge consumer; /health /readiness
+│       ├── config.py
+│       ├── worker.py                    # consume stage.merge → mux → job.results.merge
+│       ├── mux.py                       # ffmpeg replace-audio (from backend DubbingMergeService)
+│       ├── storage.py
+│       └── ffmpeg.py
+├── backend/                             # FastAPI monolith (auth, media preprocess, job creation, status)
+│   └── app/
+│       ├── media/service.py            # publish_job_created() after media preprocess
+│       └── dubbing/service.py          # legacy merge logic (reference only; merge lives in media-service)
 ├── docker-compose.yml                   # dev stack (all services)
 ├── docker-compose.test.yml             # Phase 1: test infra (no AI model volumes)
 └── docs/
@@ -246,8 +259,7 @@ Publishes `WorkerResultPayload` matching the Go orchestrator contract (persisten
 ### Adoption
 
 - **Phase 1:** stt-service and nmt-service install from `libs/dablja-worker`. Local `app/dablja_worker.py` files removed. Import changes from `from app.dablja_worker import` to `from dablja_worker import`.
-- **Backend shim:** `backend/app/shared/dablja_worker.py` becomes a re-export shim to keep `tts_bridge.py` working until Phase 2.
-- **Phase 2:** tts-service and merge-service use `job_state.py` and `results.py` from the start.
+- **Phase 2:** tts-service and media-service use `job_state.py` and `results.py` from the start.
 
 ### Docker build integration
 
@@ -535,31 +547,37 @@ UPDATE jobs SET status='COMPLETED', progress=75.0, ... WHERE id=:job_id;
 
 ---
 
-### 6.5 merge-service (Phase 2)
+### 6.5 media-service merge stage
 
-**Not built in Phase 1.** Fully specified here for continuity.
-
-**Location:** `merge-service/` (to be created)  
-**Port:** 8004  
+**Location:** `media-service/`  
+**Port:** 8003  
 **Queue:** `stage.merge` (binding key: `job.start.merge`)  
 **Runtime:** Python 3.12 + ffmpeg (no ML model)
 
-#### Source code extraction
+Media preprocess (audio extract, thumbnail) remains in **backend** `app/media/service.py` (D6). The merge worker is the production path for `fullDubbing` final mux.
 
-- `mux.py` ← `backend/app/dubbing/service.py`: `_replace_video_audio` — the VIDEO-mux half
+#### Source code
 
-#### What it does
+- `mux.py` ← `backend/app/dubbing/service.py`: `_replace_video_audio` — explicit `-map 0:v:0`, apad to video duration, `-c:v copy`, `-c:a aac`
+- `worker.py` — `dablja-worker` consumer pattern (same as STT/NMT/TTS)
+
+#### What it does (mux-only)
+
+TTS (`tts-service`) already synthesizes per-segment WAVs, combines them, uploads `tts/{video_id}/combined_{job_id}.wav`, and writes `video_tasks.combined_audio_key`. Merge **must not** re-download segments or re-concat.
 
 1. Read `video_tasks.combined_audio_key` + `videos.file_path` (original video)
-2. Download both to temp dir
-3. FFmpeg mux: `-map 0:v:0 -map [aout] -c:v copy -c:a aac -shortest`
+2. Download both to temp dir (`MERGE_TEMP_DIR`)
+3. FFmpeg mux: replace audio track (apad + stream mapping)
 4. Upload dubbed video to S3 at `dubbed/{video_id}/dubbed_{job_id}.mp4`
-5. Write `videos.dubbed_video_path` + `video_tasks.dubbed_video_path`
-6. Publish `job.results.merge {dubbed_video_key}` → orchestrator marks parent COMPLETED at 100%
+5. Write `videos.dubbed_video_path`; mark `video_tasks` COMPLETED / progress 100
+6. Publish `job.results.merge` with lean `{dubbed_video_key, combined_audio_key}`
 
-#### Orchestrator change required (Phase 2)
+**Audio-only edge case:** If `media_type != video`, skip mux; mark job COMPLETED with combined audio ref only (`dubbed_video_key: null`).
 
-In `orchestrator/internal/pipeline/manager.go` line 41, restore:
+#### Orchestrator
+
+`fullDubbing` stage order includes `JobTypeDubbingMerge` in `orchestrator/internal/pipeline/manager.go`:
+
 ```go
 "fullDubbing": {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate, db.JobTypeTTSSynthesize, db.JobTypeDubbingMerge},
 ```
@@ -570,9 +588,9 @@ In `orchestrator/internal/pipeline/manager.go` line 41, restore:
 
 **Location:** `backend/`  
 **Port:** 8000  
-**Keeps in Phase 1:** auth, users, videos CRUD, job creation, media preprocess, status polling API, TTS Celery bridge (for `fullDubbing`/`translationAndTTS`)
+**Keeps:** auth, users, videos CRUD, job creation, media preprocess, status polling API
 
-**Publishes `job.created`:** After media preprocess in `app/media/service.py` (lines 167-169, 637-639), calls `publish_job_created(parent_job_id)` via `app/shared/rabbitmq.py`. This is the entry point for the orchestrator.
+**Publishes `job.created`:** After media preprocess in `app/media/service.py`, calls `publish_job_created(parent_job_id)` via `app/shared/rabbitmq.py`. This is the entry point for the orchestrator.
 
 **Media preprocess** runs as a FastAPI `BackgroundTasks` coroutine (D6) — not via Celery. It:
 1. Downloads uploaded video to temp dir
@@ -583,7 +601,7 @@ In `orchestrator/internal/pipeline/manager.go` line 41, restore:
 6. Creates parent `FULL_DUBBING_PIPELINE` job row
 7. Publishes `job.created`
 
-**TTS Celery bridge** (`app/jobs/tasks/tts_bridge.py`): still active for `fullDubbing`/`translationAndTTS`. Consumes `job.start.tts` from RabbitMQ → fans out `tts_synthesize_segment` Celery tasks → Redis counter → `tts_combine_results` → publishes `job.results.tts`. Controlled by `ENABLE_TTS_BRIDGE=false` in dev (Phase 1 doesn't need it for `captionsOnly`/`captionsAndTranslation` testing).
+TTS and merge stages are handled by `tts-service` and `media-service` respectively. Celery TTS bridge (`tts_bridge.py`) and Redis counter have been removed in Phase 2.
 
 ---
 
@@ -599,8 +617,8 @@ All messages: `delivery_mode=2` (persistent), `content_type=application/json`
 | `orchestrator.results` | `job.results.*` | orchestrator | 1 |
 | `stage.stt` | `job.start.stt` | stt-service | 1 |
 | `stage.nmt` | `job.start.nmt` | nmt-service | 1 |
-| `stage.tts` | `job.start.tts` | tts-service / tts_bridge | 1 (bridge) → 2 (service) |
-| `stage.merge` | `job.start.merge` | merge-service | 2 |
+| `stage.tts` | `job.start.tts` | tts-service | 2 |
+| `stage.merge` | `job.start.merge` | media-service | 2 |
 | `orchestrator.dlq` | DLX routes here | manual inspection | 1 |
 
 QoS: `prefetch_count=1` on all stage queues — natural backpressure.  
@@ -660,7 +678,8 @@ orchestrator: nextStage(captionsAndTranslation, NMT) = none → parent COMPLETED
 
 ```
 ... → stt → nmt → job.results.nmt
-orchestrator → job.start.tts → [tts_bridge or tts-service Phase 2]
+orchestrator → job.start.tts → tts-service
+orchestrator → job.start.merge → media-service
 [Celery bridge Phase 1] → tts_combine_results → publish_tts_result
 orchestrator → parent COMPLETED
 ```
@@ -711,8 +730,8 @@ All services share the PostgreSQL instance. Workers write directly via raw SQL (
 | orchestrator | `jobs` (create children, update status/progress) |
 | stt-service | `video_tasks` (stt_segments, transcript), `jobs` (child status) |
 | nmt-service | `video_tasks` (segments, translated_transcript), `jobs` (child status) |
-| tts-service (Phase 2) | `video_tasks` (combined_audio_key), `jobs` (child status) |
-| merge-service (Phase 2) | `videos` (dubbed_video_path), `video_tasks`, `jobs` (child status) |
+| tts-service | `video_tasks` (combined_audio_key), `jobs` (child status) |
+| media-service (merge) | `videos` (dubbed_video_path), `video_tasks`, `jobs` (child status) |
 
 Phase 3 (post-K8s): orchestrator becomes the single writer for `jobs`/`video_tasks`; workers return results only in messages.
 
@@ -752,7 +771,8 @@ Phase 3 (post-K8s): orchestrator becomes the single writer for `jobs`/`video_tas
 | `orchestrator/internal/pipeline/manager_nextstage_test.go` | `nextStage()` for all 5 `output_type` values |
 | `orchestrator/internal/pipeline/manager_test.go` | `WorkerResultPayload` JSON contract; enum parity with Python |
 | `backend/tests/test_worker_result_payload.py` | Golden fixture round-trip |
-| `libs/dablja-worker` (if tests added) | `classify_failure`, `check_cancelled` edge cases |
+| `media-service/tests/test_worker_logic.py` | Idempotency; cancel pre-check; requires `combined_audio_key`; audio-only skips mux; result payload shape |
+| `media-service/tests/test_mux.py` | Mock S3 + ffmpeg; verifies apad filter and stream mapping |
 
 ### Layer 2 — Go integration tests (requires postgres:5433 + rabbitmq:5672)
 
@@ -784,14 +804,15 @@ Covered by `manager_integration_test.go` (T01–T15) and `manager_stt_integratio
 |--------|---------------|
 | `test_e2e_stt.sh` | Upload audio to MinIO, seed DB, publish job.created, poll until COMPLETED |
 | `test_e2e_captions_only.sh` | Full `captionsOnly` pipeline with real STT model |
-| `test_e2e_captions_and_translation.sh` | Full `captionsAndTranslation` with real STT + NMT |
+| `test_e2e_full_dubbing.sh` | Full `fullDubbing` with real STT + NMT + TTS + merge |
+| `test_e2e_merge_only.sh` | Merge smoke: pre-seeded `combined_audio_key`, direct `job.start.merge` |
 
 ### Layer 5 — CI (GitHub Actions)
 
 | Workflow | Trigger | What runs |
 |----------|---------|-----------|
 | `.github/workflows/backend-tests.yml` | PR touching `backend/**` | ruff lint + pytest (unit only, `-m "not integration and not slow"`) |
-| `.github/workflows/go-tests.yml` | PR touching `orchestrator/**` or `libs/**` | `go test ./internal/pipeline/...` (unit, no integration tag) |
+| `.github/workflows/go-tests.yml` | PR touching `orchestrator/**`, `libs/**`, `stt-service/**`, `nmt-service/**`, `tts-service/**`, `media-service/**` | Go unit tests + Python worker unit tests |
 
 Integration and E2E tests remain manual (require real infra) or optional CI.
 
@@ -815,13 +836,11 @@ Integration and E2E tests remain manual (require real infra) or optional CI.
 
 ## 14. Phase 2 preview
 
-Full specs above in §6.4 (tts-service) and §6.5 (merge-service). Summary of Phase 2 work:
+Full specs in §6.4 (tts-service) and §6.5 (media-service merge stage). Status:
 
-1. Build `tts-service` — extract `SilmaTTSModelManager` + `audio_combine.py` from backend
-2. Build `merge-service` — extract `mux.py` from `DubbingMergeService`
-3. Orchestrator: restore `JobTypeDubbingMerge` in `stageOrder["fullDubbing"]`
-4. Backend: remove `tts_bridge.py`, TTS Celery tasks in `pipeline.py`, Redis counter
-5. Decommission Celery/Redis/Flower in prod compose → `docker-compose.microservices.prod.yml`
-6. E2E: `translationAndTTS`, `fullDubbing`, cancel mid-TTS
-
-**Phase 2 estimate:** ~20–30 person-hours (separate sprint).
+1. [x] Build `tts-service` — extract `SilmaTTSModelManager` + `audio_combine.py` from backend
+2. [x] Build `media-service` merge worker — `mux.py` from `DubbingMergeService._replace_video_audio` (mux-only)
+3. [x] Orchestrator: restore `JobTypeDubbingMerge` in `stageOrder["fullDubbing"]`
+4. [x] Backend: remove `tts_bridge.py`, TTS Celery tasks in `pipeline.py`, Redis counter
+5. [ ] Decommission Celery/Redis/Flower in prod compose → `docker-compose.microservices.prod.yml`
+6. [x] E2E: `translationAndTTS`, `fullDubbing`, cancel mid-TTS, merge-only smoke

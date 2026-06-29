@@ -192,7 +192,7 @@ No `.pytest_cache`, no `tests/`, smaller `/app`.
 
 **Direction.** For any latency-sensitive deployment, run TTS (and ideally STT) on GPU (the `docker-compose.gpu.yml` overlay + a GPU NLLB/Whisper path). If GPU is unavailable, combine F14 (lower `nfe_step`), F17 (quantization), and batching to claw back time, and set expectations accordingly.
 
-**Verify.** Benchmark end-to-end `fullDubbing` on a 1-minute clip: CPU vs GPU; record per-stage seconds (STT / NMT / TTS / merge).
+**Verify.** Benchmark end-to-end `fullDubbing` on a 1-minute clip: CPU vs GPU; record per-stage seconds (STT / NMT / TTS / merge). The merge stage runs in **media-service** (ffmpeg-only, no ML/CUDA); optional future NVENC acceleration via `media-service/Dockerfile.gpu` for faster mux at scale.
 
 ---
 

@@ -1,16 +1,36 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=shared . /tmp/dablja-worker
+RUN pip install --no-cache-dir /tmp/dablja-worker
+
+COPY requirements-base.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --default-timeout=600 --retries=3 -r requirements-base.txt
+
 FROM python:3.12-slim
+
+WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+COPY --from=builder /usr/local /usr/local
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
 
-COPY app ./app
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 EXPOSE 8003
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8003"]
+
+CMD ["python", "-m", "app.main"]
