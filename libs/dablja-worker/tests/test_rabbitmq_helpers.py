@@ -71,6 +71,42 @@ def test_publish_result_reliable_retries_on_connection_loss(mock_connect):
 
 @patch("dablja_worker.ack.publish_result_reliable")
 @patch("dablja_worker.ack.run_with_heartbeat")
+def test_finish_job_message_preflight_idempotency_skips_process_fn(
+    mock_run, mock_publish
+):
+    from dablja_worker.ack import finish_job_message
+
+    channel = MagicMock()
+    channel.is_open = True
+    channel.connection = MagicMock()
+
+    session = MagicMock()
+    session.__enter__ = MagicMock(return_value=session)
+    session.__exit__ = MagicMock(return_value=False)
+
+    with patch("dablja_worker.ack.is_completed", return_value=True), patch(
+        "dablja_worker.ack._load_completed_output", return_value={"segment_count": 3}
+    ):
+        finish_job_message(
+            channel=channel,
+            delivery_tag=1,
+            rabbitmq_url="amqp://guest:guest@localhost/",
+            result_routing_key="job.results.stt",
+            job_id="job-1",
+            job_type="STT_TRANSCRIBE",
+            session_factory=lambda: session,
+            process_fn=lambda: (_ for _ in ()).throw(AssertionError("must not run")),
+            service_name="STT",
+        )
+
+    mock_run.assert_not_called()
+    mock_publish.assert_called_once()
+    assert mock_publish.call_args.args[4] == "COMPLETED"
+    channel.basic_ack.assert_called_once_with(delivery_tag=1)
+
+
+@patch("dablja_worker.ack.publish_result_reliable")
+@patch("dablja_worker.ack.run_with_heartbeat")
 def test_finish_job_message_does_not_mark_failed_when_already_completed(
     mock_run, mock_publish
 ):

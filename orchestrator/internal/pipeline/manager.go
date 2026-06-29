@@ -85,6 +85,15 @@ func getOutputType(inputData map[string]any) string {
 	return "fullDubbing"
 }
 
+func isTerminalJobStatus(status db.JobStatus) bool {
+	switch status {
+	case db.JobStatusCompleted, db.JobStatusFailed, db.JobStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 // ─── Payloads ─────────────────────────────────────────────────────────────────
 
 // WorkerResultPayload is the message body posted by AI workers to
@@ -451,6 +460,18 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 
 	now := time.Now().UTC()
 	resultStatus := db.JobStatus(payload.Status)
+
+	// Ignore stale or duplicate terminal results (at-least-once redelivery safety).
+	if isTerminalJobStatus(child.Status) {
+		switch {
+		case child.Status == db.JobStatusCompleted && resultStatus == db.JobStatusFailed:
+			log.Warn("Ignoring stale FAILED result — child already COMPLETED", "error", payload.Error)
+			return nil
+		case child.Status == resultStatus:
+			log.Info("Duplicate terminal result — ignoring", "status", child.Status)
+			return nil
+		}
+	}
 
 	// Targeted update: status + output only — never job_type
 	updates := map[string]any{

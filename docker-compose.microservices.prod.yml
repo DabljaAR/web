@@ -81,6 +81,7 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
     volumes:
       - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -206,16 +207,12 @@ services:
       <<: [*s3-env, *model-cache-env]
       RABBITMQ_URL: ${RABBITMQ_URL}
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
-      SILMA_DEVICE: ${SILMA_DEVICE:-cpu}
-      SILMA_REFERENCE_AUDIO: ${SILMA_REFERENCE_AUDIO:-}
-      SILMA_REFERENCE_TEXT: ${SILMA_REFERENCE_TEXT:-}
-      TTS_DEFAULT_SPEED: ${TTS_DEFAULT_SPEED:-0.9}
-      TTS_DEFAULT_CFG_STRENGTH: ${TTS_DEFAULT_CFG_STRENGTH:-2.0}
-      TTS_DEFAULT_NFE_STEP: ${TTS_DEFAULT_NFE_STEP:-64}
-      TTS_DEFAULT_SWAY_COEF: ${TTS_DEFAULT_SWAY_COEF:--1.0}
-      TTS_DEFAULT_TARGET_RMS: ${TTS_DEFAULT_TARGET_RMS:-0.12}
-      TTS_ENABLE_NORMALIZER: ${TTS_ENABLE_NORMALIZER:-true}
-      TTS_FORCE_TASHKEEL: ${TTS_FORCE_TASHKEEL:-false}
+      OMNIVOICE_MODEL_NAME: ${OMNIVOICE_MODEL_NAME:-k2-fsa/OmniVoice}
+      OMNIVOICE_DEVICE: ${OMNIVOICE_DEVICE:-cpu}
+      OMNIVOICE_DTYPE: ${OMNIVOICE_DTYPE:-float16}
+      OMNIVOICE_NUM_STEP: ${OMNIVOICE_NUM_STEP:-32}
+      OMNIVOICE_GUIDANCE_SCALE: ${OMNIVOICE_GUIDANCE_SCALE:-2.0}
+      OMNIVOICE_SPEED: ${OMNIVOICE_SPEED:-1.0}
       PREWARM_TTS_MODEL: ${PREWARM_TTS_MODEL:-true}
       PORT: 8005
     volumes:
@@ -326,6 +323,7 @@ volumes:
   ai_model_cache:
   caddy_data:
   caddy_config:
+  rabbitmq_data:
 
 networks:
   dabljaar_network:

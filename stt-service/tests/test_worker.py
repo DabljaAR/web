@@ -179,6 +179,33 @@ def test_on_message_successful_job_publishes_completed_and_acks():
     assert mock_publish.call_args.kwargs["output_data"] == summary
 
 
+@pytest.mark.unit
+def test_on_message_redelivery_republishes_completed_without_rerun():
+    """When job is already COMPLETED, on_message must republish and ack without processing."""
+    from app.worker import on_message
+
+    ch = _make_channel()
+    ch.is_open = True
+    ch.connection = MagicMock()
+    cached = {"segment_count": 5, "language": "en", "duration": 20.0}
+
+    with (
+        patch("app.worker._SessionLocal"),
+        patch("app.worker._is_cancelled", return_value=False),
+        patch("dablja_worker.ack.is_completed", return_value=True),
+        patch("dablja_worker.ack._load_completed_output", return_value=cached),
+        patch("app.worker.process_stt_job") as mock_process,
+        patch("dablja_worker.ack.publish_result_reliable") as mock_publish,
+    ):
+        on_message(ch, _make_method(), None, _body("job-redeliver"))
+
+    mock_process.assert_not_called()
+    mock_publish.assert_called_once()
+    assert mock_publish.call_args.args[4] == "COMPLETED"
+    assert mock_publish.call_args.kwargs["output_data"] == cached
+    ch.basic_ack.assert_called_once_with(delivery_tag=1)
+
+
 # ── Failure handling ──────────────────────────────────────────────────────────
 
 @pytest.mark.unit

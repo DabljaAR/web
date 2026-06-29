@@ -70,17 +70,27 @@ def mark_completed(
     db.commit()
 
 
-def mark_failed(db, job_id: str, error: str) -> None:
-    """Transition job to FAILED with an error message."""
-    db.execute(
+def mark_failed(db, job_id: str, error: str) -> bool:
+    """Transition job to FAILED unless it is already COMPLETED.
+
+    Returns True when the row was updated, False when skipped (already COMPLETED).
+    """
+    result = db.execute(
         text("""
             UPDATE jobs
                SET status='FAILED',
                    error_message = :error,
                    completed_at  = :now,
                    updated_at    = :now
-             WHERE id = :jid
+             WHERE id = :jid AND status != 'COMPLETED'
         """),
         {"error": error, "now": _utcnow(), "jid": job_id},
     )
     db.commit()
+    updated = result.rowcount > 0
+    if not updated:
+        logger.info(
+            "mark_failed skipped for job %s — already COMPLETED",
+            job_id,
+        )
+    return updated

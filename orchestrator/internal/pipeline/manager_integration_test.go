@@ -686,6 +686,44 @@ func TestIntegration_T13_RapidResults_SameJob(t *testing.T) {
 	}
 }
 
+// T15: Stale FAILED after child already COMPLETED must not corrupt child or parent.
+func TestIntegration_T15_StaleFailedAfterCompleted(t *testing.T) {
+	parentID := "inttest-t15-parent"
+	sttID := "inttest-t15-stt"
+
+	global.createJob(t, parentID, db.JobTypeFullDubbingPipeline, nil)
+	global.createJob(t, sttID, db.JobTypeSTTTranscribe, strPtr(parentID))
+
+	now := time.Now().UTC()
+	global.database.Model(&db.Job{}).Where("id = ?", sttID).Updates(map[string]any{
+		"status":       db.JobStatusCompleted,
+		"progress":     100.0,
+		"completed_at": now,
+		"updated_at":   now,
+	})
+	global.database.Model(&db.Job{}).Where("id = ?", parentID).Updates(map[string]any{
+		"status":     db.JobStatusProcessing,
+		"progress":   25.0,
+		"updated_at": now,
+	})
+
+	global.publish(t, "job.results.stt", pipeline.WorkerResultPayload{
+		JobID: sttID, JobType: "STT_TRANSCRIBE", Status: "FAILED",
+		Error: "stale redelivery after successful run",
+	})
+
+	time.Sleep(400 * time.Millisecond)
+
+	child := global.getJob(sttID)
+	if child.Status != db.JobStatusCompleted {
+		t.Errorf("child status = %s, want COMPLETED", child.Status)
+	}
+	parent := global.getJob(parentID)
+	if parent.Status == db.JobStatusFailed {
+		t.Error("parent must not be FAILED after stale FAILED result")
+	}
+}
+
 // T14: Result arrives before job.created → parent still processes correctly afterwards
 func TestIntegration_T14_OutOfOrderMessages(t *testing.T) {
 	parentID := "inttest-t14-parent"

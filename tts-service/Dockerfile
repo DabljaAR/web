@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=shared . /tmp/dablja-worker
+RUN pip install --no-cache-dir /tmp/dablja-worker
+
 COPY requirements-base.txt .
 RUN pip install --default-timeout=600 --retries=3 -r requirements-base.txt
 

@@ -139,7 +139,7 @@ def _update_job_failed(db, job_id: str, error: str):
             UPDATE jobs
                SET status='FAILED', error_message=:error,
                    completed_at=:now, updated_at=:now
-             WHERE id=:jid
+             WHERE id=:jid AND status != 'COMPLETED'
         """),
         {"error": error, "now": _utcnow(), "jid": job_id},
     )

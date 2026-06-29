@@ -9,6 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --from=shared . /tmp/dablja-worker
+RUN pip install --no-cache-dir /tmp/dablja-worker
+
 RUN pip install --no-cache-dir --timeout 600 --retries 3 \
     "torch==2.4.0+cu118" \
     --index-url https://download.pytorch.org/whl/cu118

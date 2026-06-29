@@ -35,6 +35,52 @@ def _load_completed_output(session_factory, job_id: str) -> dict:
     return dict(row[0])
 
 
+def _republish_completed_and_ack(
+    *,
+    channel,
+    delivery_tag: int,
+    rabbitmq_url: str,
+    result_routing_key: str,
+    job_id: str,
+    job_type: str,
+    session_factory,
+    service_name: str,
+    reason: str,
+) -> None:
+    """Publish a COMPLETED result for an already-finished job and ack safely."""
+    summary = _load_completed_output(session_factory, job_id)
+    logger.info(
+        "[%s] Job %s already COMPLETED — publishing result only (%s)",
+        service_name,
+        job_id,
+        reason,
+    )
+    try:
+        publish_result_reliable(
+            rabbitmq_url,
+            result_routing_key,
+            job_id,
+            job_type,
+            "COMPLETED",
+            output_data=summary or {},
+        )
+    except Exception as pub_exc:
+        logger.error(
+            "[%s] Job %s COMPLETED but result publish failed: %s — leaving message unacked for redelivery",
+            service_name,
+            job_id,
+            pub_exc,
+        )
+        return
+
+    if not safe_ack(channel, delivery_tag):
+        logger.warning(
+            "[%s] Job %s result republished but consumer channel closed before ack — message may redeliver",
+            service_name,
+            job_id,
+        )
+
+
 def finish_job_message(
     *,
     channel,
@@ -50,6 +96,22 @@ def finish_job_message(
     service_name: str = "worker",
 ) -> None:
     """Run a pipeline job, publish WorkerResultPayload reliably, and ack safely."""
+    with session_factory() as db:
+        already_done = is_completed(db, job_id)
+    if already_done:
+        _republish_completed_and_ack(
+            channel=channel,
+            delivery_tag=delivery_tag,
+            rabbitmq_url=rabbitmq_url,
+            result_routing_key=result_routing_key,
+            job_id=job_id,
+            job_type=job_type,
+            session_factory=session_factory,
+            service_name=service_name,
+            reason="redelivery",
+        )
+        return
+
     connection = channel.connection
     summary: Optional[dict] = None
     processing_error: Optional[Exception] = None
@@ -67,28 +129,40 @@ def finish_job_message(
         with session_factory() as db:
             already_done = is_completed(db, job_id)
         if already_done:
-            summary = _load_completed_output(session_factory, job_id)
-            logger.info(
-                "[%s] Job %s already COMPLETED after processing error — publishing result only",
-                service_name,
-                job_id,
+            _republish_completed_and_ack(
+                channel=channel,
+                delivery_tag=delivery_tag,
+                rabbitmq_url=rabbitmq_url,
+                result_routing_key=result_routing_key,
+                job_id=job_id,
+                job_type=job_type,
+                session_factory=session_factory,
+                service_name=service_name,
+                reason="processing error after completion",
             )
-        else:
-            if mark_failure_fn is not None:
-                mark_failure_fn(job_id, processing_error)
-            else:
-                with session_factory() as db:
-                    mark_failed(db, job_id, str(processing_error))
-            publish_result_reliable(
-                rabbitmq_url,
-                result_routing_key,
-                job_id,
-                job_type,
-                "FAILED",
-                error=str(processing_error),
-            )
-            safe_ack(channel, delivery_tag)
             return
+
+        logger.warning(
+            "[%s] Job %s processing failed: %s",
+            service_name,
+            job_id,
+            processing_error,
+        )
+        if mark_failure_fn is not None:
+            mark_failure_fn(job_id, processing_error)
+        else:
+            with session_factory() as db:
+                mark_failed(db, job_id, str(processing_error))
+        publish_result_reliable(
+            rabbitmq_url,
+            result_routing_key,
+            job_id,
+            job_type,
+            "FAILED",
+            error=str(processing_error),
+        )
+        safe_ack(channel, delivery_tag)
+        return
 
     try:
         publish_result_reliable(
