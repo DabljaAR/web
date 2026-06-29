@@ -14,7 +14,7 @@ from app.config import settings
 from app.core import init_db
 from app.core.rate_limiter import limiter
 from app.core.router import router as core_router
-from app.dependencies import connect_to_db, disconnect_from_db
+from app.core.db import connect_to_db, disconnect_from_db
 from app.shared.logging import setup_logging
 from app.tasks.router import router as tasks_router
 
