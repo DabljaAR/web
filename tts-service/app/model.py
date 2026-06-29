@@ -22,6 +22,22 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+class _TorchXPUStub:
+    """Minimal torch.xpu stand-in for PyTorch builds without Intel XPU support."""
+
+    @staticmethod
+    def is_available() -> bool:
+        return False
+
+
+def _patch_torch_xpu_compat() -> None:
+    """silma-tts probes torch.xpu at import time; CPU torch 2.2 lacks that namespace."""
+    if hasattr(torch, "xpu"):
+        return
+    torch.xpu = _TorchXPUStub()  # type: ignore[attr-defined]
+    logger.info("Patched torch.xpu stub for PyTorch builds without XPU support")
+
+
 class TTSModelManager:
     """Owns the SILMA-TTS model lifecycle for the microservice process."""
 
@@ -52,6 +68,7 @@ class TTSModelManager:
         self._configure_runtime_paths()
         self._patch_catt_tashkeel_model_dir()
         self._patch_torchaudio_load()
+        _patch_torch_xpu_compat()
 
         from silma_tts.api import SilmaTTS
 

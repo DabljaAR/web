@@ -28,6 +28,19 @@ from celery.utils.log import get_task_logger
 logger = get_task_logger(__name__)
 
 
+class _TorchXPUStub:
+    @staticmethod
+    def is_available() -> bool:
+        return False
+
+
+def _patch_torch_xpu_compat() -> None:
+    if hasattr(torch, "xpu"):
+        return
+    torch.xpu = _TorchXPUStub()  # type: ignore[attr-defined]
+    logger.info("Patched torch.xpu stub for PyTorch builds without XPU support")
+
+
 # ---------------------------------------------------------------------------
 # Model manager
 # ---------------------------------------------------------------------------
@@ -105,6 +118,7 @@ class SilmaTTSModelManager(Task):
                 self._patch_catt_tashkeel_model_dir()
 
             self._patch_torchaudio_load()
+            _patch_torch_xpu_compat()
             try:
                 from silma_tts.api import SilmaTTS
             except ImportError as e:
