@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import pika
 from sqlalchemy import text
 
 from app.audio_combine import combine_segment_wavs
@@ -27,12 +26,12 @@ from dablja_worker import (
     check_cancelled,
     classify_failure,
     consume_loop,
+    finish_job_message,
     is_completed,
     make_engine,
     mark_completed,
     mark_failed,
     mark_processing,
-    publish_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -337,45 +336,22 @@ def on_message(channel, method, _properties, body):
     watcher.start()
 
     try:
-        summary = process_tts_job(job_id, cancelled_flag)
-        publish_result(
-            channel,
-            RESULT_ROUTING_KEY,
-            job_id,
-            JOB_TYPE,
-            "COMPLETED",
-            output_data=summary,
-        )
-    except RuntimeError as exc:
-        if "cancelled" in str(exc).lower():
-            logger.info("[TTS] Job %s cancelled mid-synthesis — acking silently", job_id)
-            channel.basic_ack(delivery_tag=method.delivery_tag)
-            return
-        logger.exception("[TTS] Job %s failed: %s", job_id, exc)
-        _handle_failure(job_id, exc)
-        publish_result(
-            channel,
-            RESULT_ROUTING_KEY,
-            job_id,
-            JOB_TYPE,
-            "FAILED",
-            error=str(exc),
-        )
-    except Exception as exc:
-        logger.exception("[TTS] Job %s failed: %s", job_id, exc)
-        _handle_failure(job_id, exc)
-        publish_result(
-            channel,
-            RESULT_ROUTING_KEY,
-            job_id,
-            JOB_TYPE,
-            "FAILED",
-            error=str(exc),
+        finish_job_message(
+            channel=channel,
+            delivery_tag=method.delivery_tag,
+            rabbitmq_url=settings.RABBITMQ_URL,
+            result_routing_key=RESULT_ROUTING_KEY,
+            job_id=job_id,
+            job_type=JOB_TYPE,
+            session_factory=_SessionLocal,
+            process_fn=lambda: process_tts_job(job_id, cancelled_flag),
+            mark_failure_fn=_handle_failure,
+            is_cancelled_error=lambda exc: isinstance(exc, RuntimeError)
+            and "cancelled" in str(exc).lower(),
+            service_name="TTS",
         )
     finally:
         stop_event.set()
-
-    channel.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def _handle_failure(job_id: str, exc: Exception):

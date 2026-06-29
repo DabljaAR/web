@@ -12,7 +12,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-import pika
 from sqlalchemy import text
 
 from app.config import settings
@@ -21,12 +20,12 @@ from dablja_worker import (
     check_cancelled,
     classify_failure,
     consume_loop,
+    finish_job_message,
     is_completed,
     make_engine,
     mark_completed,
     mark_failed,
     mark_processing,
-    publish_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -270,33 +269,25 @@ def on_message(channel, method, _properties, body):
         channel.basic_ack(delivery_tag=method.delivery_tag)
         return
 
-    try:
-        summary = process_merge_job(job_id)
-        publish_result(
-            channel,
-            RESULT_ROUTING_KEY,
-            job_id,
-            JOB_TYPE,
-            "COMPLETED",
-            output_data=summary,
-        )
-    except Exception as exc:
-        logger.exception("[merge] Job %s failed: %s", job_id, exc)
+    def _mark_failure(job_id: str, exc: Exception) -> None:
         try:
             with _SessionLocal() as db:
                 mark_failed(db, job_id, str(exc))
         except Exception as db_exc:
             logger.error("[merge] Could not mark job %s failed: %s", job_id, db_exc)
-        publish_result(
-            channel,
-            RESULT_ROUTING_KEY,
-            job_id,
-            JOB_TYPE,
-            "FAILED",
-            error=str(exc),
-        )
 
-    channel.basic_ack(delivery_tag=method.delivery_tag)
+    finish_job_message(
+        channel=channel,
+        delivery_tag=method.delivery_tag,
+        rabbitmq_url=settings.RABBITMQ_URL,
+        result_routing_key=RESULT_ROUTING_KEY,
+        job_id=job_id,
+        job_type=JOB_TYPE,
+        session_factory=_SessionLocal,
+        process_fn=lambda: process_merge_job(job_id),
+        mark_failure_fn=_mark_failure,
+        service_name="MERGE",
+    )
 
 
 def start_consumer():

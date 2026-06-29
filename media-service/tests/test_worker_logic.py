@@ -139,6 +139,8 @@ def test_on_message_cancelled_ack_only():
 
 def test_on_message_publishes_completed_result():
     channel = MagicMock()
+    channel.is_open = True
+    channel.connection = MagicMock()
     method = MagicMock(delivery_tag=7)
 
     mock_db = MagicMock()
@@ -149,12 +151,13 @@ def test_on_message_publishes_completed_result():
 
     with patch("app.worker._SessionLocal", return_value=mock_db), patch(
         "app.worker.check_cancelled", return_value=False
-    ), patch("app.worker.process_merge_job", return_value=summary), patch(
-        "app.worker.publish_result"
-    ) as pub:
+    ), patch("dablja_worker.ack.run_with_heartbeat", side_effect=lambda _c, fn: fn()), patch(
+        "app.worker.process_merge_job", return_value=summary
+    ), patch("dablja_worker.ack.publish_result_reliable") as pub:
         on_message(channel, method, None, b'{"job_id": "j1"}')
 
     pub.assert_called_once()
-    assert pub.call_args[0][2] == "j1"
-    assert pub.call_args[1]["output_data"] == summary
+    assert pub.call_args.args[2] == "j1"
+    assert pub.call_args.args[4] == "COMPLETED"
+    assert pub.call_args.kwargs["output_data"] == summary
     channel.basic_ack.assert_called_once_with(delivery_tag=7)

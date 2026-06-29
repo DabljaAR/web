@@ -1,10 +1,11 @@
 """Shared RabbitMQ consumer utilities for pipeline workers."""
 import logging
+import os
 import time
 from typing import Callable, Literal
 
 import pika
-from pika.exceptions import AMQPConnectionError, AMQPError
+from pika.exceptions import AMQPConnectionError, AMQPError, ChannelWrongStateError, StreamLostError
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError, InterfaceError
 from sqlalchemy.orm import sessionmaker
@@ -34,6 +35,8 @@ def classify_failure(exc: BaseException) -> Literal["transient", "permanent"]:
         (
             AMQPConnectionError,
             AMQPError,
+            StreamLostError,
+            ChannelWrongStateError,
             OperationalError,
             InterfaceError,
             ConnectionError,
@@ -65,14 +68,17 @@ def consume_loop(
     prefetch_count: int = 1,
     initial_backoff_s: float = 1.0,
     max_backoff_s: float = 60.0,
+    heartbeat: int | None = None,
 ) -> None:
     """Blocking consume loop with exponential backoff reconnect on connection loss."""
+    if heartbeat is None:
+        heartbeat = int(os.environ.get("RABBITMQ_HEARTBEAT", "600"))
     backoff = initial_backoff_s
     while True:
         try:
             logger.info("[%s] Connecting to RabbitMQ: %s", service_name, rabbitmq_url)
             params = pika.URLParameters(rabbitmq_url)
-            params.heartbeat = 600
+            params.heartbeat = heartbeat
             params.blocked_connection_timeout = 300
 
             connection = pika.BlockingConnection(params)

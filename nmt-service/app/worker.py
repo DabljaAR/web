@@ -14,11 +14,10 @@ import threading
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
-import pika
 from sqlalchemy import text
 
 from app.config import settings
-from dablja_worker import check_cancelled, classify_failure, consume_loop, make_engine
+from dablja_worker import check_cancelled, classify_failure, consume_loop, finish_job_message, make_engine
 from app.model import NLLBTranslatorWrapper
 from app.length_adjuster import adjust_ar
 
@@ -414,34 +413,6 @@ def process_nmt_job(job_id: str, cancelled_flag: list) -> dict:
 
 # ── RabbitMQ consumer ─────────────────────────────────────────────────────────
 
-def _publish_result(
-    channel,
-    job_id: str,
-    status: str,
-    output_data: Optional[dict] = None,
-    error: Optional[str] = None,
-):
-    payload: dict = {
-        "job_id": job_id,
-        "job_type": JOB_TYPE,
-        "status": status,
-        "output_data": output_data or {},
-    }
-    if error:
-        payload["error"] = error
-
-    channel.basic_publish(
-        exchange=EXCHANGE,
-        routing_key=RESULT_ROUTING_KEY,
-        body=json.dumps(payload),
-        properties=pika.BasicProperties(
-            content_type="application/json",
-            delivery_mode=2,
-        ),
-    )
-    logger.info("[NMT] Published %s for job %s", status, job_id)
-
-
 def on_message(channel, method, _properties, body):
     try:
         payload = json.loads(body)
@@ -487,25 +458,22 @@ def on_message(channel, method, _properties, body):
     watcher.start()
 
     try:
-        summary = process_nmt_job(job_id, cancelled_flag)
-        _publish_result(channel, job_id, "COMPLETED", output_data=summary)
-    except RuntimeError as exc:
-        # Raised when cancelled mid-translation — ack without publishing FAILED
-        if "cancelled" in str(exc).lower():
-            logger.info("[NMT] Job %s cancelled mid-translation — acking silently", job_id)
-            channel.basic_ack(delivery_tag=method.delivery_tag)
-            return
-        logger.exception("[NMT] Job %s failed: %s", job_id, exc)
-        _handle_failure(job_id, exc)
-        _publish_result(channel, job_id, "FAILED", error=str(exc))
-    except Exception as exc:
-        logger.exception("[NMT] Job %s failed: %s", job_id, exc)
-        _handle_failure(job_id, exc)
-        _publish_result(channel, job_id, "FAILED", error=str(exc))
+        finish_job_message(
+            channel=channel,
+            delivery_tag=method.delivery_tag,
+            rabbitmq_url=settings.RABBITMQ_URL,
+            result_routing_key=RESULT_ROUTING_KEY,
+            job_id=job_id,
+            job_type=JOB_TYPE,
+            session_factory=_SessionLocal,
+            process_fn=lambda: process_nmt_job(job_id, cancelled_flag),
+            mark_failure_fn=_handle_failure,
+            is_cancelled_error=lambda exc: isinstance(exc, RuntimeError)
+            and "cancelled" in str(exc).lower(),
+            service_name="NMT",
+        )
     finally:
         stop_event.set()
-
-    channel.basic_ack(delivery_tag=method.delivery_tag)
 
 
 def _handle_failure(job_id: str, exc: Exception):

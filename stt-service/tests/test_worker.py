@@ -160,26 +160,23 @@ def test_on_message_successful_job_publishes_completed_and_acks():
     from app.worker import on_message
 
     ch = _make_channel()
+    ch.connection = MagicMock()
     summary = {"segment_count": 3, "language": "en", "duration": 10.0}
 
     with (
         patch("app.worker._SessionLocal") as mock_sl,
         patch("app.worker._is_cancelled", return_value=False),
+        patch("dablja_worker.ack.run_with_heartbeat", side_effect=lambda _c, fn: fn()),
         patch("app.worker.process_stt_job", return_value=summary),
+        patch("dablja_worker.ack.publish_result_reliable") as mock_publish,
     ):
         on_message(ch, _make_method(), None, _body("job-ok"))
 
     ch.basic_ack.assert_called_once_with(delivery_tag=1)
     ch.basic_nack.assert_not_called()
-
-    # Verify result payload shape (§15 contract)
-    call_kwargs = ch.basic_publish.call_args
-    published_body = json.loads(call_kwargs.kwargs.get("body", call_kwargs.args[0] if call_kwargs.args else b"{}"))
-    assert published_body["job_id"] == "job-ok"
-    assert published_body["job_type"] == "STT_TRANSCRIBE"
-    assert published_body["status"] == "COMPLETED"
-    assert published_body["output_data"] == summary
-    assert "error" not in published_body
+    mock_publish.assert_called_once()
+    assert mock_publish.call_args.args[4] == "COMPLETED"
+    assert mock_publish.call_args.kwargs["output_data"] == summary
 
 
 # ── Failure handling ──────────────────────────────────────────────────────────
@@ -190,37 +187,37 @@ def test_on_message_failed_job_publishes_failed_and_acks():
     from app.worker import on_message
 
     ch = _make_channel()
+    ch.connection = MagicMock()
 
     with (
         patch("app.worker._SessionLocal"),
         patch("app.worker._is_cancelled", return_value=False),
+        patch("dablja_worker.ack.run_with_heartbeat", side_effect=lambda _c, fn: fn()),
         patch("app.worker.process_stt_job", side_effect=RuntimeError("whisper crash")),
-        patch("app.worker._update_job_failed") as mock_fail_db,
+        patch("app.worker._handle_failure") as mock_fail_db,
+        patch("dablja_worker.ack.publish_result_reliable") as mock_publish,
     ):
         on_message(ch, _make_method(), None, _body("job-fail"))
 
-    # Must ack, never nack
     ch.basic_ack.assert_called_once_with(delivery_tag=1)
     ch.basic_nack.assert_not_called()
-
-    # Must publish FAILED result
-    assert ch.basic_publish.called, "basic_publish was not called"
-    published_body = json.loads(ch.basic_publish.call_args.kwargs["body"])
-    assert published_body["status"] == "FAILED"
-    assert "whisper crash" in published_body.get("error", "")
+    mock_fail_db.assert_called_once()
+    mock_publish.assert_called_once()
+    assert mock_publish.call_args.args[4] == "FAILED"
+    assert "whisper crash" in mock_publish.call_args.kwargs["error"]
 
 
 # ── Result payload shape (§15 / Claim Check) ─────────────────────────────────
 
 @pytest.mark.unit
 def test_publish_result_completed_shape():
-    """_publish_result COMPLETED must emit all required WorkerResultPayload fields."""
-    from app.worker import _publish_result
+    """publish_result COMPLETED must emit all required WorkerResultPayload fields."""
+    from dablja_worker import publish_result
 
     ch = _make_channel()
     summary = {"segment_count": 10, "language": "en", "duration": 30.5}
 
-    _publish_result(ch, "job-1", "COMPLETED", output_data=summary)
+    publish_result(ch, "job.results.stt", "job-1", "STT_TRANSCRIBE", "COMPLETED", output_data=summary)
 
     ch.basic_publish.assert_called_once()
     body = json.loads(ch.basic_publish.call_args.kwargs["body"])
@@ -233,11 +230,11 @@ def test_publish_result_completed_shape():
 
 @pytest.mark.unit
 def test_publish_result_failed_shape():
-    """_publish_result FAILED must include 'error' key."""
-    from app.worker import _publish_result
+    """publish_result FAILED must include 'error' key."""
+    from dablja_worker import publish_result
 
     ch = _make_channel()
-    _publish_result(ch, "job-2", "FAILED", error="model not loaded")
+    publish_result(ch, "job.results.stt", "job-2", "STT_TRANSCRIBE", "FAILED", error="model not loaded")
 
     body = json.loads(ch.basic_publish.call_args.kwargs["body"])
     assert body["status"] == "FAILED"
@@ -248,23 +245,23 @@ def test_publish_result_failed_shape():
 @pytest.mark.unit
 def test_publish_result_uses_correct_routing_key():
     """Result must be published to job.results.stt."""
-    from app.worker import _publish_result, RESULT_ROUTING_KEY
+    from dablja_worker import publish_result
 
     ch = _make_channel()
-    _publish_result(ch, "job-3", "COMPLETED")
+    routing_key = "job.results.stt"
+    publish_result(ch, routing_key, "job-3", "STT_TRANSCRIBE", "COMPLETED")
 
-    assert RESULT_ROUTING_KEY == "job.results.stt"
-    assert ch.basic_publish.call_args.kwargs["routing_key"] == "job.results.stt"
+    assert ch.basic_publish.call_args.kwargs["routing_key"] == routing_key
 
 
 @pytest.mark.unit
 def test_publish_result_is_persistent():
     """Messages must be persistent (delivery_mode=2)."""
-    from app.worker import _publish_result
+    from dablja_worker import publish_result
     import pika
 
     ch = _make_channel()
-    _publish_result(ch, "job-4", "COMPLETED")
+    publish_result(ch, "job.results.stt", "job-4", "STT_TRANSCRIBE", "COMPLETED")
 
     props = ch.basic_publish.call_args.kwargs["properties"]
     assert props.delivery_mode == 2

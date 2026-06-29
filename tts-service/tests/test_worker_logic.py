@@ -110,3 +110,30 @@ def test_process_tts_job_summary_includes_combined_key():
     assert summary["combined_audio_key"] == "tts/vid-1/combined_job-abc.wav"
     assert summary["segment_count"] == 1
     assert summary["tts_segments"] == 1
+
+
+def test_on_message_completed_job_republishes_result_only():
+    from app.worker import on_message
+
+    ch = MagicMock()
+    ch.is_open = True
+    ch.connection = MagicMock()
+    method = MagicMock()
+    method.delivery_tag = 7
+    body = json.dumps({"job_id": "job-redeliver"}).encode()
+
+    summary = {"combined_audio_key": "tts/v1/combined.wav", "segment_count": 5}
+
+    with patch("app.worker._SessionLocal") as mock_sl, patch(
+        "app.worker.check_cancelled", return_value=False
+    ), patch("dablja_worker.ack.run_with_heartbeat", side_effect=lambda _c, fn: fn()), patch(
+        "app.worker.process_tts_job", return_value=summary
+    ), patch("dablja_worker.ack.publish_result_reliable") as mock_publish, patch(
+        "app.worker._watch_cancel"
+    ):
+        on_message(ch, method, None, body)
+
+    mock_publish.assert_called_once()
+    assert mock_publish.call_args.args[4] == "COMPLETED"
+    assert mock_publish.call_args.kwargs["output_data"] == summary
+    ch.basic_ack.assert_called_once_with(delivery_tag=7)

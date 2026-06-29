@@ -6,11 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import pika
 from sqlalchemy import text
 
 from app.config import settings
-from dablja_worker import check_cancelled, classify_failure, consume_loop, make_engine
+from dablja_worker import check_cancelled, classify_failure, consume_loop, finish_job_message, make_engine
 from app.model import WhisperModelManager
 from app.storage import download_file
 
@@ -235,32 +234,12 @@ def process_stt_job(job_id: str) -> dict:
 
 # ── RabbitMQ consumer ─────────────────────────────────────────────────────────
 
-def _publish_result(
-    channel,
-    job_id: str,
-    status: str,
-    output_data: Optional[dict] = None,
-    error: Optional[str] = None,
-):
-    payload: dict = {
-        "job_id": job_id,
-        "job_type": JOB_TYPE,
-        "status": status,
-        "output_data": output_data or {},
-    }
-    if error:
-        payload["error"] = error
-
-    channel.basic_publish(
-        exchange=EXCHANGE,
-        routing_key=RESULT_ROUTING_KEY,
-        body=json.dumps(payload),
-        properties=pika.BasicProperties(
-            content_type="application/json",
-            delivery_mode=2,  # persistent
-        ),
-    )
-    logger.info("[STT] Published %s for job %s to %s", status, job_id, RESULT_ROUTING_KEY)
+def _handle_failure(job_id: str, exc: Exception) -> None:
+    try:
+        with _SessionLocal() as db:
+            _update_job_failed(db, job_id, str(exc))
+    except Exception as db_exc:
+        logger.error("[STT] Could not mark job %s failed: %s", job_id, db_exc)
 
 
 def on_message(channel, method, _properties, body):
@@ -296,20 +275,18 @@ def on_message(channel, method, _properties, body):
         channel.basic_ack(delivery_tag=method.delivery_tag)
         return
 
-    try:
-        summary = process_stt_job(job_id)
-        _publish_result(channel, job_id, "COMPLETED", output_data=summary)
-    except Exception as exc:
-        logger.exception("[STT] Job %s failed: %s", job_id, exc)
-        try:
-            with _SessionLocal() as db:
-                _update_job_failed(db, job_id, str(exc))
-        except Exception as db_exc:
-            logger.error("[STT] Could not mark job %s failed: %s", job_id, db_exc)
-
-        _publish_result(channel, job_id, "FAILED", error=str(exc))
-
-    channel.basic_ack(delivery_tag=method.delivery_tag)
+    finish_job_message(
+        channel=channel,
+        delivery_tag=method.delivery_tag,
+        rabbitmq_url=settings.RABBITMQ_URL,
+        result_routing_key=RESULT_ROUTING_KEY,
+        job_id=job_id,
+        job_type=JOB_TYPE,
+        session_factory=_SessionLocal,
+        process_fn=lambda: process_stt_job(job_id),
+        mark_failure_fn=_handle_failure,
+        service_name="STT",
+    )
 
 
 def start_consumer():
