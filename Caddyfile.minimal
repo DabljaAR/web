@@ -51,8 +51,8 @@
     }
 }
 
-flower.{$DOMAIN} {
-    reverse_proxy flower:5555
+rabbitmq.{$DOMAIN} {
+    reverse_proxy rabbitmq:15672
 
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"

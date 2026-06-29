@@ -13,8 +13,8 @@ variable "target_ip" {
   type        = string
 }
 
-variable "include_flower" {
-  description = "Create flower.<app_subdomain> A record for Caddy flower.{$DOMAIN} when DOMAIN is app.zone"
+variable "include_rabbitmq" {
+  description = "Create rabbitmq.<app_subdomain> A record for Caddy rabbitmq.{$DOMAIN} when DOMAIN is app.zone"
   type        = bool
   default     = true
 }

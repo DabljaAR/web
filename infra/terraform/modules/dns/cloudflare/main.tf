@@ -1,5 +1,5 @@
 # =============================================================================
-# Cloudflare DNS Module - A records for app + optional flower host
+# Cloudflare DNS Module - A records for app + optional rabbitmq host
 # =============================================================================
 
 data "cloudflare_zone" "this" {
@@ -7,9 +7,9 @@ data "cloudflare_zone" "this" {
 }
 
 locals {
-  a_record_names = var.include_flower ? {
-    (var.app_subdomain)           = var.target_ip
-    "flower.${var.app_subdomain}" = var.target_ip
+  a_record_names = var.include_rabbitmq ? {
+    (var.app_subdomain)             = var.target_ip
+    "rabbitmq.${var.app_subdomain}" = var.target_ip
     } : {
     (var.app_subdomain) = var.target_ip
   }

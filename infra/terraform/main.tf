@@ -151,11 +151,11 @@ module "dns_cloudflare" {
   count  = var.dns_enabled ? 1 : 0
   source = "./modules/dns/cloudflare"
 
-  zone_name      = var.dns_zone_name
-  app_subdomain  = var.dns_app_subdomain
-  target_ip      = module.compute.external_ip
-  include_flower = true
-  proxied        = var.dns_proxied
+  zone_name        = var.dns_zone_name
+  app_subdomain    = var.dns_app_subdomain
+  target_ip        = module.compute.external_ip
+  include_rabbitmq = true
+  proxied          = var.dns_proxied
 
   depends_on = [module.compute]
 }

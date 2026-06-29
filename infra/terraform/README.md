@@ -15,7 +15,7 @@ Follow the steps **in order**. Skipping or reordering steps (especially DNS befo
 | VM + data disk | Docker Compose host |
 | GCS bucket | Model/media object storage |
 | Secret Manager (optional) | `env-production`, `github-deploy-key` |
-| Cloudflare A records (optional) | `app.yourbrand.tech`, `flower.app.yourbrand.tech` |
+| Cloudflare A records (optional) | `app.yourbrand.tech`, `rabbitmq.app.yourbrand.tech` |
 
 **Not included:** app container deploy, Terraform CI, image registry, backups, monitoring.
 
@@ -156,7 +156,7 @@ DOMAIN=app.yourbrand.tech
 ACME_EMAIL=you@yourbrand.tech
 ```
 
-Caddy also requests a certificate for `flower.app.yourbrand.tech` (`Caddyfile.minimal`).
+Caddy also requests a certificate for `rabbitmq.app.yourbrand.tech` (`Caddyfile.minimal`).
 
 You will paste the **full file contents** into the `env-production` secret in step 5.
 

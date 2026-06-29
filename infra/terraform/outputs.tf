@@ -32,9 +32,9 @@ output "app_fqdn" {
   value       = var.dns_enabled ? module.dns_cloudflare[0].app_fqdn : null
 }
 
-output "flower_fqdn" {
-  description = "Flower admin FQDN when DNS is enabled"
-  value       = var.dns_enabled ? module.dns_cloudflare[0].flower_fqdn : null
+output "rabbitmq_fqdn" {
+  description = "RabbitMQ management UI FQDN when DNS is enabled"
+  value       = var.dns_enabled ? module.dns_cloudflare[0].rabbitmq_fqdn : null
 }
 
 # =============================================================================

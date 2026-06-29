@@ -8,9 +8,9 @@ output "app_fqdn" {
   value       = "${var.app_subdomain}.${var.zone_name}"
 }
 
-output "flower_fqdn" {
-  description = "Flower admin FQDN when include_flower is true"
-  value       = var.include_flower ? "flower.${var.app_subdomain}.${var.zone_name}" : null
+output "rabbitmq_fqdn" {
+  description = "RabbitMQ management UI FQDN when include_rabbitmq is true"
+  value       = var.include_rabbitmq ? "rabbitmq.${var.app_subdomain}.${var.zone_name}" : null
 }
 
 output "deploy_hostname" {

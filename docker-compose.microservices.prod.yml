@@ -39,6 +39,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     restart: unless-stopped
     volumes:
       - ./Caddyfile.minimal:/etc/caddy/Caddyfile:ro
@@ -73,6 +75,7 @@ services:
   rabbitmq:
     image: rabbitmq:3-management-alpine
     container_name: dabljaar_rabbitmq
+    ports: []
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-dabljaar}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}

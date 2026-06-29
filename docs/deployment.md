@@ -47,6 +47,8 @@ This stack includes: `caddy`, `postgres`, `rabbitmq`, `orchestrator`, `stt-servi
 
 The dubbing pipeline runs over **RabbitMQ** (not Celery). Backend publishes `job.created` after media preprocess; the Go orchestrator coordinates STT → NMT → TTS → merge.
 
+RabbitMQ management UI: `https://rabbitmq.$DOMAIN` (Caddy reverse proxy; credentials = `RABBITMQ_DEFAULT_USER` / `RABBITMQ_DEFAULT_PASS`). When Terraform DNS is enabled, `terraform output rabbitmq_fqdn` shows the FQDN.
+
 Check health:
 
 ```bash
