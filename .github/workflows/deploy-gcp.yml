@@ -12,7 +12,13 @@ on:
     paths:
       - backend/**
       - frontend/**
-      - docker-compose.prod.minimal.yml
+      - orchestrator/**
+      - stt-service/**
+      - nmt-service/**
+      - tts-service/**
+      - media-service/**
+      - libs/dablja-worker/**
+      - docker-compose.microservices.prod.yml
       - Caddyfile.minimal
       - .github/workflows/deploy-gcp.yml
 
@@ -135,7 +141,8 @@ jobs:
 
           require_env DOMAIN
           require_env ACME_EMAIL
-          require_env FLOWER_BASIC_AUTH
+          require_env RABBITMQ_URL
+          require_env RABBITMQ_DEFAULT_PASS
           require_env S3_ENDPOINT_URL
           require_env S3_ACCESS_KEY_ID
           require_env S3_SECRET_ACCESS_KEY
@@ -162,13 +169,13 @@ jobs:
             fi
           fi
 
-          COMPOSE_FILES="-f docker-compose.prod.minimal.yml"
+          COMPOSE_FILES="-f docker-compose.microservices.prod.yml"
 
           print_diagnostics() {
             echo "=== deploy diagnostics: compose ps ==="
             $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES ps || true
-            echo "=== deploy diagnostics: backend/caddy/flower logs ==="
-            $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES logs --tail=200 backend caddy flower || true
+            echo "=== deploy diagnostics: backend/caddy/orchestrator/stt logs ==="
+            $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES logs --tail=200 backend caddy orchestrator stt-service || true
             echo "=== deploy diagnostics: container health states ==="
             docker ps -q | xargs -r docker inspect --format '{{.Name}} {{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' || true
           }
@@ -218,7 +225,7 @@ jobs:
             caddy validate --config /etc/caddy/Caddyfile
 
           # Start infra first so migrations can run cleanly.
-          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES up -d postgres redis
+          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES up -d postgres rabbitmq
 
           # Run DB migrations before starting app services.
           # Use a direct entrypoint override to avoid the backend entrypoint running app startup command paths.
@@ -228,12 +235,29 @@ jobs:
             $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES run --rm --entrypoint sh backend -lc "alembic upgrade head"
           fi
 
-          # Start application services after schema is up to date.
+          # Start pipeline + API services after schema is up to date.
           compose_up_start="$(date +%s)"
-          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES up -d --build backend celery-worker-ai flower caddy
+          $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES up -d --build \
+            orchestrator stt-service nmt-service tts-service media-service backend caddy
           compose_up_end="$(date +%s)"
           compose_up_seconds="$((compose_up_end - compose_up_start))"
           $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES ps
+
+          # Wait for at least one AI worker readiness (STT cold start can take minutes).
+          stt_ready=false
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 28 32 36 40 44 48 52 56 60; do
+            if $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES exec -T stt-service curl -fsS http://localhost:8001/readiness >/dev/null 2>&1; then
+              stt_ready=true
+              break
+            fi
+            sleep 10
+          done
+
+          if [ "$stt_ready" != "true" ]; then
+            echo "internal-stt-fail: stt-service readiness check failed after deploy"
+            print_diagnostics
+            exit 1
+          fi
 
           # Ensure Caddy reloads after frontend dist + backend rollout.
           $COMPOSE_CMD --env-file "$ENV_FILE" $COMPOSE_FILES exec -T caddy caddy validate --config /etc/caddy/Caddyfile
@@ -317,5 +341,5 @@ jobs:
             echo "- Repository SHA: ${{ github.sha }}"
             echo "- Target branch: ${{ env.TARGET_BRANCH }}"
             echo "- Target VM path: ${{ env.APP_DIR }}"
-            echo "- Compose profile: docker-compose.prod.minimal.yml"
+            echo "- Compose profile: docker-compose.microservices.prod.yml"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -154,16 +154,20 @@ def _optional_prewarm_models(sender=None, **kwargs):
         except Exception as exc:
             logger.warning("[CELERY][PREWARM] TTS prewarm failed: %s", exc)
 
-# Register TTS task (with graceful fallback if silma-tts not installed)
+# Register TTS Celery task only when explicitly enabled (legacy prod).
+# Microservices prod uses tts-service HTTP proxy instead.
+_ENABLE_CELERY_TTS = os.getenv("ENABLE_CELERY_TTS", "false").lower() == "true"
 synthesize_tts = None
-if _INSTALL_AI:
+if _INSTALL_AI and _ENABLE_CELERY_TTS:
     try:
         from app.tts.models import register_tts_task
 
         synthesize_tts = register_tts_task(celery_app)
-        logger.info("✅ SILMA-TTS task registered successfully")
+        logger.info("✅ SILMA-TTS Celery task registered (ENABLE_CELERY_TTS=true)")
     except ImportError as e:
         logger.warning(f"⚠️  SILMA-TTS task not registered: {e}")
         logger.warning(
             "Install silma-tts to enable TTS functionality: pip install silma-tts"
         )
+elif _INSTALL_AI:
+    logger.info("SILMA-TTS Celery task skipped (ENABLE_CELERY_TTS=false; use tts-service HTTP)")

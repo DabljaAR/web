@@ -1,32 +1,24 @@
 """
-TTS Service — for TTS synthesis with Job tracking.
+TTS Service — standalone synthesis with Job tracking.
 
-Uses SILMA-TTS model for high-quality Arabic speech synthesis.
-
-Async TTS:
-  1. Creates a Job row (JobType.TTS_SYNTHESIZE)
-  2. Dispatches synthesize_tts task to the ai_tts Celery queue
-  3. Returns the job_id for polling
+Pipeline TTS runs via tts-service RabbitMQ consumer. This module proxies
+POST /api/tts/synthesize to tts-service HTTP (TTS_SERVICE_URL).
 """
 
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.jobs.models import Job, JobType, JobStatus
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class TTSService:
-    """
-    Service for TTS synthesis with Job tracking.
-    
-    Uses SILMA-TTS model to synthesize Arabic speech from translated text.
-    """
+    """Proxy standalone TTS requests to the tts-service microservice."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -49,88 +41,72 @@ class TTSService:
         upload_to_minio: bool = False,
         minio_key: Optional[str] = None,
     ) -> str:
-        """
-        Submit TTS synthesis job.
-        
-        Creates a Job record in the database and dispatches a Celery task.
-        
-        Returns:
-            job_id: The Job ID for polling status
-        """
-        from app.jobs.celery_app import synthesize_tts
-        
-        if not job_id:
-            job_id = str(uuid.uuid4())
-        
-        job = Job(
-            id=job_id,
-            job_type=JobType.TTS_SYNTHESIZE,
-            status=JobStatus.QUEUED,
-            user_id=user_id,
-            video_id=video_id,
-            progress=0.0,
-            input_data={
-                "text": text,
-                "ref_audio_path": ref_audio_path,
-                "ref_text": ref_text,
-                "speed": speed,
-                "cfg_strength": cfg_strength,
-                "nfe_step": nfe_step,
-                "sway_sampling_coef": sway_sampling_coef,
-                "target_rms": target_rms,
-                "target_lang": target_lang,
-                "upload_to_minio": upload_to_minio,
-                "minio_key": minio_key,
-            },
-            retry_count=0,
-            max_retries=3,
-            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-            started_at=datetime.now(timezone.utc).replace(tzinfo=None),
-        )
-        self.db.add(job)
-        await self.db.commit()
-        await self.db.refresh(job)
-        
-        logger.info(
-            "[TTS Service] Created job %s for video_id=%s",
-            job.id, video_id
-        )
-        
-        result = synthesize_tts.apply_async(
-            kwargs={
-                "text": text,
-                "ref_audio_path": ref_audio_path,
-                "ref_text": ref_text,
-                "speed": speed,
-                "cfg_strength": cfg_strength,
-                "nfe_step": nfe_step,
-                "sway_sampling_coef": sway_sampling_coef,
-                "target_rms": target_rms,
-                "seed": seed,
-                "job_id": job.id,
-                "upload_to_minio": upload_to_minio,
-                "minio_key": minio_key,
-            },
-            queue="ai_tts",
-            task_id=str(job.id),
-        )
-        
-        logger.info(
-            "[TTS Service] Dispatched TTS task %s for job %s",
-            result.id, job.id
-        )
-        
-        return job.id
+        """Submit TTS synthesis via tts-service HTTP API. Returns job_id."""
+        job_id = job_id or str(uuid.uuid4())
+        payload = {
+            "text": text,
+            "job_id": job_id,
+            "ref_audio_path": ref_audio_path,
+            "ref_text": ref_text,
+            "speed": speed,
+            "cfg_strength": cfg_strength,
+            "nfe_step": nfe_step,
+            "sway_sampling_coef": sway_sampling_coef,
+            "target_rms": target_rms,
+            "seed": seed,
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+
+        url = f"{settings.TTS_SERVICE_URL.rstrip('/')}/synthesize"
+        logger.info("[TTS Service] Proxying synthesis to %s job=%s", url, job_id)
+
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:500] if exc.response else str(exc)
+            logger.error("[TTS Service] tts-service HTTP error: %s", detail)
+            raise RuntimeError(f"TTS service error: {detail}") from exc
+        except httpx.RequestError as exc:
+            logger.error("[TTS Service] tts-service unreachable: %s", exc)
+            raise RuntimeError(f"TTS service unreachable at {url}") from exc
+
+        returned_id = data.get("job_id") or job_id
+        logger.info("[TTS Service] Synthesis complete job=%s status=%s", returned_id, data.get("status"))
+        return returned_id
 
     async def get_job_status(self, job_id: str) -> Optional[dict]:
-        """Get job status by job_id."""
+        """Get job status — prefer tts-service, fall back to local DB."""
+        url = f"{settings.TTS_SERVICE_URL.rstrip('/')}/status/{job_id}"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(url)
+                if resp.status_code == 404:
+                    pass
+                else:
+                    resp.raise_for_status()
+                    row = resp.json()
+                    return {
+                        "job_id": row.get("job_id", job_id),
+                        "status": row.get("status"),
+                        "video_id": None,
+                        "output_data": row.get("output_data"),
+                        "error_message": row.get("error_message"),
+                        "created_at": row.get("created_at"),
+                        "completed_at": row.get("completed_at"),
+                    }
+        except Exception as exc:
+            logger.debug("[TTS Service] tts-service status fallback: %s", exc)
+
         from app.jobs.service import JobService
+
         job_service = JobService(self.db)
         job = await job_service.get_job(job_id)
-        
         if not job:
             return None
-        
+
         return {
             "job_id": job.id,
             "status": job.status.value,
@@ -142,27 +118,30 @@ class TTSService:
         }
 
     def get_health(self) -> dict:
-        """Get TTS service health status."""
-        from app.config import settings
-        from app.tts.models import SilmaTTSModelManager
-        
-        # Check if model manager has loaded model
-        model_loaded = SilmaTTSModelManager._model is not None
-        device = "unknown"
-        
-        # Get device from the model manager
+        """Health from tts-service /health/model when available."""
+        url = f"{settings.TTS_SERVICE_URL.rstrip('/')}/health/model"
         try:
-            # Try to instantiate and get device (lazy load)
-            mgr = SilmaTTSModelManager()
-            device = mgr.device
-        except Exception:
-            pass
-        
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return {
+                        "status": "healthy" if data.get("model_loaded") else "starting",
+                        "model_loaded": data.get("model_loaded", False),
+                        "device": data.get("device", "unknown"),
+                        "model": "SILMA-TTS",
+                        "version": "1.0.0",
+                        "proxy": "tts-service",
+                    }
+        except Exception as exc:
+            logger.warning("[TTS Service] tts-service health check failed: %s", exc)
+
         return {
-            "status": "healthy" if model_loaded else "starting",
-            "model_loaded": model_loaded,
-            "device": device,
+            "status": "degraded",
+            "model_loaded": False,
+            "device": "unknown",
             "model": "SILMA-TTS",
             "version": "1.0.0",
-            "silma_device": settings.SILMA_DEVICE,
+            "proxy": "tts-service",
+            "error": "tts-service unreachable",
         }

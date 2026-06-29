@@ -277,7 +277,10 @@ class Settings(BaseSettings):
     # ========== STT MICROSERVICE ==========
     STT_SERVICE_URL: str = os.getenv("STT_SERVICE_URL", "http://stt-service:8001")
 
-    # ========== CELERY / REDIS ==========
+    # ========== TTS MICROSERVICE ==========
+    TTS_SERVICE_URL: str = os.getenv("TTS_SERVICE_URL", "http://tts-service:8005")
+
+    # ========== CELERY / REDIS (legacy — optional) ==========
     CELERY_BROKER_URL: str = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
     CELERY_RESULT_BACKEND: str = os.getenv(
         "CELERY_RESULT_BACKEND", "redis://localhost:6379/0"

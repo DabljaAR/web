@@ -200,7 +200,7 @@ services:
     networks:
       - dabljaar_network
 
-  # ─── Media Microservice (preprocess + dubbing merge stage) ────────────────
+  # ─── Media Microservice (dubbing merge stage only) ────────────────────────
   media-service:
     build:
       context: ./media-service

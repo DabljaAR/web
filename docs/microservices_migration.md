@@ -1,6 +1,6 @@
 # DabljaAR — Microservices Migration Design Doc
 
-> **Status:** Proposed
+> **Status:** Active — Phase 2 dev complete; production cutover in progress
 > **Author:** Engineering
 > **Last updated:** June 2026
 > **Supersedes target style of:** [docs/architecture.md](architecture.md) §12 (Future Roadmap)
@@ -35,7 +35,7 @@ Migrate DabljaAR from a Celery-driven modular monolith to an event-driven micros
 frontend · backend · media · stt · nmt · tts
 ```
 
-The dubbing pipeline (`STT → NMT → TTS → merge`) is coordinated by the existing Go **orchestrator** over **RabbitMQ**, replacing Celery (`apply_async` chains, the NMT `chord`, and the TTS Redis counter) entirely.
+The dubbing pipeline (`STT → NMT → TTS → merge`) is coordinated by the Go **orchestrator** over **RabbitMQ**, replacing Celery pipeline transport (`apply_async` chains, the NMT `chord`, and the TTS Redis counter). Standalone `POST /api/tts/synthesize` is proxied to `tts-service` over HTTP in the microservices stack (legacy Celery path remains optional via `ENABLE_CELERY_TTS=true`).
 
 **Primary objective:** ship the migration as fast as possible while keeping the door open for stricter data isolation later.
 
@@ -69,7 +69,7 @@ These were explicitly chosen and drive the rest of this document.
 flowchart TB
     FE["frontend (React)"] -->|HTTPS or JSON| API["backend (FastAPI)"]
 
-    API -->|"trigger preprocess"| MEDIA["media service"]
+    API -->|"BackgroundTasks preprocess"| API
     API -->|"publish job.created"| MQ[("RabbitMQ\ndablja.jobs.exchange")]
 
     ORCH["orchestrator (Go)\nsaga coordinator"]
@@ -90,10 +90,9 @@ flowchart TB
     STT --> PG
     NMT --> PG
     TTS --> PG
-    MEDIA --> PG
+    MERGE --> PG
 
-    MEDIA --> S3[("MinIO / S3\nclaim-check store")]
-    STT --> S3
+    STT --> S3[("MinIO / S3\nclaim-check store")]
     TTS --> S3
     MERGE --> S3
 ```
@@ -130,14 +129,16 @@ This is the explicit pattern catalog the design follows, with where each is real
 | Service | Owns | Inbound | Outbound | Runtime |
 |---------|------|---------|----------|---------|
 | **frontend** | UI | — | REST to backend | React/Vite |
-| **backend** | auth, users, billing, videos, job creation, status reads | REST | `job.created`, media trigger, DB | FastAPI |
-| **media** | FFmpeg preprocess (backend), final merge mux | media-service `stage.merge` | DB, S3, `job.results.merge` | Python |
+| **backend** | auth, users, billing, videos, **media preprocess** (D6), job creation, status reads | REST | `job.created`, DB | FastAPI |
+| **media-service** | final merge mux only (`stage.merge`) | `job.start.merge` | DB, S3, `job.results.merge` | Python + ffmpeg |
 | **stt** | Whisper transcription | `job.start.stt` | DB, `job.results.stt` | Python + faster-whisper |
 | **nmt** | NLLB translation incl. internal segment fan-out + Groq length adjust | `job.start.nmt` | DB, `job.results.nmt` | Python + transformers |
 | **tts** | SILMA synthesis incl. internal per-segment loop + audio combine | `job.start.tts` | DB, S3, `job.results.tts` | Python + silma-tts |
 | **orchestrator** | pipeline state machine, child-job creation, parent status | `job.created`, `job.results.*` | `job.start.*`, DB | Go |
 
-Mapping from current modules: `app/stt` → stt, `app/nmt` → nmt, `app/tts` + `app/dubbing` → tts, `app/media` → media, everything else (`core`, `tasks`, `jobs` API, `media` routers) stays in backend.
+Media **preprocess** (audio extract, thumbnail) runs in **backend** via FastAPI `BackgroundTasks` — not via AMQP. **`stage.media` / `job.start.media` is not implemented** (future optional path). Merge lives in **media-service** on port **8003**.
+
+Mapping from current modules: `app/stt` → stt-service, `app/nmt` → nmt-service, `app/tts` → tts-service, merge mux → media-service, `app/media` preprocess stays in backend.
 
 ---
 
@@ -166,8 +167,8 @@ Trigger (backend -> orchestrator):
 | `stage.stt` | `job.start.stt` | stt workers | new |
 | `stage.nmt` | `job.start.nmt` | nmt workers | new |
 | `stage.tts` | `job.start.tts` | tts workers | new |
-| `stage.media` | `job.start.media` | media workers | new (preprocess optional path) |
-| `stage.merge` | `job.start.merge` | media-service | new |
+| `stage.media` | `job.start.media` | *(not implemented — future)* | preprocess stays in backend |
+| `stage.merge` | `job.start.merge` | media-service | port 8003 |
 | `orchestrator.dlq` | DLX | manual / alerting | existing |
 
 **QoS:** every stage queue uses `prefetch=1` (one unacked message per consumer). This is the natural backpressure mechanism — slow workers leave messages safely in RabbitMQ instead of in RAM.
@@ -178,23 +179,30 @@ Trigger (backend -> orchestrator):
 
 ## 7. Orchestrator Design (Saga Coordinator)
 
-### 7.1 What changes from today
+### 7.1 Current implementation (shipped)
 
-The current `manager.go` has a **fixed** transition table:
+The orchestrator uses **dynamic stage resolution** via `stageOrder`, `nextStage()`, and `startRoute()` in [orchestrator/internal/pipeline/manager.go](../orchestrator/internal/pipeline/manager.go):
 
-```20:26:orchestrator/internal/pipeline/manager.go
-var nextStageRoutes = map[db.JobType]string{
-	db.JobTypeSTTTranscribe: "job.start.nmt",
-	db.JobTypeNMTTranslate:  "job.start.tts",
-	db.JobTypeTTSSynthesize: "job.start.merge",
-	// JobTypeDubbingMerge is the final stage — no next route.
+```go
+var stageOrder = map[string][]db.JobType{
+    "captionsOnly":           {db.JobTypeSTTTranscribe},
+    "captionsAndTranslation": {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate},
+    "translationAndTTS":      {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate, db.JobTypeTTSSynthesize},
+    "fullDubbing":            {db.JobTypeSTTTranscribe, db.JobTypeNMTTranslate, db.JobTypeTTSSynthesize, db.JobTypeDubbingMerge},
+}
+
+var startRoute = map[db.JobType]string{
+    db.JobTypeSTTTranscribe: "job.start.stt",
+    db.JobTypeNMTTranslate:  "job.start.nmt",
+    db.JobTypeTTSSynthesize: "job.start.tts",
+    db.JobTypeDubbingMerge:  "job.start.merge",
 }
 ```
 
-Three changes are required:
+Three behaviors are implemented:
 
-1. **Dynamic next-stage resolution (D5).** Replace the static map with a function that reads the parent job's `output_type` and returns the next stage (or "done").
-2. **Child-job creation (D7).** Before publishing `job.start.X`, the orchestrator inserts a child `Job` row of the correct `job_type` (status `QUEUED`, `parent_job_id` set) and publishes that **child** `job_id`.
+1. **Dynamic next-stage resolution (D5).** `nextStage(outputType, currentJobType)` walks `stageOrder` for the parent's `output_type`.
+2. **Child-job creation (D7).** Before publishing `job.start.X`, the orchestrator inserts a child `Job` row and publishes that **child** `job_id`.
 3. **Cancellation gate (D8).** Before advancing, re-read the parent; if `CANCELLED`, stop.
 
 ### 7.2 Dynamic transition table
@@ -341,9 +349,7 @@ NMT/TTS loops should check `is_cancelled(job_id)` between segments so a long job
 
 ```mermaid
 sequenceDiagram
-    participant FE as frontend
     participant API as backend
-    participant ME as media
     participant MQ as RabbitMQ
     participant OR as orchestrator
     participant STT as stt
@@ -354,10 +360,8 @@ sequenceDiagram
     participant S3 as MinIO
 
     FE->>API: POST /videos/upload (+ output_type)
-    API->>ME: preprocess(video)
-    ME->>S3: store audio key
-    ME->>DB: update video.audio_path
-    API->>DB: create parent job (FULL_DUBBING_PIPELINE) + VideoTask
+    API->>S3: preprocess: extract audio + thumbnail
+    API->>DB: update video.audio_path; create parent job + VideoTask
     API->>MQ: publish job.created {parent_job_id}
 
     MQ->>OR: job.created
@@ -480,15 +484,32 @@ Incremental **Strangler Fig** — the monolith keeps running until each queue is
 
 Canonical LLD: [docs/microservices_lld.md](microservices_lld.md)
 
-### Phase 2 — TTS service + merge worker + Celery decommission (PENDING)
+### Phase 2 — TTS + merge + Celery decommission ✅ COMPLETE (dev + prod compose)
 
 - [x] Build `tts-service` (port 8005) — extract SilmaTTSModelManager + audio_combine from backend.
 - [x] Wire `media-service` merge worker for `fullDubbing` (orchestrator merge stage restored).
 - [x] **media-service merge production hardening:** mux-only path (`combined_audio_key`), `dablja-worker`, `/readiness`, unit tests + CI, multi-stage Docker.
 - [x] Orchestrator: restore `JobTypeDubbingMerge` in `stageOrder["fullDubbing"]`.
-- [x] Remove `tts_bridge.py`, Celery TTS tasks, Redis counter from backend.
-- [ ] Decommission Celery/Redis/Flower; ship `docker-compose.microservices.prod.yml`.
+- [x] Pipeline Celery cutover: remove `tts_bridge.py`, pipeline Celery TTS tasks, Redis counter from backend.
+- [x] Prod decommission: `docker-compose.microservices.prod.yml` shipped; Celery/Redis/Flower removed from prod path; standalone TTS via HTTP proxy.
 - [x] E2E scripts: `translationAndTTS`, `fullDubbing`, cancel mid-TTS, merge-only smoke (`test_e2e_*.sh`).
+
+### 12.1 Production deployment
+
+| Environment | Compose file | Pipeline transport |
+|-------------|--------------|-------------------|
+| **Local dev** | `docker-compose.yml` | RabbitMQ + orchestrator + stt/nmt/tts/media-service |
+| **Production (target)** | `docker-compose.microservices.prod.yml` | Same — external S3, no Celery/Redis/Flower |
+| **Production (legacy)** | `docker-compose.prod.minimal.yml` | Celery + Redis — **deprecated**; does not run microservices |
+
+```bash
+# Production microservices stack
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build
+```
+
+Required prod env (in addition to existing secrets): `RABBITMQ_URL`, `RABBITMQ_DEFAULT_USER`, `RABBITMQ_DEFAULT_PASS`. Backend must have `RABBITMQ_URL` for `publish_job_created` after media preprocess.
+
+GCP deploy uses [.github/workflows/deploy-gcp.yml](../.github/workflows/deploy-gcp.yml) — switched to `docker-compose.microservices.prod.yml`.
 
 ### Phase 3 (Post-K8s) — Kubernetes + data ownership
 
@@ -503,10 +524,12 @@ Canonical LLD: [docs/microservices_lld.md](microservices_lld.md)
 |---------|-----------|--------|---------|
 | backend | HPA | CPU + RPS | 2 / 12 |
 | orchestrator | HPA | CPU | 1 / 3 |
-| media | KEDA | `stage.media` depth | 0 / 8 |
+| media-service (merge) | KEDA | `stage.merge` depth | 0 / 4 |
 | stt | KEDA | `stage.stt` depth | 1 / 4 |
 | nmt | KEDA | `stage.nmt` depth | 1 / 6 |
 | tts | KEDA | `stage.tts` depth | 1 / 4 |
+| media (preprocess) | — | backend BackgroundTasks | N/A — not a queue worker |
+| `stage.media` (future) | KEDA | `stage.media` depth | 0 / 8 |
 
 Principles (detail in the scaling discussion already on record):
 - **KEDA** for queue workers (reacts to backlog before CPU spikes); **HPA** for the stateless API/orchestrator.
