@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dabljaar/orchestrator/internal/db"
@@ -125,6 +126,9 @@ type Manager struct {
 	// wg tracks all goroutines spawned by the Manager so Wait() can
 	// block until every message in flight has been processed.
 	wg sync.WaitGroup
+
+	// ready is true after Start() declares consumers and queues successfully.
+	ready atomic.Bool
 }
 
 // NewManager constructs a Manager with the given dependencies and worker pool size.
@@ -207,7 +211,13 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.logger.Info("Pipeline Manager started",
 		"worker_pool_size", m.workerPoolSize,
 	)
+	m.ready.Store(true)
 	return nil
+}
+
+// IsReady reports whether pipeline consumers are started and accepting work.
+func (m *Manager) IsReady() bool {
+	return m.ready.Load()
 }
 
 // Wait blocks until all in-flight message handlers finish OR the context

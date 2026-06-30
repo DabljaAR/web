@@ -85,7 +85,7 @@ func main() {
 	}
 
 	// ─── 6. Start Health / Readiness HTTP Server ──────────────────────────────
-	healthSrv := health.NewServer(healthPort, rabbitClient, database, logger)
+	healthSrv := health.NewServer(healthPort, rabbitClient, database, manager, logger)
 	go func() {
 		if err := healthSrv.ListenAndServe(); err != nil {
 			logger.Error("Health server error", "error", err)

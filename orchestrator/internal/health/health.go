@@ -10,6 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const serviceName = "orchestrator"
+
 // Connector is a minimal interface so the health package does not need to
 // import the full mq package (avoids circular dependencies and is easier to
 // test with a mock).
@@ -17,29 +19,49 @@ type Connector interface {
 	IsConnected() bool
 }
 
-// Response is the JSON body returned by /health and /readiness.
-type Response struct {
-	Status    string            `json:"status"`    // "ok" | "degraded" | "not ready"
-	Timestamp time.Time         `json:"timestamp"` // UTC time of the check
-	Checks    map[string]string `json:"checks"`    // per-dependency status
+// PipelineReady reports whether pipeline consumers are started and accepting work.
+type PipelineReady interface {
+	IsReady() bool
+}
+
+// LivenessResponse is returned by GET /health (process alive).
+type LivenessResponse struct {
+	Status  string `json:"status"`
+	Service string `json:"service"`
+	Version string `json:"version,omitempty"`
+}
+
+// ReadinessResponse is returned by GET /readiness (deps + pipeline ready).
+type ReadinessResponse struct {
+	Status  string            `json:"status"`
+	Service string            `json:"service"`
+	Checks  map[string]string `json:"checks"`
 }
 
 // Server is a lightweight HTTP server exposing health and readiness endpoints.
 type Server struct {
-	port    string
-	rabbit  Connector
-	db      *gorm.DB
-	logger  *slog.Logger
-	httpSrv *http.Server
+	port     string
+	rabbit   Connector
+	db       *gorm.DB
+	pipeline PipelineReady
+	logger   *slog.Logger
+	httpSrv  *http.Server
 }
 
-// NewServer constructs a Server. rabbit must implement Connector.
-func NewServer(port string, rabbit Connector, database *gorm.DB, logger *slog.Logger) *Server {
+// NewServer constructs a Server. pipeline may be nil (treated as not ready).
+func NewServer(
+	port string,
+	rabbit Connector,
+	database *gorm.DB,
+	pipeline PipelineReady,
+	logger *slog.Logger,
+) *Server {
 	s := &Server{
-		port:   port,
-		rabbit: rabbit,
-		db:     database,
-		logger: logger,
+		port:     port,
+		rabbit:   rabbit,
+		db:       database,
+		pipeline: pipeline,
+		logger:   logger,
 	}
 
 	mux := http.NewServeMux()
@@ -67,68 +89,58 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpSrv.Shutdown(ctx)
 }
 
-// handleHealth reports the current health of each dependency.
-// Returns 200 if all dependencies are healthy, 503 if any are degraded.
-// Kubernetes liveness probes should call this endpoint.
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	resp := Response{
-		Status:    "ok",
-		Timestamp: time.Now().UTC(),
-		Checks:    make(map[string]string),
-	}
-
-	// ── Check PostgreSQL ──────────────────────────────────────────────────
-	if sqlDB, err := s.db.DB(); err != nil || sqlDB.Ping() != nil {
-		resp.Checks["database"] = "unhealthy"
-		resp.Status = "degraded"
-	} else {
-		resp.Checks["database"] = "healthy"
-	}
-
-	// ── Check RabbitMQ ────────────────────────────────────────────────────
-	if !s.rabbit.IsConnected() {
-		resp.Checks["rabbitmq"] = "unhealthy"
-		resp.Status = "degraded"
-	} else {
-		resp.Checks["rabbitmq"] = "healthy"
-	}
-
-	status := http.StatusOK
-	if resp.Status != "ok" {
-		status = http.StatusServiceUnavailable
-	}
-
-	writeJSON(w, status, resp)
+// Handler returns the HTTP handler (useful for httptest).
+func (s *Server) Handler() http.Handler {
+	return s.httpSrv.Handler
 }
 
-// handleReadiness reports whether the service is ready to process messages.
-// Returns 200 only when ALL dependencies are reachable.
-// Kubernetes readiness probes should call this endpoint.
-func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
-	sqlDB, dbErr := s.db.DB()
-	dbOK := dbErr == nil && sqlDB.Ping() == nil
-	rabbitOK := s.rabbit.IsConnected()
+// handleHealth is the liveness probe: process is up if this handler responds.
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, LivenessResponse{
+		Status:  "healthy",
+		Service: serviceName,
+	})
+}
 
-	if !dbOK || !rabbitOK {
-		writeJSON(w, http.StatusServiceUnavailable, Response{
-			Status:    "not ready",
-			Timestamp: time.Now().UTC(),
-			Checks: map[string]string{
-				"database": boolStatus(dbOK),
-				"rabbitmq": boolStatus(rabbitOK),
-			},
-		})
-		return
+// handleReadiness reports whether the service can process pipeline messages.
+func (s *Server) handleReadiness(w http.ResponseWriter, _ *http.Request) {
+	checks := map[string]string{
+		"database": boolStatus(dbOK(s.db)),
+		"rabbitmq": boolStatus(s.rabbit != nil && s.rabbit.IsConnected()),
+		"pipeline": boolStatus(pipelineOK(s.pipeline)),
 	}
 
-	writeJSON(w, http.StatusOK, Response{
-		Status:    "ready",
-		Timestamp: time.Now().UTC(),
-		Checks: map[string]string{
-			"database": "healthy",
-			"rabbitmq": "healthy",
-		},
+	ready := checks["database"] == "healthy" &&
+		checks["rabbitmq"] == "healthy" &&
+		checks["pipeline"] == "healthy"
+
+	status := http.StatusOK
+	respStatus := "ready"
+	if !ready {
+		status = http.StatusServiceUnavailable
+		respStatus = "not ready"
+	}
+
+	writeJSON(w, status, ReadinessResponse{
+		Status:  respStatus,
+		Service: serviceName,
+		Checks:  checks,
 	})
+}
+
+func dbOK(database *gorm.DB) bool {
+	if database == nil {
+		return false
+	}
+	sqlDB, err := database.DB()
+	if err != nil {
+		return false
+	}
+	return sqlDB.Ping() == nil
+}
+
+func pipelineOK(p PipelineReady) bool {
+	return p != nil && p.IsReady()
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

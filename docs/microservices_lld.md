@@ -322,8 +322,10 @@ Same logic applies when advancing to next stage.
 
 #### Orchestrator health
 
-- `/health` (port 8081): DB ping + RabbitMQ connected check → 200 / 503
-- `/readiness`: same checks
+- `/health` (port 8081): liveness — returns 200 when the HTTP server responds (process alive)
+- `/readiness`: DB ping + RabbitMQ connected + pipeline consumers started → 200 / 503
+
+Docker healthcheck: `curl -f http://localhost:8081/readiness`
 
 #### Key files
 

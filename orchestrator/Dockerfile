@@ -11,6 +11,7 @@ RUN go mod vendor \
 
 # Minimal production image
 FROM alpine:latest
+RUN apk add --no-cache curl ca-certificates
 WORKDIR /app
 COPY --from=builder /orchestrator-server /orchestrator-server
 

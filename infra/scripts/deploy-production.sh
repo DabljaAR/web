@@ -284,22 +284,7 @@ wait_for_backend_health() {
   return 1
 }
 
-wait_for_orchestrator_running() {
-  local max_attempts="${1:-30}"
-  local attempt=1
-  while [ "$attempt" -le "$max_attempts" ]; do
-    if $COMPOSE ps --status running -q orchestrator 2>/dev/null | grep -q .; then
-      echo "orchestrator container is running"
-      return 0
-    fi
-    sleep 5
-    attempt=$((attempt + 1))
-  done
-  echo "internal-orchestrator-fail: orchestrator is not running after deploy"
-  return 1
-}
-
-wait_for_orchestrator_running 30
+wait_for_readiness orchestrator http://localhost:8081/readiness orchestrator 12 5
 wait_for_readiness media-service http://localhost:8003/readiness media 12 10
 wait_for_readiness stt-service http://localhost:8001/readiness stt 60 10
 wait_for_readiness nmt-service http://localhost:8002/readiness nmt 60 10

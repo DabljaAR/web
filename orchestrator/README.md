@@ -79,8 +79,24 @@ docker run --rm \
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /health` | Liveness — returns 200 if DB + RabbitMQ are reachable |
-| `GET /readiness` | Readiness — returns 200 only when both dependencies are healthy |
+| `GET /health` | Liveness — returns 200 when the HTTP server is responding (process alive) |
+| `GET /readiness` | Readiness — returns 200 when PostgreSQL, RabbitMQ, and pipeline consumers are ready |
+
+Readiness response shape:
+
+```json
+{
+  "status": "ready",
+  "service": "orchestrator",
+  "checks": {
+    "database": "healthy",
+    "rabbitmq": "healthy",
+    "pipeline": "healthy"
+  }
+}
+```
+
+Docker Compose uses `curl -f http://localhost:8081/readiness` for the healthcheck (`HEALTH_PORT` defaults to `8081`).
 
 ## Project structure
 
