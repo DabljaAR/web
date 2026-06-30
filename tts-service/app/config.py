@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     HF_TOKEN: str = ""
     CATT_TASHKEEL_MODEL_DIR: str = ""
 
-    PORT: int = 8003
+    PORT: int = 8005
     LOG_LEVEL: str = "INFO"
 
     class Config:
