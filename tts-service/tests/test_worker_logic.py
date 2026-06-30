@@ -22,11 +22,21 @@ def _make_method(delivery_tag=1):
     return m
 
 
+def _job_context(task_id="task-1"):
+    return {
+        "id": "job-abc",
+        "video_id": "vid-1",
+        "input_data": {"task_id": task_id},
+        "status": "QUEUED",
+        "output_data": {},
+    }
+
+
 def test_process_tts_job_idempotency_skip():
     mock_db = MagicMock()
     mock_db.__enter__ = MagicMock(return_value=mock_db)
     mock_db.__exit__ = MagicMock(return_value=False)
-    cached = {"status": "completed", "segments": [], "video_id": "v1"}
+    cached = {"status": "completed", "combined_audio_key": "tts/vid-1/combined_j1.wav", "video_id": "v1"}
 
     with patch("app.worker._SessionLocal", return_value=mock_db), patch(
         "app.worker._load_job",
@@ -45,13 +55,7 @@ def test_process_tts_job_cancel_before_processing():
 
     with patch("app.worker._SessionLocal", return_value=mock_db), patch(
         "app.worker._load_job",
-        return_value={
-            "id": "j1",
-            "video_id": "v1",
-            "input_data": {},
-            "status": "QUEUED",
-            "output_data": {},
-        },
+        return_value=_job_context(),
     ), patch("app.worker._load_video_task_segments", return_value=[{"translated_text": "hi"}]), patch(
         "app.worker._is_cancelled", return_value=True
     ), patch("app.worker.mark_processing") as mock_processing, patch(
@@ -65,41 +69,79 @@ def test_process_tts_job_cancel_before_processing():
     mock_completed.assert_called_once()
 
 
-def test_process_tts_job_synthesizes_segment():
+def test_process_tts_job_empty_segments_raises():
+    mock_db = MagicMock()
+    mock_db.__enter__ = MagicMock(return_value=mock_db)
+    mock_db.__exit__ = MagicMock(return_value=False)
+
+    with patch("app.worker._SessionLocal", return_value=mock_db), patch(
+        "app.worker._load_job",
+        return_value=_job_context(),
+    ), patch("app.worker._load_video_task_segments", return_value=[]), patch(
+        "app.worker._is_cancelled", return_value=False
+    ):
+        with pytest.raises(ValueError, match="no segments to synthesize"):
+            process_tts_job("job-abc", [False])
+
+
+def test_process_tts_job_all_segments_failed_raises():
+    mock_db = MagicMock()
+    mock_db.__enter__ = MagicMock(return_value=mock_db)
+    mock_db.__exit__ = MagicMock(return_value=False)
+    segments = [{"translated_text": "hello", "start": 0.0, "end": 1.0}]
+
+    with patch("app.worker._SessionLocal", return_value=mock_db), patch(
+        "app.worker._load_job",
+        return_value=_job_context(),
+    ), patch("app.worker._load_video_task_segments", return_value=segments), patch(
+        "app.worker._is_cancelled", return_value=False
+    ), patch("app.worker.mark_processing"), patch(
+        "app.worker.OmniVoiceManager.synthesize", side_effect=RuntimeError("boom")
+    ):
+        with pytest.raises(ValueError, match="all segment syntheses failed"):
+            process_tts_job("job-abc", [False])
+
+
+def test_process_tts_job_synthesizes_and_writes_combined_audio_key():
     mock_db = MagicMock()
     mock_db.__enter__ = MagicMock(return_value=mock_db)
     mock_db.__exit__ = MagicMock(return_value=False)
 
     segments = [{"translated_text": "hello", "start": 0.0, "end": 1.0}]
+    combined_path = MagicMock(spec=Path)
+    combined_path.read_bytes.return_value = b"combined-wav"
 
     with patch("app.worker._SessionLocal", return_value=mock_db), patch(
         "app.worker._load_job",
-        return_value={
-            "id": "job-abc",
-            "video_id": "vid-1",
-            "input_data": {},
-            "status": "QUEUED",
-            "output_data": {},
-        },
+        return_value=_job_context(task_id="task-99"),
     ), patch("app.worker._load_video_task_segments", return_value=segments), patch(
         "app.worker._is_cancelled", return_value=False
-    ), patch("app.worker.mark_processing"), patch("app.worker.mark_completed"), patch(
+    ), patch("app.worker.mark_processing"), patch(
+        "app.worker.mark_completed"
+    ) as mock_completed, patch(
+        "app.worker._update_video_task_combined_audio"
+    ) as mock_update_task, patch(
         "app.worker.OmniVoiceManager.synthesize", return_value=[b"\x00" * 100]
-    ), patch("app.worker.upload_audio", return_value="https://example/audio.wav"), patch(
+    ), patch("app.worker.upload_audio", return_value="https://example/audio.wav") as mock_upload, patch(
         "app.worker.sf.write"
-    ):
+    ), patch(
+        "app.worker.combine_segment_wavs", return_value=combined_path
+    ) as mock_combine:
         summary = process_tts_job("job-abc", [False])
 
-    assert summary["video_id"] == "vid-1"
-    assert summary["metadata"]["total_segments"] == 1
-    assert summary["segments"][0]["tts_key"] == "tts/job-abc/segment_0.wav"
+    assert summary["combined_audio_key"] == "tts/vid-1/combined_job-abc.wav"
+    assert summary["segment_count"] == 1
+    mock_combine.assert_called_once()
+    mock_upload.assert_called()
+    mock_update_task.assert_called_once_with(mock_db, "task-99", "tts/vid-1/combined_job-abc.wav")
+    mock_completed.assert_called_once()
 
 
 def test_on_message_completed_job_republishes_result_only():
     ch = _make_channel()
     method = _make_method(7)
     body = json.dumps({"job_id": "job-redeliver"}).encode()
-    summary = {"status": "completed", "video_id": "v1", "segments": []}
+    summary = {"status": "completed", "video_id": "v1", "combined_audio_key": "k"}
 
     with patch("app.worker._SessionLocal"), patch(
         "app.worker._is_cancelled", return_value=False

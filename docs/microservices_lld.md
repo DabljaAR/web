@@ -514,8 +514,8 @@ tts-service/
     ├── prewarm.py       # optional model prewarm at startup
     ├── config.py        # PORT=8005, TTS_INTERNAL_CONCURRENCY, PREWARM_TTS_MODEL
     ├── worker.py        # consume stage.tts → synth + combine → job.results.tts
-    ├── model.py         # SilmaTTSModelManager (non-Celery)
-    ├── audio_combine.py # stretch/fit/concat segment WAVs
+    ├── model.py         # OmniVoiceManager (non-Celery)
+    ├── audio_combine.py # stretch/fit/concat segment WAVs → combined_audio_key
     └── storage.py       # S3 up/down for wavs
 ```
 

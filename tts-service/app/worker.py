@@ -8,11 +8,13 @@ import json
 import logging
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import soundfile as sf
 from sqlalchemy import text
 
+from app.audio_combine import combine_segment_wavs
 from app.config import settings
 from app.model import OmniVoiceManager
 from app.storage import upload_audio
@@ -76,6 +78,46 @@ def _load_video_task_segments(db, video_id: str) -> list:
     return segments or []
 
 
+def _find_video_task_id(db, video_id: str) -> Optional[str]:
+    row = db.execute(
+        text(
+            "SELECT id FROM video_tasks WHERE video_id = :vid"
+            " ORDER BY created_at DESC LIMIT 1"
+        ),
+        {"vid": video_id},
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _load_video_task(db, task_id: str) -> Optional[dict]:
+    row = db.execute(
+        text(
+            "SELECT id, video_id, output_type FROM video_tasks WHERE id = :tid"
+        ),
+        {"tid": task_id},
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "video_id": row[1],
+        "output_type": row[2] or "fullDubbing",
+    }
+
+
+def _update_video_task_combined_audio(db, task_id: str, combined_audio_key: str):
+    db.execute(
+        text("""
+            UPDATE video_tasks
+               SET combined_audio_key = :key,
+                   updated_at = :now
+             WHERE id = :tid
+        """),
+        {"key": combined_audio_key, "now": _utcnow(), "tid": task_id},
+    )
+    db.commit()
+
+
 def _is_cancelled(db, job_id: str) -> bool:
     """D8: cooperative cancel check for job or parent pipeline."""
     if check_cancelled(db, job_id):
@@ -110,7 +152,7 @@ def _watch_cancel(
 
 
 def process_tts_job(job_id: str, cancelled_flag: list) -> dict:
-    """Synthesize translated segments with OmniVoice and persist output."""
+    """Synthesize translated segments with OmniVoice, combine, and persist output."""
     with _SessionLocal() as db:
         job = _load_job(db, job_id)
         if not job:
@@ -120,16 +162,20 @@ def process_tts_job(job_id: str, cancelled_flag: list) -> dict:
             logger.info("[TTS] job=%s already COMPLETED — skipping re-run", job_id)
             return job["output_data"]
 
-        video_id = job["video_id"] or job["input_data"].get("video_id")
+        input_data = job["input_data"]
+        video_id = job["video_id"] or input_data.get("video_id")
         if not video_id:
             raise ValueError(f"Job {job_id} has no video_id")
 
+        task_id = input_data.get("task_id")
+        if not task_id:
+            task_id = _find_video_task_id(db, video_id)
+        if not task_id:
+            raise ValueError(f"Job {job_id}: cannot resolve video_task")
+
         segments = _load_video_task_segments(db, video_id)
         if not segments:
-            logger.warning("[TTS] No segments to synthesize | job=%s", job_id)
-            output = {"status": "completed", "video_id": video_id, "segments": []}
-            mark_completed(db, job_id, output)
-            return output
+            raise ValueError(f"Job {job_id}: no segments to synthesize")
 
         if _is_cancelled(db, job_id):
             logger.warning("[TTS] Job %s cancelled before processing", job_id)
@@ -198,26 +244,45 @@ def process_tts_job(job_id: str, cancelled_flag: list) -> dict:
                 "tts_error": str(exc),
             })
 
-    output = {
+    successful = [s for s in result_segments if s.get("tts_key") and not s.get("tts_error")]
+    if not successful:
+        raise ValueError(f"Job {job_id}: all segment syntheses failed — cannot combine audio")
+
+    session_dir = Path(settings.DUBBING_TEMP_DIR) / f"{video_id}_{job_id}_{int(_utcnow().timestamp())}"
+    combined_path = combine_segment_wavs(
+        successful,
+        temp_dir=session_dir,
+        max_stretch=settings.DUBBING_MAX_STRETCH_RATIO,
+        min_stretch=settings.DUBBING_MIN_STRETCH_RATIO,
+        silence_threshold=settings.DUBBING_SILENCE_THRESHOLD,
+    )
+    combined_key = f"tts/{video_id}/combined_{job_id}.wav"
+    upload_audio(combined_path.read_bytes(), combined_key)
+
+    failed_count = sum(1 for s in result_segments if s.get("tts_error"))
+    summary = {
         "status": "completed",
         "video_id": video_id,
-        "segments": result_segments,
+        "combined_audio_key": combined_key,
+        "segment_count": len(successful),
         "metadata": {
             "total_segments": len(result_segments),
-            "failed": sum(1 for s in result_segments if s.get("tts_error")),
+            "failed": failed_count,
         },
     }
 
     with _SessionLocal() as db:
-        mark_completed(db, job_id, output)
+        _update_video_task_combined_audio(db, task_id, combined_key)
+        mark_completed(db, job_id, summary)
 
     logger.info(
-        "[TTS] Done | job=%s | segments=%d | failed=%d",
+        "[TTS] Done | job=%s | combined=%s | segments=%d | failed=%d",
         job_id,
-        len(result_segments),
-        output["metadata"]["failed"],
+        combined_key,
+        len(successful),
+        failed_count,
     )
-    return output
+    return summary
 
 
 def _handle_failure(job_id: str, exc: Exception) -> None:
