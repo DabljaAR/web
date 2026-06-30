@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/dabljaar/orchestrator/internal/db"
+	"github.com/dabljaar/orchestrator/internal/metrics"
 	"github.com/dabljaar/orchestrator/internal/mq"
+	"github.com/dabljaar/orchestrator/internal/tracing"
 	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"gorm.io/gorm"
@@ -247,7 +249,7 @@ func (m *Manager) startConsumer(
 	ch *amqp.Channel,
 	queueName, bindingKey string,
 	args amqp.Table,
-	handler func(context.Context, []byte) error,
+	handler func(context.Context, amqp.Delivery) error,
 ) error {
 	q, err := ch.QueueDeclare(queueName, true, false, false, false, args)
 	if err != nil {
@@ -292,13 +294,18 @@ func (m *Manager) startConsumer(
 					defer func() { <-m.sem }() // release pool slot
 
 					start := time.Now()
-					err := handler(ctx, d.Body)
+					msgCtx := tracing.ExtractFromAMQP(ctx, d.Headers)
+					err := handler(msgCtx, d)
 					elapsed := time.Since(start)
 
 					if err != nil {
 						requeue := !errors.As(err, &errPermanent{})
+						if !requeue {
+							metrics.DLQMessages.Inc()
+						}
 						m.logger.Error("Message handler failed — nacking",
 							"queue", queueName,
+							"routing_key", d.RoutingKey,
 							"error", err,
 							"requeue", requeue,
 							"elapsed_ms", elapsed.Milliseconds(),
@@ -310,8 +317,10 @@ func (m *Manager) startConsumer(
 						return
 					}
 
+					metrics.StageDuration.WithLabelValues(queueName).Observe(elapsed.Seconds())
 					m.logger.Debug("Message handled successfully",
 						"queue", queueName,
+						"routing_key", d.RoutingKey,
 						"elapsed_ms", elapsed.Milliseconds(),
 					)
 					d.Ack(false)
@@ -328,7 +337,8 @@ func (m *Manager) startConsumer(
 // handleNewJob is invoked when the FastAPI backend publishes a "job.created"
 // event with the PARENT job_id (§15 contract). It resolves output_type, marks
 // the parent PROCESSING, creates the first child job (STT), and dispatches.
-func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
+func (m *Manager) handleNewJob(ctx context.Context, delivery amqp.Delivery) error {
+	body := delivery.Body
 	var payload newJobPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		m.logger.Error("handleNewJob: bad JSON — discarding message", "error", err)
@@ -336,18 +346,21 @@ func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
 	}
 
 	parentID := payload.JobID
-	log := m.logger.With("parent_job_id", parentID, "handler", "handleNewJob")
+	handlerCtx, span := tracing.StartHandlerSpan(ctx, "handle job.created", parentID)
+	defer span.End()
+
+	log := m.logger.With("parent_job_id", parentID, "handler", "handleNewJob", "routing_key", delivery.RoutingKey)
 	log.Info("Orchestrator received new job")
 
 	var parent db.Job
-	if err := m.db.WithContext(ctx).Where("id = ?", parentID).First(&parent).Error; err != nil {
+	if err := m.db.WithContext(handlerCtx).Where("id = ?", parentID).First(&parent).Error; err != nil {
 		return permanent(fmt.Errorf("parent job %s not found: %w", parentID, err))
 	}
 
 	now := time.Now().UTC()
 
 	// Mark parent PROCESSING
-	m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+	m.db.WithContext(handlerCtx).Model(&parent).Updates(map[string]any{
 		"status":     db.JobStatusProcessing,
 		"started_at": &now,
 		"updated_at": now,
@@ -359,7 +372,7 @@ func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
 	if !ok {
 		// uploadOnly or unknown — mark parent COMPLETED immediately
 		log.Info("No pipeline stages for output_type — marking parent COMPLETED", "output_type", outputType)
-		m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+		m.db.WithContext(handlerCtx).Model(&parent).Updates(map[string]any{
 			"status":       db.JobStatusCompleted,
 			"progress":     100.0,
 			"completed_at": &now,
@@ -372,7 +385,7 @@ func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
 	// don't create another one. Instead, re-publish if the existing child is
 	// still in a non-terminal state (the original dispatch may have been lost).
 	var existing db.Job
-	dupErr := m.db.WithContext(ctx).
+	dupErr := m.db.WithContext(handlerCtx).
 		Where("parent_job_id = ? AND job_type = ?", parentID, firstStage).
 		First(&existing).Error
 
@@ -385,7 +398,7 @@ func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
 			if !ok {
 				return permanent(fmt.Errorf("no start route for stage %s", firstStage))
 			}
-			if err := m.publishNextJob(route, existing.ID); err != nil {
+			if err := m.publishNextJob(handlerCtx, route, existing.ID); err != nil {
 				return fmt.Errorf("re-publish %s for child %s: %w", route, existing.ID, err)
 			}
 			return nil
@@ -418,7 +431,7 @@ func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if err := m.db.WithContext(ctx).Create(&child).Error; err != nil {
+	if err := m.db.WithContext(handlerCtx).Create(&child).Error; err != nil {
 		return fmt.Errorf("create STT child for parent %s: %w", parentID, err)
 	}
 
@@ -428,7 +441,7 @@ func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
 	}
 
 	log.Info("Dispatching first stage", "child_job_id", childID, "stage", firstStage, "route", route)
-	if err := m.publishNextJob(route, childID); err != nil {
+	if err := m.publishNextJob(handlerCtx, route, childID); err != nil {
 		return fmt.Errorf("publish %s for child %s: %w", route, childID, err)
 	}
 
@@ -439,7 +452,8 @@ func (m *Manager) handleNewJob(ctx context.Context, body []byte) error {
 // It updates the child job, then either creates the next child and dispatches
 // (COMPLETED), propagates failure to the parent (FAILED), or marks the pipeline
 // complete when no more stages remain. Never mutates job_type on existing rows.
-func (m *Manager) handleResult(ctx context.Context, body []byte) error {
+func (m *Manager) handleResult(ctx context.Context, delivery amqp.Delivery) error {
+	body := delivery.Body
 	var payload WorkerResultPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
 		m.logger.Error("handleResult: bad JSON — discarding message", "error", err)
@@ -447,15 +461,20 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 	}
 
 	childID := payload.JobID
+	handlerCtx, span := tracing.StartHandlerSpan(ctx, "handle job.results", childID)
+	defer span.End()
+
 	log := m.logger.With(
 		"child_job_id", childID,
 		"job_type", payload.JobType,
 		"status", payload.Status,
+		"routing_key", delivery.RoutingKey,
 	)
 	log.Info("Worker result received")
+	metrics.JobsCompleted.WithLabelValues(string(payload.JobType), payload.Status).Inc()
 
 	var child db.Job
-	if err := m.db.WithContext(ctx).Where("id = ?", childID).First(&child).Error; err != nil {
+	if err := m.db.WithContext(handlerCtx).Where("id = ?", childID).First(&child).Error; err != nil {
 		return permanent(fmt.Errorf("child job %s not found: %w", childID, err))
 	}
 
@@ -486,13 +505,13 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 		updates["completed_at"] = &now
 		updates["progress"] = 100.0
 	}
-	m.db.WithContext(ctx).Model(&child).Updates(updates)
+	m.db.WithContext(handlerCtx).Model(&child).Updates(updates)
 
 	// ── State machine ──────────────────────────────────────────────────────
 	switch resultStatus {
 	case db.JobStatusFailed:
 		log.Error("Stage failed — propagating to parent", "error", payload.Error)
-		m.updateParent(ctx, child, db.JobStatusFailed, payload.Error, &now)
+		m.updateParent(handlerCtx, child, db.JobStatusFailed, payload.Error, &now)
 
 	case db.JobStatusCompleted:
 		// Load parent for cancel check and output_type
@@ -502,7 +521,7 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 		}
 
 		var parent db.Job
-		if err := m.db.WithContext(ctx).Where("id = ?", *child.ParentJobID).First(&parent).Error; err != nil {
+		if err := m.db.WithContext(handlerCtx).Where("id = ?", *child.ParentJobID).First(&parent).Error; err != nil {
 			// Parent gone — still update child progress, but can't advance
 			m.logger.Warn("Parent job not found for child", "child_id", childID, "parent_id", *child.ParentJobID, "error", err)
 			return nil
@@ -511,7 +530,7 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 		// D8: cancel check — if parent was cancelled, stop advancing
 		if parent.Status == db.JobStatusCancelled {
 			log.Info("Parent is CANCELLED — stopping pipeline")
-			m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+			m.db.WithContext(handlerCtx).Model(&parent).Updates(map[string]any{
 				"status": db.JobStatusCancelled, "updated_at": now,
 			})
 			return nil
@@ -519,7 +538,7 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 
 		// Update parent progress for completed stage
 		if prog, hasProg := stageProgress[child.JobType]; hasProg {
-			m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+			m.db.WithContext(handlerCtx).Model(&parent).Updates(map[string]any{
 				"progress": prog, "updated_at": now,
 			})
 		}
@@ -530,7 +549,7 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 
 		if !hasNext {
 			log.Info("All pipeline stages complete")
-			m.db.WithContext(ctx).Model(&parent).Updates(map[string]any{
+			m.db.WithContext(handlerCtx).Model(&parent).Updates(map[string]any{
 				"status":       db.JobStatusCompleted,
 				"progress":     100.0,
 				"completed_at": &now,
@@ -542,7 +561,7 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 		// Duplicate prevention: if a next-stage child already exists for this
 		// parent, don't create another one. Re-publish if still non-terminal.
 		var existingNext db.Job
-		dupErr := m.db.WithContext(ctx).
+		dupErr := m.db.WithContext(handlerCtx).
 			Where("parent_job_id = ? AND job_type = ?", *child.ParentJobID, next).
 			First(&existingNext).Error
 
@@ -554,7 +573,7 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 				if !ok {
 					return permanent(fmt.Errorf("no start route for stage %s", next))
 				}
-				if err := m.publishNextJob(route, existingNext.ID); err != nil {
+				if err := m.publishNextJob(handlerCtx, route, existingNext.ID); err != nil {
 					return fmt.Errorf("re-publish %s for next child %s: %w", route, existingNext.ID, err)
 				}
 				return nil
@@ -591,7 +610,7 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}
-		if err := m.db.WithContext(ctx).Create(&nextChild).Error; err != nil {
+		if err := m.db.WithContext(handlerCtx).Create(&nextChild).Error; err != nil {
 			return fmt.Errorf("create next child for parent %s: %w", *child.ParentJobID, err)
 		}
 
@@ -605,7 +624,7 @@ func (m *Manager) handleResult(ctx context.Context, body []byte) error {
 			"next_stage", next,
 			"route", route,
 		)
-		if err := m.publishNextJob(route, nextChildID); err != nil {
+		if err := m.publishNextJob(handlerCtx, route, nextChildID); err != nil {
 			return fmt.Errorf("publish %s for next child %s: %w", route, nextChildID, err)
 		}
 
@@ -659,11 +678,17 @@ func (m *Manager) updateParent(
 
 // publishNextJob sends a trigger message to the exchange with the given
 // routing key. Messages are marked persistent so they survive a broker restart.
-func (m *Manager) publishNextJob(routingKey, jobID string) error {
+func (m *Manager) publishNextJob(ctx context.Context, routingKey, jobID string) error {
 	body, err := json.Marshal(map[string]string{"job_id": jobID})
 	if err != nil {
 		return fmt.Errorf("marshal publish payload: %w", err)
 	}
+
+	headers := tracing.InjectToAMQP(ctx, amqp.Table{})
+	m.logger.Info("Publishing stage dispatch",
+		"routing_key", routingKey,
+		"job_id", jobID,
+	)
 
 	return m.rabbit.Channel.Publish(
 		"dablja.jobs.exchange",
@@ -673,6 +698,7 @@ func (m *Manager) publishNextJob(routingKey, jobID string) error {
 		amqp.Publishing{
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent, // survive broker restart
+			Headers:      headers,
 			Body:         body,
 		},
 	)

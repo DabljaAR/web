@@ -17,7 +17,9 @@ Follow the steps **in order**. Skipping or reordering steps (especially DNS befo
 | Secret Manager (optional) | `env-production`, `github-deploy-key` |
 | Cloudflare A records (optional) | `app.yourbrand.tech`, `rabbitmq.app.yourbrand.tech` |
 
-**Not included:** app container deploy, Terraform CI, image registry, backups, monitoring.
+**Not included:** app container deploy, Terraform CI, image registry, backups.
+
+**Observability:** self-hosted on the VM via Docker Compose overlay ([`docs/observability.md`](../../docs/observability.md)) — not GCP Cloud Monitoring. The VM service account has `roles/logging.logWriter` and `roles/monitoring.metricWriter` for optional future GCP agent use, but the default stack is Loki + Grafana + VictoriaMetrics + Tempo.
 
 ---
 

@@ -20,6 +20,9 @@ from dablja_worker.job_state import (
     mark_failed,
 )
 from dablja_worker.results import publish_result, publish_result_reliable
+from dablja_worker.logging import setup_logging
+from dablja_worker.metrics import DLQ_MESSAGES, JOBS_COMPLETED, STAGE_DURATION
+from dablja_worker.tracing import inject_trace_headers, setup_tracing, trace_stage
 
 __all__ = [
     # consumer.py
@@ -40,4 +43,12 @@ __all__ = [
     # ack.py
     "safe_ack",
     "finish_job_message",
+    # logging / observability
+    "setup_logging",
+    "setup_tracing",
+    "trace_stage",
+    "inject_trace_headers",
+    "JOBS_COMPLETED",
+    "STAGE_DURATION",
+    "DLQ_MESSAGES",
 ]

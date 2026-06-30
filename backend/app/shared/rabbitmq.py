@@ -8,8 +8,13 @@ import json
 import logging
 
 import pika
+from opentelemetry import trace
+from opentelemetry.propagate import inject
+
+from app.shared.telemetry import JOBS_CREATED
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 EXCHANGE = "dablja.jobs.exchange"
 
@@ -21,26 +26,32 @@ def _get_rabbitmq_url() -> str:
 
 def publish_job_created(job_id: str) -> bool:
     """Publish a ``job.created`` event so the orchestrator can start the pipeline."""
-    try:
-        params = pika.URLParameters(_get_rabbitmq_url())
-        params.socket_timeout = 5
-        connection = pika.BlockingConnection(params)
-        channel = connection.channel()
+    with tracer.start_as_current_span("publish job.created", attributes={"job_id": job_id}):
+        try:
+            params = pika.URLParameters(_get_rabbitmq_url())
+            params.socket_timeout = 5
+            connection = pika.BlockingConnection(params)
+            channel = connection.channel()
 
-        channel.exchange_declare(EXCHANGE, exchange_type="topic", durable=True)
+            channel.exchange_declare(EXCHANGE, exchange_type="topic", durable=True)
 
-        channel.basic_publish(
-            exchange=EXCHANGE,
-            routing_key="job.created",
-            body=json.dumps({"job_id": job_id}),
-            properties=pika.BasicProperties(
-                content_type="application/json",
-                delivery_mode=2,  # persistent
-            ),
-        )
-        connection.close()
-        logger.info("[RabbitMQ] Published job.created for job %s", job_id)
-        return True
-    except Exception as exc:
-        logger.error("[RabbitMQ] Failed to publish job.created for %s: %s", job_id, exc)
-        return False
+            headers: dict[str, str] = {}
+            inject(headers)
+
+            channel.basic_publish(
+                exchange=EXCHANGE,
+                routing_key="job.created",
+                body=json.dumps({"job_id": job_id}),
+                properties=pika.BasicProperties(
+                    content_type="application/json",
+                    delivery_mode=2,  # persistent
+                    headers=headers or None,
+                ),
+            )
+            connection.close()
+            JOBS_CREATED.inc()
+            logger.info("[RabbitMQ] Published job.created for job %s", job_id)
+            return True
+        except Exception as exc:
+            logger.error("[RabbitMQ] Failed to publish job.created for %s: %s", job_id, exc)
+            return False

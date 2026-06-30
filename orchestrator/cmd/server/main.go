@@ -13,16 +13,28 @@ import (
 	"github.com/dabljaar/orchestrator/internal/health"
 	"github.com/dabljaar/orchestrator/internal/mq"
 	"github.com/dabljaar/orchestrator/internal/pipeline"
+	"github.com/dabljaar/orchestrator/internal/tracing"
 )
 
 func main() {
 	// ─── 1. Structured Logging ────────────────────────────────────────────────
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
-	}))
+	})).With("service", "orchestrator")
 	slog.SetDefault(logger)
 
 	logger.Info("Starting DabljaAR Orchestrator")
+
+	shutdownTracing, err := tracing.Init(context.Background(), "orchestrator")
+	if err != nil {
+		logger.Error("OpenTelemetry initialization failed", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if shutdownTracing != nil {
+			_ = shutdownTracing(context.Background())
+		}
+	}()
 
 	// ─── 2. Load Config ───────────────────────────────────────────────────────
 	rabbitURL := os.Getenv("RABBITMQ_URL")

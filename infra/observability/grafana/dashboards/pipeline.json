@@ -1,0 +1,113 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        {
+          "expr": "sum(rate(dablja_jobs_completed_total{status=\"COMPLETED\"}[5m])) * 3600",
+          "legendFormat": "completed/h",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(dablja_jobs_completed_total{status=\"FAILED\"}[5m])) * 3600",
+          "legendFormat": "failed/h",
+          "refId": "B"
+        }
+      ],
+      "title": "Jobs per hour",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(rate(dablja_jobs_completed_total{status=\"FAILED\"}[1h])) / sum(rate(dablja_jobs_completed_total[1h]))",
+          "legendFormat": "failure rate",
+          "refId": "A"
+        }
+      ],
+      "title": "Job failure rate (1h)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(dablja_stage_duration_seconds_bucket[5m])) by (le, stage))",
+          "legendFormat": "p95 {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Stage duration p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "rabbitmq_queue_messages{queue=~\"stage\\\\..*|orchestrator\\\\..*\"}",
+          "legendFormat": "{{queue}}",
+          "refId": "A"
+        }
+      ],
+      "title": "RabbitMQ queue depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 24 },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "rabbitmq_queue_messages{queue=\"orchestrator.dlq\"}",
+          "legendFormat": "DLQ",
+          "refId": "A"
+        }
+      ],
+      "title": "DLQ messages",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 16, "x": 8, "y": 24 },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{job=\"backend\"}[5m])) by (status)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Backend HTTP rate",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["dabljaar", "pipeline"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "Pipeline",
+  "uid": "dablja-pipeline",
+  "version": 1
+}

@@ -1,0 +1,48 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    uid: loki
+    url: http://loki:3100
+    isDefault: false
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - datasourceUid: tempo
+          matcherRegex: '"trace_id":"([a-f0-9]+)"'
+          name: TraceID
+          url: "$${__value.raw}"
+          urlDisplayLabel: View trace
+
+  - name: VictoriaMetrics
+    type: prometheus
+    access: proxy
+    uid: victoriametrics
+    url: http://victoriametrics:8428
+    isDefault: true
+    jsonData:
+      httpMethod: POST
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    uid: tempo
+    url: http://tempo:3200
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -1h
+        spanEndTimeShift: 1h
+        filterByTraceID: true
+        filterBySpanID: false
+        customQuery: true
+        query: '{service=~".+"} | json | trace_id="$${__trace.traceId}"'
+      serviceMap:
+        datasourceUid: victoriametrics
+      nodeGraph:
+        enabled: true

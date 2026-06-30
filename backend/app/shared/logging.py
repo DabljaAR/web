@@ -1,6 +1,7 @@
 """Logging configuration for the application."""
 import logging
 import logging.handlers
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -55,6 +56,7 @@ def setup_logging(
                 log_data = {
                     "timestamp": datetime.utcnow().isoformat(),
                     "level": record.levelname,
+                    "service": os.environ.get("SERVICE_NAME", "backend"),
                     "logger": record.name,
                     "message": record.getMessage(),
                     "module": record.module,

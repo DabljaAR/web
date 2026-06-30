@@ -248,7 +248,76 @@ docker compose up --scale worker-media=3 -d
 
 ---
 
+## Microservices observability (production)
+
+The microservices stack ships with an optional self-hosted observability overlay. See [docs/observability.md](observability.md) for full setup.
+
+### Quick access
+
+| UI | URL |
+|----|-----|
+| Grafana (logs, metrics, traces) | `https://grafana.$DOMAIN` |
+| RabbitMQ Management | `https://rabbitmq.$DOMAIN` |
+
+### Debugging a failed job
+
+1. **Find the job ID** from the API response, database, or user report (`parent_job_id` for the pipeline, child `job_id` per stage).
+
+2. **Search logs in Grafana** → Explore → Loki:
+   ```logql
+   {service=~".+"} |= "YOUR_JOB_ID"
+   ```
+   Or open dashboard **Logs Explorer** (`dablja-logs`) and set the `job_id` variable.
+
+3. **Check pipeline metrics** → dashboard **Pipeline** (`dablja-pipeline`):
+   - Failure rate spike?
+   - Which stage has high p95 latency?
+   - Queue depth growing on `stage.stt`, `stage.nmt`, `stage.tts`, or `stage.merge`?
+
+4. **Inspect the trace** (if sampled): Grafana → Explore → Tempo → search by `job_id` tag, or click **TraceID** from a correlated log line.
+
+5. **Check RabbitMQ** at `https://rabbitmq.$DOMAIN`:
+   - Queue depth on stage queues
+   - **orchestrator.dlq** for poison messages (unparseable payloads, permanent handler errors)
+
+6. **DLQ recovery:** inspect the message in RabbitMQ UI → orchestrator.dlq → get payload → fix root cause → re-publish or delete after fixing data.
+
+7. **Fallback (SSH):** if Grafana is down:
+   ```bash
+   docker compose -f docker-compose.microservices.prod.yml -f docker-compose.observability.yml logs --tail=200 orchestrator stt-service nmt-service tts-service media-service backend
+   ```
+
+### Common pipeline failure patterns
+
+| Symptom | Likely cause | Where to look |
+|---------|--------------|---------------|
+| Job stuck in `QUEUED` | Worker not consuming / queue backlog | Pipeline dashboard queue depth; worker `/readiness` |
+| Job `FAILED` at STT | Audio missing, model error, S3 download | `{service="stt"} \|= "job_id"` |
+| Job `FAILED` at NMT/TTS | GPU OOM, model load failure | Infra dashboard container memory; worker logs |
+| DLQ messages | Poison JSON or permanent orchestrator error | `orchestrator.dlq` in RabbitMQ; orchestrator logs |
+| High failure rate alert | Upstream API or storage outage | Backend logs + S3 connectivity |
+
+---
+
 ## Log Locations
+
+### Microservices production (current)
+
+| Component | Location | Notes |
+|-----------|----------|-------|
+| All services | Grafana → Loki | JSON stdout via Promtail; search by `job_id` |
+| Backend API | stdout + optional `backend/logs/` | `LOG_JSON_FORMAT=true` |
+| Orchestrator | stdout | JSON slog with `parent_job_id` / `child_job_id` |
+| AI workers | stdout | JSON via `dablja_worker.logging` |
+| Caddy | stdout | JSON access logs |
+| Deploy script | `~/web/deploy.log` on VM | GitHub Actions deploy output |
+
+**Without Grafana (SSH fallback):**
+```bash
+docker compose -f docker-compose.microservices.prod.yml logs -f --tail=100 orchestrator backend stt-service
+```
+
+### Legacy Celery stack
 
 | Component | Location | Notes |
 |-----------|----------|-------|
@@ -259,19 +328,25 @@ docker compose up --scale worker-media=3 -d
 | Redis | `docker compose logs redis` | Connection issues |
 | Flower | `docker compose logs flower` | Monitoring UI |
 
-**Tail all logs:**
+**Tail all logs (legacy):**
 ```bash
 docker compose logs -f --tail=100
 ```
 
-**Filter by service:**
+**Filter by service (legacy):**
 ```bash
 docker compose logs -f worker-media worker-pipeline
 ```
 
 ---
 
-## Monitoring with Flower
+## Monitoring
+
+### Microservices (Grafana LGTM)
+
+See [docs/observability.md](observability.md). Dashboards: **Pipeline**, **Infrastructure**, **Logs Explorer**.
+
+### Legacy: Flower
 
 Flower dashboard: [http://localhost:5555](http://localhost:5555)
 

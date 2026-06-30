@@ -1,0 +1,67 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{service=~\"$service\"} | json | job_id=~\"$job_id\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Pipeline logs",
+      "type": "logs"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["dabljaar", "logs"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": ".+" },
+        "name": "service",
+        "options": [
+          { "selected": true, "text": "All", "value": ".+" },
+          { "selected": false, "text": "backend", "value": "backend" },
+          { "selected": false, "text": "orchestrator", "value": "orchestrator" },
+          { "selected": false, "text": "stt", "value": "stt" },
+          { "selected": false, "text": "nmt", "value": "nmt" },
+          { "selected": false, "text": "tts", "value": "tts" },
+          { "selected": false, "text": "media", "value": "media" }
+        ],
+        "query": "backend,orchestrator,stt,nmt,tts,media",
+        "type": "custom"
+      },
+      {
+        "current": { "selected": true, "text": ".*", "value": ".*" },
+        "name": "job_id",
+        "options": [{ "selected": true, "text": ".*", "value": ".*" }],
+        "query": ".*",
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "Logs Explorer",
+  "uid": "dablja-logs",
+  "version": 1
+}

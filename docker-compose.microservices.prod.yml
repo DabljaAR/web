@@ -36,6 +36,8 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required for production}
       ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required for production}
+      GRAFANA_BASIC_AUTH_USER: ${GRAFANA_BASIC_AUTH_USER:-admin}
+      GRAFANA_BASIC_AUTH_HASH: ${GRAFANA_BASIC_AUTH_HASH:-}
     depends_on:
       backend:
         condition: service_healthy
@@ -85,6 +87,7 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
     volumes:
       - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./infra/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -324,6 +327,8 @@ services:
       NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
       ENVIRONMENT: production
       DEBUG: "false"
+      LOG_JSON_FORMAT: ${LOG_JSON_FORMAT:-true}
+      SERVICE_NAME: backend
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()"]
       interval: 30s
