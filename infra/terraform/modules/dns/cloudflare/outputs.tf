@@ -13,6 +13,11 @@ output "rabbitmq_fqdn" {
   value       = var.include_rabbitmq ? "rabbitmq.${var.app_subdomain}.${var.zone_name}" : null
 }
 
+output "grafana_fqdn" {
+  description = "Grafana observability UI FQDN when include_grafana is true"
+  value       = var.include_grafana ? "grafana.${var.app_subdomain}.${var.zone_name}" : null
+}
+
 output "deploy_hostname" {
   description = "Hostname for GitHub Actions GCP_VM_HOST (stable DNS name)"
   value       = "${var.app_subdomain}.${var.zone_name}"

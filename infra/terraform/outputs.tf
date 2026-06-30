@@ -37,6 +37,11 @@ output "rabbitmq_fqdn" {
   value       = var.dns_enabled ? module.dns_cloudflare[0].rabbitmq_fqdn : null
 }
 
+output "grafana_fqdn" {
+  description = "Grafana observability UI FQDN when DNS is enabled"
+  value       = var.dns_enabled ? module.dns_cloudflare[0].grafana_fqdn : null
+}
+
 # =============================================================================
 # Access Commands
 # =============================================================================

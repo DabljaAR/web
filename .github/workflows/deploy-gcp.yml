@@ -20,8 +20,12 @@ on:
       - libs/dablja-worker/**
       - libs/docker-torch/**
       - docker-compose.microservices.prod.yml
-      - Caddyfile.minimal
+      - docker-compose.observability.yml
+      - infra/observability/**
+      - infra/rabbitmq/enabled_plugins
       - infra/scripts/deploy-production.sh
+      - infra/scripts/lib/**
+      - Caddyfile.minimal
       - .github/workflows/deploy-gcp.yml
 
 permissions:
@@ -166,9 +170,10 @@ jobs:
             echo "| Repository SHA | \`${{ github.sha }}\` |"
             echo "| Target branch | \`${{ env.TARGET_BRANCH }}\` |"
             echo "| Target VM path | \`${{ env.APP_DIR }}\` |"
-            echo "| Compose file | \`docker-compose.microservices.prod.yml\` |"
+            echo "| Compose file | \`docker-compose.microservices.prod.yml\` (+ observability overlay when \`GRAFANA_ADMIN_PASSWORD\` is set on VM) |"
             echo "| Deploy script | \`infra/scripts/deploy-production.sh\` |"
             echo "| Deploy log on VM | \`${{ env.APP_DIR }}/deploy.log\` |"
+            echo "| Grafana (when enabled) | \`https://grafana.\$DOMAIN\` — see VM \`.env.production\` |"
             echo ""
             echo "> Timing breakdown (frontend_build / compose_up / health_gates) is emitted"
             echo "> to the VM deploy log: \`tail -20 ~/web/deploy.log\`"

@@ -286,6 +286,12 @@ variable "dns_proxied" {
   default     = false
 }
 
+variable "dns_include_grafana" {
+  description = "Create grafana.<app_subdomain> A record (needed when observability overlay is enabled)"
+  type        = bool
+  default     = true
+}
+
 # =============================================================================
 # Secret Manager (bootstrap)
 # =============================================================================

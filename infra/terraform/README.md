@@ -15,7 +15,7 @@ Follow the steps **in order**. Skipping or reordering steps (especially DNS befo
 | VM + data disk | Docker Compose host |
 | GCS bucket | Model/media object storage |
 | Secret Manager (optional) | `env-production`, `github-deploy-key` |
-| Cloudflare A records (optional) | `app.yourbrand.tech`, `rabbitmq.app.yourbrand.tech` |
+| Cloudflare A records (optional) | `app.yourbrand.tech`, `rabbitmq.app.yourbrand.tech`, `grafana.app.yourbrand.tech` |
 
 **Not included:** app container deploy, Terraform CI, image registry, backups.
 
@@ -158,7 +158,18 @@ DOMAIN=app.yourbrand.tech
 ACME_EMAIL=you@yourbrand.tech
 ```
 
-Caddy also requests a certificate for `rabbitmq.app.yourbrand.tech` (`Caddyfile.minimal`).
+Caddy also requests certificates for `rabbitmq.app.yourbrand.tech` and (when observability is enabled) `grafana.app.yourbrand.tech` (`Caddyfile.minimal` + `infra/observability/Caddyfile.grafana`).
+
+When enabling observability, also set in `.env.production`:
+
+```env
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=replace-with-strong-password
+GRAFANA_BASIC_AUTH_USER=admin
+GRAFANA_BASIC_AUTH_HASH=replace-with-bcrypt-hash   # caddy hash-password
+```
+
+Run `terraform apply` so `grafana.app.yourbrand.tech` resolves before the first observability deploy. Verify: `dig +short grafana.app.yourbrand.tech`.
 
 You will paste the **full file contents** into the `env-production` secret in step 5.
 

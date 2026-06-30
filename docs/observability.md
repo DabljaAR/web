@@ -2,21 +2,44 @@
 
 Self-hosted LGTM stack (Loki, Grafana, VictoriaMetrics, Tempo) for the microservices production deployment.
 
+## Production deploy path
+
+Observability is **optional**. It activates when `GRAFANA_ADMIN_PASSWORD` is set in the VM's `.env.production` (from Secret Manager `env-production`).
+
+```
+push to main → .github/workflows/deploy-gcp.yml → infra/scripts/deploy-production.sh
+  → assemble Caddyfile.production (with grafana block only when enabled)
+  → Phase B2: loki, victoriametrics, tempo, otel-collector
+  → Phase E2: promtail, exporters, grafana
+  → Phase E3: caddy (TLS for grafana.app.$ZONE)
+  → health gate: https://grafana.$DOMAIN/api/health
+```
+
+**DNS prerequisite:** `grafana.app.yourbrand.tech` must resolve to the VM before the first observability deploy (`terraform apply` with `dns_include_grafana = true`, then `dig +short grafana.app.yourbrand.tech`).
+
+For manual ops commands, use the shared compose helper from repo root:
+
+```bash
+source infra/scripts/lib/compose-env.sh
+$COMPOSE ps
+$COMPOSE logs grafana --tail=50
+```
+
 ## Quick start
 
 ```bash
 # Generate Caddy basic-auth hash for Grafana (run once)
 caddy hash-password --plaintext 'your-strong-password'
 
-# Add to .env.production:
+# Add to .env.production, then upload to Secret Manager and re-deploy:
 #   GRAFANA_ADMIN_USER=admin
 #   GRAFANA_ADMIN_PASSWORD=your-strong-password
 #   GRAFANA_BASIC_AUTH_USER=admin
 #   GRAFANA_BASIC_AUTH_HASH=<output of caddy hash-password>
 
-docker compose --env-file .env.production \
-  -f docker-compose.microservices.prod.yml \
-  -f docker-compose.observability.yml up -d
+source infra/scripts/lib/compose-env.sh
+cat Caddyfile.minimal infra/observability/Caddyfile.grafana > Caddyfile.production
+$COMPOSE up -d --build
 ```
 
 Access:
