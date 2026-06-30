@@ -7,12 +7,11 @@ data "cloudflare_zone" "this" {
 }
 
 locals {
-  a_record_names = var.include_rabbitmq ? {
-    (var.app_subdomain)             = var.target_ip
-    "rabbitmq.${var.app_subdomain}" = var.target_ip
-    } : {
-    (var.app_subdomain) = var.target_ip
-  }
+  a_record_names = merge(
+    { (var.app_subdomain) = var.target_ip },
+    var.include_rabbitmq ? { "rabbitmq.${var.app_subdomain}" = var.target_ip } : {},
+    var.include_grafana ? { "grafana.${var.app_subdomain}" = var.target_ip } : {},
+  )
 }
 
 resource "cloudflare_record" "a" {

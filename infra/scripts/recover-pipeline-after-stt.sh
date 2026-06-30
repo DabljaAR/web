@@ -17,14 +17,20 @@ if [[ -z "$STT_JOB_ID" ]]; then
   exit 1
 fi
 
-COMPOSE=(docker compose --env-file .env.production -f docker-compose.microservices.prod.yml)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
+
+# shellcheck source=lib/compose-env.sh
+source "$SCRIPT_DIR/lib/compose-env.sh"
+
 PAYLOAD=$(printf '{"job_id":"%s","job_type":"STT_TRANSCRIBE","status":"COMPLETED","output_data":{}}' "$STT_JOB_ID")
 
 echo "Publishing job.results.stt COMPLETED for child $STT_JOB_ID ..."
-"${COMPOSE[@]}" exec -T rabbitmq rabbitmqadmin publish \
+$COMPOSE exec -T rabbitmq rabbitmqadmin publish \
   exchange=dablja.jobs.exchange \
   routing_key=job.results.stt \
   payload="$PAYLOAD"
 
 echo "Done. Check orchestrator logs for NMT dispatch:"
-echo "  ${COMPOSE[*]} logs orchestrator --tail=50"
+echo "  $COMPOSE logs orchestrator --tail=50"

@@ -155,6 +155,7 @@ module "dns_cloudflare" {
   app_subdomain    = var.dns_app_subdomain
   target_ip        = module.compute.external_ip
   include_rabbitmq = true
+  include_grafana  = var.dns_include_grafana
   proxied          = var.dns_proxied
 
   depends_on = [module.compute]

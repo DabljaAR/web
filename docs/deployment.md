@@ -56,6 +56,45 @@ docker compose --env-file .env.production -f docker-compose.microservices.prod.y
 docker compose --env-file .env.production -f docker-compose.microservices.prod.yml logs backend --tail=100
 ```
 
+Caddy reads [`Caddyfile.production`](Caddyfile.production), generated on each deploy by [`infra/scripts/deploy-production.sh`](infra/scripts/deploy-production.sh). For a manual bring-up without the deploy script:
+
+```bash
+cp Caddyfile.minimal Caddyfile.production
+```
+
+## Observability overlay (optional)
+
+When `GRAFANA_ADMIN_PASSWORD` is set in `.env.production`, GitHub Actions deploy and [`infra/scripts/deploy-production.sh`](infra/scripts/deploy-production.sh) automatically add `docker-compose.observability.yml` and start the LGTM stack.
+
+**Prerequisites:**
+
+1. DNS: `grafana.app.$ZONE` → VM IP (`terraform output grafana_fqdn` after apply with `dns_include_grafana = true`)
+2. Secrets in `.env.production` (upload to Secret Manager `env-production`):
+
+```env
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=<strong>
+GRAFANA_BASIC_AUTH_USER=admin
+GRAFANA_BASIC_AUTH_HASH=<caddy hash-password output>
+```
+
+**Manual start** (same compose selection as deploy):
+
+```bash
+source infra/scripts/lib/compose-env.sh
+cat Caddyfile.minimal infra/observability/Caddyfile.grafana > Caddyfile.production
+$COMPOSE up -d --build
+```
+
+**URLs after deploy:**
+
+| UI | URL |
+|----|-----|
+| Grafana | `https://grafana.$DOMAIN` |
+| RabbitMQ | `https://rabbitmq.$DOMAIN` |
+
+See [observability.md](observability.md) for dashboards, LogQL, and alerting.
+
 ### Legacy production compose (Celery — deprecated)
 
 The Celery-based stack remains for rollback only:

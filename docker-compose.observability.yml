@@ -13,6 +13,12 @@ services:
       - ./infra/observability/loki-config.yml:/etc/loki/config.yml:ro
       - loki_data:/loki
     mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3100/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -100,6 +106,12 @@ services:
       - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     depends_on:
       - loki
       - victoriametrics
@@ -163,9 +175,8 @@ services:
     environment:
       GRAFANA_BASIC_AUTH_USER: ${GRAFANA_BASIC_AUTH_USER:-admin}
       GRAFANA_BASIC_AUTH_HASH: ${GRAFANA_BASIC_AUTH_HASH:-}
-    depends_on:
-      grafana:
-        condition: service_started
+    volumes:
+      - ./Caddyfile.production:/etc/caddy/Caddyfile:ro
 
   rabbitmq:
     volumes:

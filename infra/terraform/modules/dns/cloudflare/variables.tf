@@ -19,6 +19,12 @@ variable "include_rabbitmq" {
   default     = true
 }
 
+variable "include_grafana" {
+  description = "Create grafana.<app_subdomain> A record for Caddy grafana.{$DOMAIN} when observability is enabled"
+  type        = bool
+  default     = true
+}
+
 variable "proxied" {
   description = "Cloudflare proxy (orange cloud). Keep false for Caddy ACME on the VM."
   type        = bool
