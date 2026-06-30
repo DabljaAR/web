@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir /tmp/dablja-worker
 # CPU-only PyTorch — must run before requirements-base.txt so pip never pulls CUDA torch from PyPI.
 COPY --from=docker_torch install_cpu.sh verify_cpu_torch.py /tmp/docker-torch/
 RUN chmod +x /tmp/docker-torch/install_cpu.sh \
-    && TORCH_CPU_VERSION=2.2.0 bash /tmp/docker-torch/install_cpu.sh
+    && TORCH_CPU_VERSION=2.6.0 bash /tmp/docker-torch/install_cpu.sh
 
 COPY requirements-base.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \

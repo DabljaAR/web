@@ -295,13 +295,28 @@ class TestSignup:
         with pytest.raises(UserAlreadyExistsException):
             await user_service.signup(sample_user_create)
     
-    async def test_signup_email_exists(self, user_service, mock_user_repo, sample_user_create):
+    async def test_signup_email_exists(self, user_service, mock_user_repo, sample_user_create, sample_user):
         """Test signup with existing email."""
         mock_user_repo.username_exists = AsyncMock(return_value=False)
         mock_user_repo.email_exists = AsyncMock(return_value=True)
-        
+        mock_user_repo.get_by_email = AsyncMock(return_value=sample_user)
+
         with pytest.raises(UserAlreadyExistsException):
             await user_service.signup(sample_user_create)
+
+    async def test_signup_google_only_email_guides_to_google(self, user_service, mock_user_repo, sample_user_create, sample_user):
+        """Signup with an email belonging to a Google-only account should guide to Google."""
+        # A Google-only account has an empty password.
+        google_user = sample_user
+        google_user.password = ""
+        mock_user_repo.username_exists = AsyncMock(return_value=False)
+        mock_user_repo.email_exists = AsyncMock(return_value=True)
+        mock_user_repo.get_by_email = AsyncMock(return_value=google_user)
+
+        with pytest.raises(UserAlreadyExistsException) as exc_info:
+            await user_service.signup(sample_user_create)
+
+        assert "Google" in str(exc_info.value.detail)
 
 
 class TestPasswordByteLimitValidation:
@@ -350,6 +365,114 @@ class TestPasswordByteLimitValidation:
     def test_user_update_rejects_password_over_72_bytes(self):
         with pytest.raises(ValidationError, match="must not exceed 72 bytes"):
             UserUpdate(password="A" * 73, first_name="Updated")
+
+
+@pytest.mark.asyncio
+class TestChangePassword:
+    """Test change_password method, including Google-only accounts."""
+
+    async def test_change_password_with_correct_old_password(self, user_service, mock_user_repo, sample_user):
+        """User with a password can change it when providing the correct old one."""
+        mock_user_repo.get_by_id = AsyncMock(return_value=sample_user)
+        mock_user_repo.db.commit = AsyncMock()
+        mock_user_repo.db.add = Mock()
+
+        result = await user_service.change_password(1, "hashed_password", "NewPassword123!")
+
+        assert result["message"] == "Password changed successfully"
+        user_service.auth_service.verify_password.assert_called_once()
+        user_service.auth_service.get_password_hash.assert_called_once_with("NewPassword123!")
+
+    async def test_change_password_with_wrong_old_password(self, user_service, mock_user_repo, sample_user):
+        """Wrong old password is rejected for users who have a password."""
+        user_service.auth_service.verify_password = Mock(return_value=False)
+        mock_user_repo.get_by_id = AsyncMock(return_value=sample_user)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await user_service.change_password(1, "wrong", "NewPassword123!")
+
+        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+    async def test_change_password_google_only_skips_old_password(self, user_service, mock_user_repo, sample_user):
+        """Google-only users (empty password) can set a password without the old one."""
+        google_user = sample_user
+        google_user.password = ""
+        mock_user_repo.get_by_id = AsyncMock(return_value=google_user)
+        mock_user_repo.db.commit = AsyncMock()
+        mock_user_repo.db.add = Mock()
+
+        result = await user_service.change_password(1, None, "NewPassword123!")
+
+        assert result["message"] == "Password changed successfully"
+        # Old password must NOT be verified since the account has none.
+        user_service.auth_service.verify_password.assert_not_called()
+        user_service.auth_service.get_password_hash.assert_called_once_with("NewPassword123!")
+
+
+@pytest.mark.asyncio
+class TestGoogleAuth:
+    """Test google_auth security handling."""
+
+    async def test_google_auth_links_verified_email_to_existing_user(
+        self, user_service, mock_user_repo, mock_auth_service, sample_user
+    ):
+        """A verified Google email is linked to an existing email-only account."""
+        sample_user.google_id = None
+        mock_auth_service.verify_google_token = AsyncMock(return_value={
+            "sub": "g-123",
+            "email": "test@example.com",
+            "email_verified": "true",
+            "given_name": "Test",
+            "family_name": "User",
+            "picture": "",
+        })
+        mock_user_repo.get_by_google_id = AsyncMock(return_value=None)
+        mock_user_repo.get_by_email = AsyncMock(return_value=sample_user)
+        mock_user_repo.username_exists = AsyncMock(return_value=False)
+        mock_user_repo.db.commit = AsyncMock()
+        mock_user_repo.db.add = Mock()
+        mock_user_repo.db.refresh = AsyncMock()
+
+        result = await user_service.google_auth("credential")
+
+        assert sample_user.google_id == "g-123"
+        from app.core.schema import UserLoginResponse
+        assert isinstance(result, UserLoginResponse)
+
+    async def test_google_auth_rejects_unverified_email_link(
+        self, user_service, mock_user_repo, mock_auth_service, sample_user
+    ):
+        """An unverified Google email must not be linked to an existing account."""
+        sample_user.google_id = None
+        mock_auth_service.verify_google_token = AsyncMock(return_value={
+            "sub": "g-123",
+            "email": "test@example.com",
+            "email_verified": "false",
+        })
+        mock_user_repo.get_by_google_id = AsyncMock(return_value=None)
+        mock_user_repo.get_by_email = AsyncMock(return_value=sample_user)
+
+        from app.core.exceptions import InvalidCredentialsException
+        with pytest.raises(InvalidCredentialsException):
+            await user_service.google_auth("credential")
+
+    async def test_google_auth_rejects_conflicting_google_id(
+        self, user_service, mock_user_repo, mock_auth_service, sample_user
+    ):
+        """An email already linked to a different Google account must not be taken over."""
+        sample_user.google_id = "other-google-id"
+        mock_auth_service.verify_google_token = AsyncMock(return_value={
+            "sub": "g-123",
+            "email": "test@example.com",
+            "email_verified": "true",
+        })
+        mock_user_repo.get_by_google_id = AsyncMock(return_value=None)
+        mock_user_repo.get_by_email = AsyncMock(return_value=sample_user)
+
+        from app.core.exceptions import InvalidCredentialsException
+        with pytest.raises(InvalidCredentialsException):
+            await user_service.google_auth("credential")
+
 
 
 

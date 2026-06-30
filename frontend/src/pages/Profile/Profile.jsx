@@ -434,7 +434,8 @@ const Profile = () => {
               <input
                 type="password"
                 className="form-input"
-                value="••••••••••••"
+                value={user?.has_password === false ? '' : '••••••••••••'}
+                placeholder={user?.has_password === false ? (t('profile.notSet') || 'Not set — click "Change Password" to set one') : '••••••••••••'}
                 disabled
               />
             </div>
@@ -698,6 +699,7 @@ const Profile = () => {
         isOpen={isPasswordModalOpen}
         onClose={() => setIsPasswordModalOpen(false)}
         userId={user?.user_id}
+        hasPassword={user?.has_password !== false}
       />
     </div>
   );

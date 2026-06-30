@@ -4,7 +4,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import api from '../../services/api';
 import './ChangePasswordModal.css';
 
-const ChangePasswordModal = ({ isOpen, onClose, userId }) => {
+const ChangePasswordModal = ({ isOpen, onClose, userId, hasPassword = true }) => {
     const { t } = useTranslation();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -57,10 +57,15 @@ const ChangePasswordModal = ({ isOpen, onClose, userId }) => {
 
         try {
             setLoading(true);
-            await api.post(`/users/${userId}/change-password`, {
-                old_password: formData.oldPassword,
+            const payload = {
                 new_password: formData.newPassword
-            });
+            };
+            // Only send old_password when the user actually has one.
+            // Google-only accounts have no password, so the backend skips verification.
+            if (hasPassword) {
+                payload.old_password = formData.oldPassword;
+            }
+            await api.post(`/users/${userId}/change-password`, payload);
             setSuccess(true);
             setTimeout(() => {
                 onClose();
@@ -82,7 +87,7 @@ const ChangePasswordModal = ({ isOpen, onClose, userId }) => {
         <div className="password-modal-backdrop" onClick={handleBackdropClick}>
             <div className="password-modal-container">
                 <div className="password-modal-header">
-                    <h3>{t('profile.changePassword') || 'Change Password'}</h3>
+                    <h3>{hasPassword ? (t('profile.changePassword') || 'Change Password') : (t('profile.setPassword') || 'Set Password')}</h3>
                     <button className="close-btn" onClick={onClose}>
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -101,18 +106,25 @@ const ChangePasswordModal = ({ isOpen, onClose, userId }) => {
                         <form onSubmit={handleSubmit}>
                             {error && <div className="error-message">{error}</div>}
 
-                            <div className="form-group">
-                                <label className="form-label">{t('profile.oldPassword') || 'Current Password'}</label>
-                                <input
-                                    type="password"
-                                    name="oldPassword"
-                                    className="form-input"
-                                    value={formData.oldPassword}
-                                    onChange={handleChange}
-                                    required
-                                    placeholder="••••••••"
-                                />
-                            </div>
+                            {hasPassword && (
+                                <div className="form-group">
+                                    <label className="form-label">{t('profile.oldPassword') || 'Current Password'}</label>
+                                    <input
+                                        type="password"
+                                        name="oldPassword"
+                                        className="form-input"
+                                        value={formData.oldPassword}
+                                        onChange={handleChange}
+                                        required
+                                        placeholder="••••••••"
+                                    />
+                                </div>
+                            )}
+                            {!hasPassword && (
+                                <div className="error-message" style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6' }}>
+                                    {t('profile.setPasswordHint') || 'Your account was created with Google. Set a password to also sign in with email.'}
+                                </div>
+                            )}
 
                             <div className="form-group">
                                 <label className="form-label">{t('profile.newPassword') || 'New Password'}</label>

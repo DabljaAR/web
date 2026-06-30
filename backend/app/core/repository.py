@@ -113,6 +113,11 @@ class UserRepository(BaseRepository):
         user = await self.get_by_username(username)
         return user is not None
     
+    async def get_by_google_id(self, google_id: str) -> Optional[T]:
+        stmt = select(self.model).where(self.model.google_id == google_id)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def email_exists(self, email: str) -> bool:
         user = await self.get_by_email(email)
         return user is not None

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useTranslation } from '../../hooks/useTranslation';
@@ -6,6 +6,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../hooks/useAuth';
 import { authService } from '../../services/authService';
+import { useGoogleAuth } from '../../hooks/useGoogleAuth';
 import { usePageTitle } from '../../hooks/usePageTitle';
 import '../../styles/auth.css';
 
@@ -71,8 +72,30 @@ const Login = () => {
     }
   };
 
-  const handleGoogleLogin = () => {
-    toast(t('login.googleLoginDemo') || 'Google login (Demo)');
+  const handleGoogleLogin = useCallback(async (credential) => {
+    setIsLoading(true);
+    setSubmitError('');
+    try {
+      const response = await authService.googleAuth(credential);
+      if (response.access_token) {
+        login(response.user, response.access_token, response.refresh_token, formData.remember);
+        navigate('/dashboard');
+      }
+    } catch (error) {
+      setSubmitError(error.message || (t('login.loginFailed') || 'Google login failed.'));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [formData.remember, login, navigate, t]);
+
+  const { triggerGoogleSignIn, clientConfigured } = useGoogleAuth(handleGoogleLogin);
+
+  const handleGoogleButtonClick = () => {
+    if (!clientConfigured) {
+      toast(t('login.googleLoginDemo') || 'Google login is currently a demo.');
+      return;
+    }
+    triggerGoogleSignIn();
   };
 
   return (
@@ -207,7 +230,7 @@ const Login = () => {
                 <span>{t('login.orContinue')}</span>
               </div>
 
-              <button type="button" className="btn-google" onClick={handleGoogleLogin}>
+              <button type="button" className="btn-google" onClick={handleGoogleButtonClick} disabled={isLoading}>
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                   <path d="M18 10.2c0-.7 0-1.3-.1-1.8H10v3.4h4.5c-.2 1-.8 1.9-1.6 2.5v2.1h2.6c1.5-1.4 2.4-3.4 2.4-5.8z" fill="#4285F4" />
                   <path d="M10 18.2c2.2 0 4-.7 5.3-1.9l-2.6-2c-.7.5-1.6.8-2.7.8-2.1 0-3.8-1.4-4.5-3.3H2.8v2.1c1.3 2.6 4 4.3 7.2 4.3z" fill="#34A853" />

@@ -6,16 +6,16 @@
 #   RUN bash /tmp/docker-torch/install_cpu.sh
 #
 # Environment (optional):
-#   TORCH_CPU_VERSION        — pin e.g. 2.2.0 (default: 2.2.0)
-#   TORCHVISION_CPU_VERSION  — companion wheel (default: 0.17.0 for torch 2.2.x)
+#   TORCH_CPU_VERSION        — pin e.g. 2.6.0 (default: 2.6.0)
+#   TORCHVISION_CPU_VERSION  — companion wheel (default: 0.21.0 for torch 2.6.x)
 #   TORCHAUDIO_CPU_VERSION   — companion wheel (default: same as TORCH_CPU_VERSION)
 #   PYTORCH_CPU_INDEX        — wheel index (default: https://download.pytorch.org/whl/cpu)
 #   PIP_TIMEOUT         — seconds per pip attempt (default: 600)
 #   PIP_RETRIES         — pip --retries (default: 3)
 set -euo pipefail
 
-TORCH_CPU_VERSION="${TORCH_CPU_VERSION:-2.2.0}"
-TORCHVISION_CPU_VERSION="${TORCHVISION_CPU_VERSION:-0.17.0}"
+TORCH_CPU_VERSION="${TORCH_CPU_VERSION:-2.6.0}"
+TORCHVISION_CPU_VERSION="${TORCHVISION_CPU_VERSION:-0.21.0}"
 TORCHAUDIO_CPU_VERSION="${TORCHAUDIO_CPU_VERSION:-${TORCH_CPU_VERSION}}"
 PYTORCH_CPU_INDEX="${PYTORCH_CPU_INDEX:-https://download.pytorch.org/whl/cpu}"
 PIP_TIMEOUT="${PIP_TIMEOUT:-600}"

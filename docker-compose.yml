@@ -270,6 +270,7 @@ services:
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 60
       REFRESH_TOKEN_EXPIRE_DAYS: 7
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
       STT_SERVICE_URL: "http://stt-service:8001"
       MINIO_ENDPOINT: minio:9000
@@ -305,6 +306,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api}
+        VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
     container_name: dabljaar_frontend
     ports:
       - "5173:5173"
