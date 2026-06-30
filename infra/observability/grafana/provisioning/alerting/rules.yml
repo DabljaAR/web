@@ -1,0 +1,212 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: dabljaar-alerts
+    folder: DabljaAR
+    interval: 1m
+    rules:
+      - uid: dlq-nonempty
+        title: DLQ has messages
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              expr: rabbitmq_queue_messages{queue="orchestrator.dlq"} > 0
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: A
+              refId: C
+              type: threshold
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Poison messages in orchestrator DLQ
+
+      - uid: queue-backlog
+        title: Pipeline queue backlog
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              expr: max(rabbitmq_queue_messages{queue=~"stage\\..*"}) > 20
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: A
+              refId: C
+              type: threshold
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: A pipeline stage queue has more than 20 pending messages
+
+      - uid: job-failure-rate
+        title: High pipeline job failure rate
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              expr: >-
+                sum(rate(dablja_jobs_completed_total{status="FAILED"}[1h]))
+                /
+                sum(rate(dablja_jobs_completed_total[1h])) > 0.05
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: A
+              refId: C
+              type: threshold
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 5% of pipeline jobs failed in the last hour
+
+      - uid: disk-low
+        title: Host disk space low
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              expr: >-
+                (node_filesystem_avail_bytes{mountpoint="/"}
+                / node_filesystem_size_bytes{mountpoint="/"}) < 0.15
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: A
+              refId: C
+              type: threshold
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Root filesystem has less than 15% free space
+
+      - uid: service-down
+        title: Scrape target down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: victoriametrics
+            model:
+              expr: up{job=~"backend|orchestrator|stt|nmt|tts|media"} == 0
+              instant: true
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              expression: A
+              refId: C
+              type: threshold
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: A core service metrics endpoint is unreachable

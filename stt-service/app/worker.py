@@ -286,6 +286,8 @@ def on_message(channel, method, _properties, body):
         process_fn=lambda: process_stt_job(job_id),
         mark_failure_fn=_handle_failure,
         service_name="STT",
+        stage="stt",
+        trace_carrier=_properties.headers if _properties else None,
     )
 
 

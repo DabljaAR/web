@@ -347,6 +347,8 @@ def on_message(channel, method, _properties, body):
             process_fn=lambda: process_tts_job(job_id, cancelled_flag),
             mark_failure_fn=_handle_failure,
             service_name="TTS",
+            stage="tts",
+            trace_carrier=_properties.headers if _properties else None,
         )
     finally:
         stop_event.set()

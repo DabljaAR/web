@@ -11,6 +11,8 @@ from typing import Optional
 import pika
 from pika.exceptions import AMQPConnectionError, AMQPError, ChannelWrongStateError, StreamLostError
 
+from dablja_worker.tracing import inject_trace_headers
+
 logger = logging.getLogger(__name__)
 
 EXCHANGE = "dablja.jobs.exchange"
@@ -46,6 +48,7 @@ def publish_result(
     if error:
         payload["error"] = error
 
+    headers = inject_trace_headers()
     channel.basic_publish(
         exchange=EXCHANGE,
         routing_key=routing_key,
@@ -53,6 +56,7 @@ def publish_result(
         properties=pika.BasicProperties(
             content_type="application/json",
             delivery_mode=2,  # persistent
+            headers=headers or None,
         ),
     )
     logger.info("[worker] Published %s for job %s to %s", status, job_id, routing_key)

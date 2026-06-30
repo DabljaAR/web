@@ -471,6 +471,8 @@ def on_message(channel, method, _properties, body):
             is_cancelled_error=lambda exc: isinstance(exc, RuntimeError)
             and "cancelled" in str(exc).lower(),
             service_name="NMT",
+            stage="nmt",
+            trace_carrier=_properties.headers if _properties else None,
         )
     finally:
         stop_event.set()

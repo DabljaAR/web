@@ -16,6 +16,7 @@ from app.core.rate_limiter import limiter
 from app.core.router import router as core_router
 from app.core.db import connect_to_db, disconnect_from_db
 from app.shared.logging import setup_logging
+from app.shared.telemetry import setup_observability
 from app.tasks.router import router as tasks_router
 
 _INSTALL_AI = os.getenv("INSTALL_AI", "false").lower() == "true"
@@ -138,6 +139,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+setup_observability(app)
 
 # ---------------------------------------------------------------------------
 # Routers  (each registered exactly once)

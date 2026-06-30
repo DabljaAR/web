@@ -4,15 +4,16 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from prometheus_client import make_asgi_app
 
 from app.config import settings
 from app.synthesize import router as synthesize_router
 from app.worker import start_consumer
+from dablja_worker.logging import setup_logging
+from dablja_worker.tracing import setup_tracing
 
-logging.basicConfig(
-    level=settings.LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(name)s \u2014 %(message)s",
-)
+setup_logging("tts", level=settings.LOG_LEVEL)
+setup_tracing("tts")
 logger = logging.getLogger(__name__)
 
 _consumer_thread: threading.Thread | None = None
@@ -37,6 +38,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(synthesize_router)
+app.mount("/metrics", make_asgi_app())
 
 
 @app.get("/health", summary="Liveness check")

@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional
+import time
+from typing import Any, Callable, Mapping, Optional
 
 from sqlalchemy import text
 
 from dablja_worker.heartbeat import run_with_heartbeat
 from dablja_worker.job_state import is_completed, mark_failed
+from dablja_worker.metrics import JOBS_COMPLETED, STAGE_DURATION
 from dablja_worker.results import publish_result_reliable
+from dablja_worker.tracing import trace_stage
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +97,43 @@ def finish_job_message(
     mark_failure_fn: Optional[Callable[[str, Exception], None]] = None,
     is_cancelled_error: Optional[Callable[[Exception], bool]] = None,
     service_name: str = "worker",
+    stage: str = "",
+    trace_carrier: Optional[Mapping[Any, Any]] = None,
 ) -> None:
     """Run a pipeline job, publish WorkerResultPayload reliably, and ack safely."""
+    stage_name = stage or service_name.lower()
+    with trace_stage(service_name, stage_name, job_id, carrier=trace_carrier):
+        _finish_job_message_inner(
+            channel=channel,
+            delivery_tag=delivery_tag,
+            rabbitmq_url=rabbitmq_url,
+            result_routing_key=result_routing_key,
+            job_id=job_id,
+            job_type=job_type,
+            session_factory=session_factory,
+            process_fn=process_fn,
+            mark_failure_fn=mark_failure_fn,
+            is_cancelled_error=is_cancelled_error,
+            service_name=service_name,
+            stage_name=stage_name,
+        )
+
+
+def _finish_job_message_inner(
+    *,
+    channel,
+    delivery_tag: int,
+    rabbitmq_url: str,
+    result_routing_key: str,
+    job_id: str,
+    job_type: str,
+    session_factory,
+    process_fn: Callable[[], dict],
+    mark_failure_fn: Optional[Callable[[str, Exception], None]] = None,
+    is_cancelled_error: Optional[Callable[[Exception], bool]] = None,
+    service_name: str = "worker",
+    stage_name: str = "worker",
+) -> None:
     with session_factory() as db:
         already_done = is_completed(db, job_id)
     if already_done:
@@ -115,13 +153,20 @@ def finish_job_message(
     connection = channel.connection
     summary: Optional[dict] = None
     processing_error: Optional[Exception] = None
+    started = time.monotonic()
 
     try:
         summary = run_with_heartbeat(connection, process_fn)
     except Exception as exc:
         processing_error = exc
         if is_cancelled_error and is_cancelled_error(exc):
-            logger.info("[%s] Job %s cancelled — acking without result publish", service_name, job_id)
+            logger.info(
+                "[%s] Job %s cancelled — acking without result publish",
+                service_name,
+                job_id,
+                extra={"status": "CANCELLED"},
+            )
+            JOBS_COMPLETED.labels(stage=stage_name, status="CANCELLED").inc()
             safe_ack(channel, delivery_tag)
             return
 
@@ -161,6 +206,8 @@ def finish_job_message(
             "FAILED",
             error=str(processing_error),
         )
+        JOBS_COMPLETED.labels(stage=stage_name, status="FAILED").inc()
+        STAGE_DURATION.labels(stage=stage_name).observe(time.monotonic() - started)
         safe_ack(channel, delivery_tag)
         return
 
@@ -172,6 +219,14 @@ def finish_job_message(
             job_type,
             "COMPLETED",
             output_data=summary or {},
+        )
+        JOBS_COMPLETED.labels(stage=stage_name, status="COMPLETED").inc()
+        STAGE_DURATION.labels(stage=stage_name).observe(time.monotonic() - started)
+        logger.info(
+            "[%s] Job %s completed",
+            service_name,
+            job_id,
+            extra={"status": "COMPLETED", "duration_ms": int((time.monotonic() - started) * 1000)},
         )
     except Exception as pub_exc:
         with session_factory() as db:

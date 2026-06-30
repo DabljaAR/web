@@ -287,6 +287,8 @@ def on_message(channel, method, _properties, body):
         process_fn=lambda: process_merge_job(job_id),
         mark_failure_fn=_mark_failure,
         service_name="MERGE",
+        stage="merge",
+        trace_carrier=_properties.headers if _properties else None,
     )
 
 

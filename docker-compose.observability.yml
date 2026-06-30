@@ -1,0 +1,220 @@
+# Observability overlay — Loki, Grafana, VictoriaMetrics, Tempo, exporters.
+#
+#   docker compose --env-file .env.production \
+#     -f docker-compose.microservices.prod.yml \
+#     -f docker-compose.observability.yml up -d
+
+services:
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: dabljaar_loki
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./infra/observability/loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    mem_limit: 512m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  promtail:
+    image: grafana/promtail:3.4.2
+    container_name: dabljaar_promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./infra/observability/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    mem_limit: 128m
+    depends_on:
+      - loki
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.109.1
+    container_name: dabljaar_victoriametrics
+    command:
+      - "--storageDataPath=/storage"
+      - "--retentionPeriod=15d"
+      - "--promscrape.config=/etc/vm/scrape.yml"
+      - "--promscrape.config.strictParse=false"
+      - "--httpListenAddr=:8428"
+    volumes:
+      - ./infra/observability/victoriametrics/scrape.yml:/etc/vm/scrape.yml:ro
+      - vm_data:/storage
+    mem_limit: 512m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    container_name: dabljaar_tempo
+    command: ["-config.file=/etc/tempo/config.yml"]
+    volumes:
+      - ./infra/observability/tempo-config.yml:/etc/tempo/config.yml:ro
+      - tempo_data:/tmp/tempo
+    mem_limit: 384m
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    container_name: dabljaar_otel_collector
+    command: ["--config=/etc/otel-collector.yml"]
+    volumes:
+      - ./infra/observability/otel-collector.yml:/etc/otel-collector.yml:ro
+    mem_limit: 128m
+    depends_on:
+      - tempo
+      - victoriametrics
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: dabljaar_grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required when observability stack is enabled}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_UNIFIED_ALERTING_ENABLED: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    mem_limit: 256m
+    depends_on:
+      - loki
+      - victoriametrics
+      - tempo
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  node_exporter:
+    image: prom/node-exporter:v1.9.0
+    container_name: dabljaar_node_exporter
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    mem_limit: 64m
+    pid: host
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.51.0
+    container_name: dabljaar_cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    mem_limit: 128m
+    privileged: true
+    restart: unless-stopped
+    networks:
+      - dabljaar_network
+
+  postgres_exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    container_name: dabljaar_postgres_exporter
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}?sslmode=disable
+    mem_limit: 64m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
+  caddy:
+    environment:
+      GRAFANA_BASIC_AUTH_USER: ${GRAFANA_BASIC_AUTH_USER:-admin}
+      GRAFANA_BASIC_AUTH_HASH: ${GRAFANA_BASIC_AUTH_HASH:-}
+    depends_on:
+      grafana:
+        condition: service_started
+
+  rabbitmq:
+    volumes:
+      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./infra/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  backend:
+    environment:
+      LOG_JSON_FORMAT: "true"
+      SERVICE_NAME: backend
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: backend
+
+  orchestrator:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: orchestrator
+
+  stt-service:
+    environment:
+      LOG_JSON_FORMAT: "true"
+      SERVICE_NAME: stt
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: stt
+
+  nmt-service:
+    environment:
+      LOG_JSON_FORMAT: "true"
+      SERVICE_NAME: nmt
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: nmt
+
+  tts-service:
+    environment:
+      LOG_JSON_FORMAT: "true"
+      SERVICE_NAME: tts
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: tts
+
+  media-service:
+    environment:
+      LOG_JSON_FORMAT: "true"
+      SERVICE_NAME: media
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_SERVICE_NAME: media
+
+volumes:
+  loki_data:
+  grafana_data:
+  vm_data:
+  tempo_data:

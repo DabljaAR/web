@@ -172,6 +172,10 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 COMPOSE_FILES="-f docker-compose.microservices.prod.yml"
+if grep -q '^GRAFANA_ADMIN_PASSWORD=.' "$ENV_FILE" 2>/dev/null; then
+  COMPOSE_FILES="$COMPOSE_FILES -f docker-compose.observability.yml"
+  log "Observability overlay enabled (GRAFANA_ADMIN_PASSWORD set)"
+fi
 COMPOSE="$COMPOSE_CMD --env-file $ENV_FILE $COMPOSE_FILES"
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const serviceName = "orchestrator"
@@ -67,6 +69,7 @@ func NewServer(
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/readiness", s.handleReadiness)
+	mux.Handle("/metrics", promhttp.Handler())
 
 	s.httpSrv = &http.Server{
 		Addr:         ":" + port,

@@ -6,17 +6,18 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import make_asgi_app
 
 from app.config import settings
 from app import db
 from app.routes.videos import router as videos_router
 from app.routes.ffmpeg_ops import router as ffmpeg_router
 from app.worker import start_consumer
+from dablja_worker.logging import setup_logging
+from dablja_worker.tracing import setup_tracing
 
-logging.basicConfig(
-    level=settings.LOG_LEVEL,
-    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-)
+setup_logging("media", level=settings.LOG_LEVEL)
+setup_tracing("media")
 logger = logging.getLogger(__name__)
 
 _consumer_thread: threading.Thread | None = None
@@ -53,6 +54,7 @@ app.add_middleware(
 
 app.include_router(videos_router)
 app.include_router(ffmpeg_router)
+app.mount("/metrics", make_asgi_app())
 
 
 @app.get("/health", summary="Liveness check")
