@@ -1,28 +1,70 @@
 # DabljaAR Frontend
 
-The DabljaAR site frontend. built with React and Vite.
+React SPA for the DabljaAR AI dubbing platform — landing page, authentication, media upload dashboard, job tracking, and result playback.
 
-### File Structure
-- `src/`: Contains the source code for the frontend application.
-  - `components/`: Reusable React components.
-  - `pages/`: Different pages of the application.
-  - `assets/`: Static assets like images and styles.
-  - `App.jsx`: Main application component.
-  - `main.jsx`: Entry point for the React application.
+For full system architecture, see the [root README](../README.md).
 
+## Features
 
-### Getting Started
+- **Landing page** — hero, problem statement, how-it-works workflow, team section, demo CTA
+- **Authentication** — login, register, JWT token management, protected routes
+- **Dashboard** — upload video, audio, or text; import from YouTube; choose output type (captions, translation, TTS, full dubbing)
+- **Job tracking** — poll backend for pipeline progress and display status updates
+- **History** — browse past processing jobs and download results
+- **Media library** — manage uploaded original videos
+- **Profile** — account settings and subscription info
+- **Internationalization** — English and Arabic UI (React context + translation files)
+- **PWA** — installable web app with offline-ready service worker
 
-### Preferred (Ubuntu 22.04)
+## Stack
 
-From the repository root, use the bootstrap script to prepare and run the stack:
+| Layer | Technology |
+|---|---|
+| Framework | React 19 |
+| Build tool | Vite 5 |
+| Routing | React Router 7 |
+| State | Zustand |
+| Styling | Tailwind CSS 4 |
+| HTTP | Fetch-based API service (`src/services/api.js`) |
+| Testing |  Vitest + React Testing Library |
+| Linting | ESLint (flat config) + Prettier |
+
+## Project Structure
+
+```text
+frontend/
+├── public/                  # Static assets, logo, team photos
+├── src/
+│   ├── components/          # Reusable UI (layout, home, common)
+│   ├── pages/               # Route-level views (Dashboard, History, Login, …)
+│   ├── features/            # Feature-scoped logic and components
+│   ├── hooks/               # Custom React hooks (useTranslation, …)
+│   ├── contexts/            # ThemeProvider, LanguageProvider
+│   ├── services/            # API client and auth token handling
+│   ├── store/               # Zustand global state
+│   ├── utils/               # Constants, translations, helpers
+│   ├── styles/              # Global and page-specific CSS
+│   ├── data/                # Static data (team members)
+│   ├── test/                # Test setup and utilities
+│   ├── App.jsx              # Router and lazy-loaded page routes
+│   └── main.jsx             # React entry point
+├── vite.config.ts
+├── eslint.config.js
+└── package.json
+```
+
+## Getting Started
+
+### Preferred (full stack)
+
+From the repository root:
 
 ```bash
 ./start.sh setup
 ./start.sh run
 ```
 
-To work with frontend logs and lifecycle:
+Frontend logs and lifecycle:
 
 ```bash
 ./start.sh logs frontend
@@ -30,45 +72,49 @@ To work with frontend logs and lifecycle:
 ./start.sh stop
 ```
 
-**Prerequisites**:
-- Node.js (version 20 or later): Node 24.x is recommended.
-- npm (comes with Node.js)
+### Frontend only
 
-1. **Install Dependencies**:  
-   Navigate to the `frontend` directory and run:
-   ```bash
-   npm install
-   ```
+**Prerequisites:** Node.js 20+ (24.x recommended), npm
 
-2. **Run the Development Server**:  
-   Start the development server with:
-   ```bash
-   npm run dev
-   ```
-   The application will be available at `http://localhost:5173` by default.
+```bash
+cd frontend
+npm ci
+npm run dev
+```
 
-3. **Build for Production**:  
-   To create a production build, run:
-   ```bash
-   npm run build
-   ```
-   The optimized files will be in the `dist` directory.
+The app is available at `http://localhost:5173`. Requires the backend API running at `http://localhost:8000`.
 
-4. **Preview the Production Build**:  
-   To preview the production build locally, run:
-   ```bash
-   npm run preview
-   ```
-    This will serve the files from the `dist` directory.
+### Production build
 
-### Additional Scripts
-- `npm run lint`: Lints the code using ESLint.
-- `npm run format`: Formats the code using Prettier.
-- `npm run test`: Runs the test suite (if tests are set up).
+```bash
+npm run build        # output in dist/
+npm run preview      # serve dist/ locally
+```
 
-### Configuration
-- **Vite Configuration**: The Vite configuration file is located at `vite.config.ts`.
-- **Environment Variables**: You can create a `.env` file in the `frontend` directory to define environment-specific variables.
+## Scripts
 
-### License
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+| Command | Description |
+|---|---|
+| `npm run dev` | Start Vite dev server |
+| `npm run build` | Production build |
+| `npm run preview` | Preview production build |
+| `npm run lint` | ESLint |
+| `npm run format` | Prettier |
+| `npm test` | Vitest (watch mode) |
+| `npm run test:coverage` | Vitest with coverage report |
+
+## Configuration
+
+- **Vite:** `vite.config.ts`
+- **Environment variables:** create `.env` in this directory (see `.env.example`)
+
+```env
+VITE_API_BASE_URL=http://localhost:8000/api
+```
+
+## Docs
+
+- [Root README](../README.md) — product overview and architecture
+- [`docs/api.md`](../docs/api.md) — backend API reference
+- [`docs/onboarding.md`](../docs/onboarding.md) — full-stack developer setup
+- [`AGENTS.md`](AGENTS.md) — conventions for AI agents working in this project
