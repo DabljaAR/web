@@ -273,7 +273,7 @@ build_frontend_atomic() {
     -e VITE_API_BASE_URL=/api \
     -e VITE_BUILD_OUTDIR=dist.next \
     node:24-alpine \
-    sh -c "npm ci --legacy-peer-deps && npm run build"
+    sh -c "npm ci --legacy-peer-deps && npx tsc -b && npx vite build --outDir dist.next"
   frontend_build_end="$(date +%s)"
   frontend_build_seconds="$((frontend_build_end - frontend_build_start))"
 
