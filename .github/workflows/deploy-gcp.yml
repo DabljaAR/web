@@ -29,7 +29,10 @@ permissions:
 
 concurrency:
   group: production-deploy
-  cancel-in-progress: true
+  # Never cancel an in-progress deployment — a cancelled deploy mid-run can
+  # leave the VM in a partial state (some containers on new images, others not,
+  # migrations half-applied). Subsequent runs queue instead of clobbering.
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -88,6 +91,8 @@ jobs:
           set -euo pipefail
           VM_PORT="${VM_PORT:-22}"
 
+          # Shell-quote all values before embedding them in the remote heredoc so
+          # that special characters in commit messages / paths don't break the script.
           _q_target_branch=$(printf '%q' "$TARGET_BRANCH")
           _q_app_dir=$(printf '%q' "$APP_DIR")
           _q_env_file=$(printf '%q' "$ENV_FILE")
@@ -98,6 +103,9 @@ jobs:
           _q_repo_ssh_url=$(printf '%q' "$REPO_SSH_URL")
           _q_repo_fallback=$(printf '%q' "$REPO_FALLBACK")
 
+          # The heredoc only sets environment variables and delegates ALL git
+          # operations and deployment logic to deploy-production.sh. Do NOT
+          # duplicate git fetch/checkout here — the script owns git sync.
           ssh -p "$VM_PORT" "$VM_USER@$VM_HOST" bash -se <<REMOTE_EOF
           set -euo pipefail
           export TARGET_BRANCH=${_q_target_branch}
@@ -110,6 +118,7 @@ jobs:
           export REPO_SSH_URL=${_q_repo_ssh_url}
           export REPO_FALLBACK=${_q_repo_fallback}
 
+          # Expand tilde so the script receives an absolute path.
           case "\$APP_DIR" in
             "~"|"~/"*) APP_DIR="\${HOME}\${APP_DIR#\\~}" ;;
           esac
@@ -117,6 +126,9 @@ jobs:
 
           mkdir -p "\$APP_DIR"
 
+          # Bootstrap: clone repo if the directory has no .git yet.
+          # All subsequent git operations (fetch/checkout/reset) are handled
+          # inside deploy-production.sh via sync_repository().
           if [ ! -d "\$APP_DIR/.git" ]; then
             REPO_URL="\${REPO_SSH_URL:-\$REPO_FALLBACK}"
             if [ -n "\$(ls -A "\$APP_DIR" 2>/dev/null || true)" ] && [ "\${DEPLOY_FORCE_CLONE:-false}" != "true" ]; then
@@ -132,29 +144,32 @@ jobs:
           fi
 
           cd "\$APP_DIR"
-
-          if ! git fetch --prune origin "\$TARGET_BRANCH"; then
-            echo "git fetch failed. Remote configuration:"
-            git remote -v || true
-            exit 1
-          fi
-
-          git checkout -B "\$TARGET_BRANCH" "\$DEPLOY_SHA"
-          git reset --hard "\$DEPLOY_SHA"
-
           exec bash infra/scripts/deploy-production.sh
           REMOTE_EOF
 
       - name: Deployment summary
+        if: always()
+        env:
+          DEPLOY_STATUS: ${{ job.status }}
         run: |
           {
-            echo "## Production Deployment"
-            echo "- Workflow: deploy-gcp"
-            echo "- Trigger: ${{ github.event_name }}"
-            echo "- Repository SHA: ${{ github.sha }}"
-            echo "- Target branch: ${{ env.TARGET_BRANCH }}"
-            echo "- Target VM path: ${{ env.APP_DIR }}"
-            echo "- Compose profile: docker-compose.microservices.prod.yml"
-            echo "- Deploy script: \`infra/scripts/deploy-production.sh\`"
-            echo "- Deploy log on VM: \`${{ env.APP_DIR }}/deploy.log\`"
+            if [ "$DEPLOY_STATUS" = "success" ]; then
+              echo "## ✅ Production Deployment Succeeded"
+            else
+              echo "## ❌ Production Deployment Failed"
+            fi
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Workflow | deploy-gcp |"
+            echo "| Trigger | ${{ github.event_name }} |"
+            echo "| Repository SHA | \`${{ github.sha }}\` |"
+            echo "| Target branch | \`${{ env.TARGET_BRANCH }}\` |"
+            echo "| Target VM path | \`${{ env.APP_DIR }}\` |"
+            echo "| Compose file | \`docker-compose.microservices.prod.yml\` |"
+            echo "| Deploy script | \`infra/scripts/deploy-production.sh\` |"
+            echo "| Deploy log on VM | \`${{ env.APP_DIR }}/deploy.log\` |"
+            echo ""
+            echo "> Timing breakdown (frontend_build / compose_up / health_gates) is emitted"
+            echo "> to the VM deploy log: \`tail -20 ~/web/deploy.log\`"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -156,6 +156,9 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    # AI services need time to finish in-flight requests and flush model state.
+    stop_grace_period: 120s
+    mem_limit: ${STT_MEM_LIMIT:-8g}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -199,6 +202,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    stop_grace_period: 120s
+    mem_limit: ${NMT_MEM_LIMIT:-4g}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -239,6 +244,9 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    # TTS loads large models; allow time to finish in-flight synthesis jobs.
+    stop_grace_period: 180s
+    mem_limit: ${TTS_MEM_LIMIT:-10g}
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -292,12 +300,13 @@ services:
     container_name: dabljaar_backend
     ports: []
     volumes: []
+    # The backend communicates with AI services via RabbitMQ and HTTP; it does
+    # not require them to be healthy at startup. Removing the tts-service
+    # dependency prevents the 10-minute model-warm-up from blocking the API.
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
-        condition: service_healthy
-      tts-service:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
     environment:
@@ -321,6 +330,7 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    stop_grace_period: 30s
     tmpfs:
       - /tmp
     restart: unless-stopped

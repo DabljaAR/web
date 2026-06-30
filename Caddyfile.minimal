@@ -36,6 +36,21 @@
         }
     }
 
+    # Hashed static assets (filenames contain a content hash from Vite's build):
+    # serve with immutable long-lived cache — browsers can cache indefinitely.
+    @hashed_assets {
+        path /assets/*
+    }
+    header @hashed_assets Cache-Control "public, max-age=31536000, immutable"
+
+    # index.html and other non-hashed entry points must never be cached so
+    # browsers always fetch the latest shell, which then loads the hashed assets.
+    @spa_entry {
+        path /
+        path /index.html
+    }
+    header @spa_entry Cache-Control "no-cache, no-store, must-revalidate"
+
     handle {
         root * /srv
         try_files {path} /index.html
