@@ -80,21 +80,62 @@ Apply migrations after deploy:
 docker compose exec backend alembic upgrade head
 ```
 
-For CI/CD VM deploys ([`.github/workflows/deploy-gcp.yml`](../.github/workflows/deploy-gcp.yml)), the workflow:
+## GCP VM deploy (GitHub Actions)
 
-1. Checks out the exact triggering commit (`GITHUB_SHA`) on the VM
-2. Builds the frontend static assets
-3. Starts `postgres` and `rabbitmq`, builds the backend image, then runs migrations in a one-off `run --no-deps` container (unique name — no conflict with `dabljaar_backend`)
-4. Reconciles the **full** microservices stack:
+Production deploys run via [`.github/workflows/deploy-gcp.yml`](../.github/workflows/deploy-gcp.yml), which SSHs to the VM and invokes [`infra/scripts/deploy-production.sh`](../infra/scripts/deploy-production.sh).
+
+### Deploy flow
+
+1. **Git sync** — `git fetch --prune origin main` then `git checkout -B main $GITHUB_SHA` (VM stays on branch `main`, not detached HEAD)
+2. **Lock** — `flock` prevents overlapping deploys (`~/web/.deploy.lock` or `/var/lock/dabljaar-deploy.lock`)
+3. **Frontend** — atomic build to `frontend/dist.next`, then swap into `frontend/dist` (Caddy never serves an empty `/srv`)
+4. **Validate** — `caddy validate` before touching the running stack
+5. **Infra + migrate** — `postgres` + `rabbitmq`, build backend once, run Alembic in a one-off container
+6. **Reconcile** — `docker compose up -d --build --remove-orphans --wait`
+7. **Edge** — recreate Caddy (`compose up -d caddy`), verify HTTPS API + SPA routes
+
+Deploy logs append to `~/web/deploy.log`. On failure, service logs and `compose ps -a` are printed automatically.
+
+### Manual deploy on the VM
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build --remove-orphans
+cd ~/web
+export DEPLOY_SHA=<commit-sha>          # required
+export REPO_FALLBACK=git@github.com:ORG/REPO.git  # only needed for first clone
+bash infra/scripts/deploy-production.sh
 ```
 
-5. Waits for orchestrator, stage workers (`/readiness`), and backend health (via `compose exec`, not host ports)
-6. Restarts Caddy and verifies edge HTTPS + SPA routes (including `Strict-Transport-Security` on `/`)
+### One-time fix: detached HEAD
 
-Deploy logs are appended to `~/web/deploy.log` on the VM. On failure, service logs and `compose ps -a` are printed automatically.
+If the VM was deployed before this change and shows `(HEAD detached at …)`:
+
+```bash
+cd ~/web
+git fetch --prune origin main
+git checkout -B main "$(git rev-parse HEAD)"
+```
+
+### Verification checklist
+
+After deploy:
+
+```bash
+cd ~/web
+git branch --show-current    # expect: main
+git rev-parse HEAD           # expect: matches GITHUB_SHA
+
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml ps
+# caddy + backend should be healthy even while tts-service is still starting
+
+curl -fsS "https://$(grep ^DOMAIN= .env.production | cut -d= -f2)/api/health"
+curl -fsSI "https://$(grep ^DOMAIN= .env.production | cut -d= -f2)/" | grep -i strict-transport-security
+```
+
+Re-run the deploy script without code changes to confirm idempotency — the second run should succeed without downtime.
+
+### Compose startup order (edge vs pipeline)
+
+The website (`caddy` → `backend` → SPA) starts as soon as **backend** is healthy. AI workers (`stt`, `nmt`, `tts`, `media`) and the orchestrator can still be warming up — dubbing jobs queue in RabbitMQ until workers pass `/readiness`. Caddy no longer depends on RabbitMQ health.
 
 ## Common Issues
 
@@ -119,8 +160,14 @@ tail -200 ~/web/deploy.log
 
 ```bash
 docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build --remove-orphans
-docker compose --env-file .env.production -f docker-compose.microservices.prod.yml restart caddy
+docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d caddy
 curl -sI https://app.dabljaar.tech/ | grep -i strict
+```
+
+Or re-run the full deploy script:
+
+```bash
+cd ~/web && DEPLOY_SHA=$(git rev-parse HEAD) bash infra/scripts/deploy-production.sh
 ```
 
 ### PostgreSQL authentication failed
@@ -149,10 +196,8 @@ Standalone `POST /api/tts/synthesize` proxies to `tts-service` via `TTS_SERVICE_
 
 ## Recommended Deployment Flow
 
-1. Build frontend assets (CI) or ensure `frontend/dist` exists
-2. Start infra (`postgres`, `rabbitmq`)
-3. Run migrations (`compose build backend`, then one-off `run --no-deps` with a unique container name)
-4. Full stack: `docker compose … up -d --build --remove-orphans`
-5. Verify worker `/readiness`, backend health, and Caddy edge routes
+1. Sync git to target commit (`git checkout -B main <sha>`)
+2. Run `infra/scripts/deploy-production.sh` (handles frontend build, migrations, compose reconcile, health gates)
+3. Verify worker `/readiness` for pipeline jobs (site can be up before workers finish cold start)
 
 See also: [microservices_migration.md](microservices_migration.md), [microservices_lld.md](microservices_lld.md).
