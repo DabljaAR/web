@@ -17,8 +17,11 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-def _download_model_from_s3(prefix: str, local_path: str, bucket: str) -> bool:
-    """Download Whisper weights from object storage (parallel per-key downloads)."""
+def _download_model_from_s3(prefix: str, local_path: str, bucket: str) -> int:
+    """Download Whisper weights from object storage (parallel per-key downloads).
+
+    Returns the number of files downloaded.
+    """
     client = boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint(),
@@ -39,7 +42,7 @@ def _download_model_from_s3(prefix: str, local_path: str, bucket: str) -> bool:
             "[STT] Downloaded %d files from s3://%s/%s → %s",
             downloaded, bucket, prefix.strip("/"), local_path,
         )
-    return downloaded > 0
+    return downloaded
 
 
 def _resolve_model_path() -> str:
@@ -54,10 +57,24 @@ def _resolve_model_path() -> str:
     if local and model_key and bucket:
         try:
             os.makedirs(local, exist_ok=True)
-            if _download_model_from_s3(model_key, local, bucket) and _has_model_files(local):
+            downloaded = _download_model_from_s3(model_key, local, bucket)
+            if downloaded == 0:
+                logger.warning(
+                    "[STT] No objects found at s3://%s/%s — check STT_MODEL_KEY prefix and bucket IAM",
+                    bucket,
+                    model_key.strip("/"),
+                )
+            elif _has_model_files(local):
                 logger.info("[STT] Model downloaded from S3 to %s", local)
                 return local
-            logger.warning("[STT] S3 download for %s did not yield a valid model at %s", model_key, local)
+            else:
+                logger.warning(
+                    "[STT] Downloaded %d file(s) from s3://%s/%s but missing model.bin/config.json at %s",
+                    downloaded,
+                    bucket,
+                    model_key.strip("/"),
+                    local,
+                )
         except Exception as exc:
             logger.error("[STT] S3 model download failed: %s", exc)
 

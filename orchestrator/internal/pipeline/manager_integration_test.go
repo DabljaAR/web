@@ -724,6 +724,53 @@ func TestIntegration_T15_StaleFailedAfterCompleted(t *testing.T) {
 	}
 }
 
+// T16: Worker marks child COMPLETED in DB before AMQP result — pipeline must still advance.
+func TestIntegration_T16_WorkerDbFirstCompletedStillAdvances(t *testing.T) {
+	parentID := "inttest-t16-parent"
+	sttID := "inttest-t16-stt"
+
+	global.createJob(t, parentID, db.JobTypeFullDubbingPipeline, nil)
+	global.createJob(t, sttID, db.JobTypeSTTTranscribe, strPtr(parentID))
+
+	now := time.Now().UTC()
+	global.database.Model(&db.Job{}).Where("id = ?", parentID).Updates(map[string]any{
+		"status":     db.JobStatusProcessing,
+		"progress":   25.0,
+		"updated_at": now,
+	})
+	global.database.Model(&db.Job{}).Where("id = ?", sttID).Updates(map[string]any{
+		"status":       db.JobStatusCompleted,
+		"progress":     100.0,
+		"completed_at": now,
+		"updated_at":   now,
+	})
+
+	global.publish(t, "job.results.stt", pipeline.WorkerResultPayload{
+		JobID:      sttID,
+		JobType:    "STT_TRANSCRIBE",
+		Status:     "COMPLETED",
+		OutputData: map[string]any{"segment_count": 5, "language": "en"},
+	})
+
+	time.Sleep(400 * time.Millisecond)
+
+	var nmtChild db.Job
+	err := global.database.
+		Where("parent_job_id = ? AND job_type = ?", parentID, db.JobTypeNMTTranslate).
+		First(&nmtChild).Error
+	if err != nil {
+		t.Fatalf("NMT child not created after STT COMPLETED result: %v", err)
+	}
+	if nmtChild.Status != db.JobStatusQueued {
+		t.Errorf("NMT child status = %s, want QUEUED", nmtChild.Status)
+	}
+
+	parent := global.getJob(parentID)
+	if parent.Progress != 25.0 {
+		t.Errorf("parent progress = %v, want 25.0 after STT stage", parent.Progress)
+	}
+}
+
 // T14: Result arrives before job.created → parent still processes correctly afterwards
 func TestIntegration_T14_OutOfOrderMessages(t *testing.T) {
 	parentID := "inttest-t14-parent"

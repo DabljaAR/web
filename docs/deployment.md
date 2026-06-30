@@ -194,6 +194,42 @@ Verify:
 
 Standalone `POST /api/tts/synthesize` proxies to `tts-service` via `TTS_SERVICE_URL` — no Celery worker required.
 
+### Pipeline stuck after STT (~25% progress)
+
+Symptoms: STT child job is `COMPLETED`, parent stays at ~25%, NMT never starts. Orchestrator logs may show `Duplicate terminal result — ignoring` (fixed in orchestrator — redeploy orchestrator first).
+
+**Recover a stuck job** after orchestrator fix is deployed:
+
+```bash
+# From repo root on prod VM
+chmod +x infra/scripts/recover-pipeline-after-stt.sh
+./infra/scripts/recover-pipeline-after-stt.sh <stt_child_job_id>
+```
+
+Or redeploy orchestrator only:
+
+```bash
+docker compose --env-file .env.production \
+  -f docker-compose.microservices.prod.yml \
+  up -d --build orchestrator
+```
+
+### Whisper model not loading from S3
+
+STT logs may show `No objects found at s3://...` or `missing model.bin/config.json`. Verify bucket layout:
+
+```bash
+chmod +x infra/scripts/verify-whisper-s3-model.sh
+./infra/scripts/verify-whisper-s3-model.sh
+```
+
+Required keys under `STT_MODEL_KEY` (default `whisper-medium/`):
+
+- `model.bin`
+- `config.json`
+
+Align `S3_MODELS_BUCKET` with `terraform output storage_bucket_name`. Set `STT_ALLOW_HF_FALLBACK=false` once S3 cache is valid.
+
 ## Recommended Deployment Flow
 
 1. Sync git to target commit (`git checkout -B main <sha>`)
