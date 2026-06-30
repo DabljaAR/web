@@ -88,54 +88,62 @@ jobs:
           set -euo pipefail
           VM_PORT="${VM_PORT:-22}"
 
-          ssh -p "$VM_PORT" "$VM_USER@$VM_HOST" \
-            env \
-              TARGET_BRANCH="$TARGET_BRANCH" \
-              APP_DIR="$APP_DIR" \
-              ENV_FILE="$ENV_FILE" \
-              BOOTSTRAP_MARKER="$BOOTSTRAP_MARKER" \
-              REQUIRE_BOOTSTRAP_MARKER="$REQUIRE_BOOTSTRAP_MARKER" \
-              DEPLOY_SHA="$DEPLOY_SHA" \
-              DEPLOY_REASON="$DEPLOY_REASON" \
-              REPO_SSH_URL="$REPO_SSH_URL" \
-              REPO_FALLBACK="$REPO_FALLBACK" \
-            bash -se <<'EOF'
-          set -euo pipefail
+          _q_target_branch=$(printf '%q' "$TARGET_BRANCH")
+          _q_app_dir=$(printf '%q' "$APP_DIR")
+          _q_env_file=$(printf '%q' "$ENV_FILE")
+          _q_bootstrap_marker=$(printf '%q' "$BOOTSTRAP_MARKER")
+          _q_require_bootstrap=$(printf '%q' "$REQUIRE_BOOTSTRAP_MARKER")
+          _q_deploy_sha=$(printf '%q' "$DEPLOY_SHA")
+          _q_deploy_reason=$(printf '%q' "$DEPLOY_REASON")
+          _q_repo_ssh_url=$(printf '%q' "$REPO_SSH_URL")
+          _q_repo_fallback=$(printf '%q' "$REPO_FALLBACK")
 
-          case "$APP_DIR" in
-            "~"|"~/"*) APP_DIR="${HOME}${APP_DIR#\~}" ;;
+          ssh -p "$VM_PORT" "$VM_USER@$VM_HOST" bash -se <<REMOTE_EOF
+          set -euo pipefail
+          export TARGET_BRANCH=${_q_target_branch}
+          export APP_DIR=${_q_app_dir}
+          export ENV_FILE=${_q_env_file}
+          export BOOTSTRAP_MARKER=${_q_bootstrap_marker}
+          export REQUIRE_BOOTSTRAP_MARKER=${_q_require_bootstrap}
+          export DEPLOY_SHA=${_q_deploy_sha}
+          export DEPLOY_REASON=${_q_deploy_reason}
+          export REPO_SSH_URL=${_q_repo_ssh_url}
+          export REPO_FALLBACK=${_q_repo_fallback}
+
+          case "\$APP_DIR" in
+            "~"|"~/"*) APP_DIR="\${HOME}\${APP_DIR#\\~}" ;;
           esac
           export APP_DIR
 
-          mkdir -p "$APP_DIR"
+          mkdir -p "\$APP_DIR"
 
-          if [ ! -d "$APP_DIR/.git" ]; then
-            REPO_URL="${REPO_SSH_URL:-$REPO_FALLBACK}"
-            if [ -n "$(ls -A "$APP_DIR" 2>/dev/null || true)" ] && [ "${DEPLOY_FORCE_CLONE:-false}" != "true" ]; then
-              echo "APP_DIR exists without .git and is non-empty: $APP_DIR"
+          if [ ! -d "\$APP_DIR/.git" ]; then
+            REPO_URL="\${REPO_SSH_URL:-\$REPO_FALLBACK}"
+            if [ -n "\$(ls -A "\$APP_DIR" 2>/dev/null || true)" ] && [ "\${DEPLOY_FORCE_CLONE:-false}" != "true" ]; then
+              echo "APP_DIR exists without .git and is non-empty: \$APP_DIR"
               echo "Set DEPLOY_FORCE_CLONE=true to re-clone, or remove the directory manually."
               exit 1
             fi
-            git clone -b "$TARGET_BRANCH" "$REPO_URL" "$APP_DIR" || {
+            git clone -b "\$TARGET_BRANCH" "\$REPO_URL" "\$APP_DIR" || {
               echo "Failed to clone repository. Ensure VM has GitHub SSH access for private repo."
-              echo "Tried URL: $REPO_URL"
+              echo "Tried URL: \$REPO_URL"
               exit 1
             }
           fi
 
-          cd "$APP_DIR"
+          cd "\$APP_DIR"
 
-          if ! git fetch --prune origin "$TARGET_BRANCH"; then
+          if ! git fetch --prune origin "\$TARGET_BRANCH"; then
             echo "git fetch failed. Remote configuration:"
             git remote -v || true
             exit 1
           fi
 
-          git checkout -B "$TARGET_BRANCH" "$DEPLOY_SHA"
-          git reset --hard "$DEPLOY_SHA"
+          git checkout -B "\$TARGET_BRANCH" "\$DEPLOY_SHA"
+          git reset --hard "\$DEPLOY_SHA"
 
           exec bash infra/scripts/deploy-production.sh
-          EOF
+          REMOTE_EOF
 
       - name: Deployment summary
         run: |
