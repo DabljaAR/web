@@ -172,7 +172,7 @@ OBSERVABILITY_MARKER="${HOME}/.observability-bootstrap.done"
 
 assemble_caddyfile() {
   if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
-    cat "$APP_DIR/Caddyfile.minimal" "$APP_DIR/infra/observability/Caddyfile.grafana" > "$CADDY_FILE"
+    { cat "$APP_DIR/Caddyfile.minimal"; echo; cat "$APP_DIR/infra/observability/Caddyfile.grafana"; } > "$CADDY_FILE"
     log "Assembled $CADDY_FILE (app + rabbitmq + grafana)"
   else
     cp "$APP_DIR/Caddyfile.minimal" "$CADDY_FILE"
