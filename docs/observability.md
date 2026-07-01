@@ -38,7 +38,7 @@ caddy hash-password --plaintext 'your-strong-password'
 #   GRAFANA_BASIC_AUTH_HASH=<output of caddy hash-password>
 
 source infra/scripts/lib/compose-env.sh
-cat Caddyfile.minimal infra/observability/Caddyfile.grafana > Caddyfile.production
+{ cat Caddyfile.minimal; echo; cat infra/observability/Caddyfile.grafana; } > Caddyfile.production
 $COMPOSE up -d --build
 ```
 
