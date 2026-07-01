@@ -24,5 +24,9 @@ export const authService = {
   updateUser: async (userId, userData) => {
     return api.put(`/users/${userId}`, userData);
   },
+
+  googleAuth: async (credential) => {
+    return api.post('/auth/google', { credential });
+  },
 };
 

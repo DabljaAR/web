@@ -89,6 +89,8 @@ class User(Base):
         index=True
     )
     
+    google_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True, nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False) #online
     role: Mapped[Optional["Role"]] = relationship("Role", back_populates="users")
     subscriptions: Mapped[List["UserSubscription"]] = relationship("UserSubscription", back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
@@ -96,6 +98,11 @@ class User(Base):
 
     def __repr__(self):
         return f"<User {self.username} (id={self.user_id})>"
+
+    @property
+    def has_password(self) -> bool:
+        """Whether the user has a password set (False for Google-only accounts)."""
+        return bool(self.password)
 
 
 class SubscriptionPlan(Base):

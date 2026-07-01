@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +12,11 @@ from app.core.repository import UserRepository
 from app.core.models import User
 from app.core.db import get_db
 from app.core.exceptions import InvalidCredentialsException, TokenExpiredException
+
+import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Password hashing context
@@ -179,6 +184,31 @@ class AuthService:
         
         return user
     
+    @staticmethod
+    async def verify_google_token(credential: str) -> Dict[str, Any]:
+        """Verify Google ID token and return the payload."""
+        if not settings.GOOGLE_CLIENT_ID:
+            raise InvalidCredentialsException("Google authentication is not configured on the server")
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    "https://oauth2.googleapis.com/tokeninfo",
+                    params={"id_token": credential},
+                )
+                response.raise_for_status()
+                token_info = response.json()
+        except httpx.HTTPStatusError:
+            raise InvalidCredentialsException("Invalid Google token")
+        except httpx.RequestError:
+            raise InvalidCredentialsException("Failed to verify Google token")
+
+        if token_info.get("aud") != settings.GOOGLE_CLIENT_ID:
+            logger.warning("Google token audience mismatch: expected=%s got=%s", settings.GOOGLE_CLIENT_ID, token_info.get("aud"))
+            raise InvalidCredentialsException("Google token audience mismatch")
+
+        return token_info
+
     def create_token_pair(self, user: User) -> Dict[str, str]:
         """
         Create both access and refresh tokens for a user.
@@ -284,14 +314,17 @@ async def get_current_user(
     """
     payload = auth_service.decode_token(token, token_type="access")
     username: str = payload.get("sub")
-    
+
     if username is None:
         raise InvalidCredentialsException("Could not validate credentials")
-    
+
     user = await auth_service.user_repo.get_by_username(username)
     if user is None:
         raise InvalidCredentialsException("User not found")
-    
+
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
+
     return user
 
 
@@ -300,16 +333,16 @@ async def get_current_active_user(
 ) -> User:
     """
     Get the current active user (additional check for active status).
-    
+
     Args:
         current_user: Current user from get_current_user dependency
-        
+
     Returns:
         Current active User object
-        
+
     Raises:
         HTTPException: If user is inactive
     """
-    # Note: User model doesn't have is_active field currently
-    # This is a placeholder for future implementation
+    if not current_user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
     return current_user

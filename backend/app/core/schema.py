@@ -256,7 +256,13 @@ class UserResponse(UserBase):
         description="Whether the user is active",
         examples=[True]
     )
-    
+
+    has_password: bool = Field(
+        ...,
+        description="Whether the user has a password set (False for Google-only accounts)",
+        examples=[True]
+    )
+
     # Preferences
     default_domain: str
     translation_style: str
@@ -306,7 +312,10 @@ class UserPublicResponse(BaseModel):
 
 class PasswordChangeRequest(BaseModel):
     """Schema for password change request."""
-    old_password: str = Field(..., description="Current password")
+    old_password: Optional[str] = Field(
+        None,
+        description="Current password (omit for Google-only accounts setting their first password)"
+    )
     new_password: str = Field(
         ..., 
         min_length=8, 
@@ -367,6 +376,15 @@ class TokenRefresh(BaseModel):
                 "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
             }
         }
+    )
+
+
+class GoogleAuthRequest(BaseModel):
+    """Schema for Google Sign-In request."""
+    credential: str = Field(
+        ...,
+        description="Google ID token from Sign In With Google",
+        examples=["eyJhbGciOiJSUzI1NiIsImtpZCI6..."]
     )
 
 

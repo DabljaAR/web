@@ -10,7 +10,7 @@ from app.core.schema import (
     UserCreate, UserLogin, TokenRefresh, UserLoginResponse, TokenResponse, 
     UserResponse, UserUpdate, PasswordChangeRequest, SubscriptionPlanCreate, SubscriptionPlanResponse,
     SubscriptionPlanUpdate, UserSubscriptionCreate, UserSubscriptionResponse, ForgotPasswordRequest,
-    UserSubscriptionUpdate, PaymentCreate, PaymentResponse, PaymentUpdate
+    UserSubscriptionUpdate, PaymentCreate, PaymentResponse, PaymentUpdate, GoogleAuthRequest
 )
 from app.core.db import get_db
 from app.core.models import User, SubscriptionPlan, UserSubscription, Payment
@@ -150,6 +150,27 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e.detail),
             headers={"WWW-Authenticate": "Bearer"}
+        )
+
+
+@router.post("/auth/google", response_model=UserLoginResponse, tags=["auth"])
+@limiter.limit("5/minute")
+async def google_auth(
+    request: Request,
+    google_data: GoogleAuthRequest,
+    user_service: UserService = Depends(get_user_service)
+):
+    """
+    Sign in or sign up using Google.
+    
+    - **credential**: Google ID token from Sign In With Google
+    """
+    try:
+        return await user_service.google_auth(google_data.credential)
+    except InvalidCredentialsException as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e.detail)
         )
 
 

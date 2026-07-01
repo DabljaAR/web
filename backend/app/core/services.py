@@ -10,6 +10,7 @@ from app.core.schema import (
     UserUpdate,
     UserResponse,
     UserLoginResponse,
+    GoogleAuthRequest,
     SubscriptionPlanCreate,
     SubscriptionPlanUpdate,
     SubscriptionPlanResponse,
@@ -67,16 +68,26 @@ class UserService:
             raise UserAlreadyExistsException(
                 f"Username '{user_data.username}' is already registered"
             )
-        
+
         # Check if email already exists
-        if await self.user_repo.email_exists(user_data.email):
+        existing_user = await self.user_repo.get_by_email(user_data.email)
+        if existing_user:
+            # Google-only accounts have an empty password. They should set a password
+            # from their profile (after signing in with Google) rather than via public
+            # signup, to prevent an attacker from setting a password on someone else's
+            # Google account without proving email ownership.
+            if not existing_user.password:
+                raise UserAlreadyExistsException(
+                    "This email is registered via Google. Please sign in with Google, "
+                    "then set a password from your profile settings."
+                )
             raise UserAlreadyExistsException(
                 f"Email '{user_data.email}' is already registered"
             )
-        
+
         # Hash password
         hashed_password = self.auth_service.get_password_hash(user_data.password)
-        
+
         # Create user model
         db_user = User(
             username=user_data.username,
@@ -95,6 +106,98 @@ class UserService:
         await self.user_repo.db.refresh(db_user)
         
         logger.info(db_user)
+        token_pair = self.auth_service.create_token_pair(db_user)
+        user_response = UserResponse.model_validate(db_user)
+        return UserLoginResponse(
+            access_token=token_pair["access_token"],
+            refresh_token=token_pair["refresh_token"],
+            token_type=token_pair["token_type"],
+            user=user_response
+        )
+
+    async def google_auth(self, credential: str) -> UserLoginResponse:
+        google_payload = await self.auth_service.verify_google_token(credential)
+
+        google_id = google_payload.get("sub")
+        email = google_payload.get("email")
+        email_verified = str(google_payload.get("email_verified", "")).lower() == "true"
+        first_name = google_payload.get("given_name", "")
+        last_name = google_payload.get("family_name", "")
+        picture = google_payload.get("picture", "")
+
+        if not google_id or not email:
+            raise InvalidCredentialsException("Incomplete Google account information")
+
+        # 1. Existing account already linked to this Google identity.
+        user = await self.user_repo.get_by_google_id(google_id)
+
+        if user:
+            user.last_login = datetime.utcnow()
+            self.user_repo.db.add(user)
+            await self.user_repo.db.commit()
+            await self.user_repo.db.refresh(user)
+
+            token_pair = self.auth_service.create_token_pair(user)
+            user_response = UserResponse.model_validate(user)
+            return UserLoginResponse(
+                access_token=token_pair["access_token"],
+                refresh_token=token_pair["refresh_token"],
+                token_type=token_pair["token_type"],
+                user=user_response
+            )
+
+        # 2. An account exists with the same email. Only link when the email is
+        #    verified by Google AND the account is not already linked to a
+        #    different Google identity (prevents account takeover).
+        user = await self.user_repo.get_by_email(email)
+        if user:
+            if user.google_id:
+                raise InvalidCredentialsException(
+                    "This email is already associated with another Google account"
+                )
+            if not email_verified:
+                raise InvalidCredentialsException(
+                    "Google email is not verified. Verify your email with Google first."
+                )
+
+            user.google_id = google_id
+            if not user.avatar_url and picture:
+                user.avatar_url = picture
+            user.last_login = datetime.utcnow()
+            self.user_repo.db.add(user)
+            await self.user_repo.db.commit()
+            await self.user_repo.db.refresh(user)
+
+            token_pair = self.auth_service.create_token_pair(user)
+            user_response = UserResponse.model_validate(user)
+            return UserLoginResponse(
+                access_token=token_pair["access_token"],
+                refresh_token=token_pair["refresh_token"],
+                token_type=token_pair["token_type"],
+                user=user_response
+            )
+
+        base_username = email.split("@")[0].lower()
+        username = base_username
+        suffix = 1
+        while await self.user_repo.username_exists(username):
+            username = f"{base_username}{suffix}"
+            suffix += 1
+
+        db_user = User(
+            username=username,
+            email=email,
+            password="",
+            first_name=first_name,
+            last_name=last_name,
+            google_id=google_id,
+            avatar_url=picture or None,
+        )
+
+        self.user_repo.db.add(db_user)
+        await self.user_repo.db.commit()
+        await self.user_repo.db.refresh(db_user)
+
         token_pair = self.auth_service.create_token_pair(db_user)
         user_response = UserResponse.model_validate(db_user)
         return UserLoginResponse(
@@ -254,13 +357,13 @@ class UserService:
         
         return UserResponse.model_validate(user)
     
-    async def change_password(self, user_id: int, old_password: str, new_password: str) -> dict:
+    async def change_password(self, user_id: int, old_password: Optional[str], new_password: str) -> dict:
         """
         Change user password after verifying the old one.
         
         Args:
             user_id: User ID
-            old_password: Current password
+            old_password: Current password (None for Google-only accounts setting their first password)
             new_password: New password
             
         Returns:
@@ -275,14 +378,17 @@ class UserService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
-            
-        # Verify old password
-        if not self.auth_service.verify_password(old_password, user.password):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect current password"
-            )
-            
+
+        # Google-only accounts have an empty password. They are allowed to set an
+        # initial password without providing the old one (there is none). For users
+        # who already have a password, the old password must be verified.
+        if user.password:
+            if not old_password or not self.auth_service.verify_password(old_password, user.password):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Incorrect current password"
+                )
+
         # Update password
         user.password = self.auth_service.get_password_hash(new_password)
         user.updated_at = datetime.utcnow()
