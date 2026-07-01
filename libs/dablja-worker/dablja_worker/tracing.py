@@ -12,7 +12,7 @@ from opentelemetry.propagate import extract, inject
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk.trace.sampling import ParentBasedTraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
 from dablja_worker.logging import bind_job_context, clear_job_context
 
@@ -56,7 +56,7 @@ def setup_tracing(service_name: str) -> trace.Tracer:
     )
     provider = TracerProvider(
         resource=resource,
-        sampler=ParentBasedTraceIdRatioBased(0.2),
+        sampler=ParentBased(root=TraceIdRatioBased(0.2)),
     )
     provider.add_span_processor(
         BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True))

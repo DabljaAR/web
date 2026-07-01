@@ -10,7 +10,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.sdk.trace.sampling import ParentBasedTraceIdRatioBased
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from prometheus_client import Counter
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -47,7 +47,7 @@ def setup_observability(app) -> None:
     resource = Resource.create({"service.name": service_name})
     provider = TracerProvider(
         resource=resource,
-        sampler=ParentBasedTraceIdRatioBased(0.2),
+        sampler=ParentBased(root=TraceIdRatioBased(0.2)),
     )
     provider.add_span_processor(
         BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True))
