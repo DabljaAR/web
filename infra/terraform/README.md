@@ -8,20 +8,24 @@ Follow the steps **in order**. Skipping or reordering steps (especially DNS befo
 
 ## What Terraform creates
 
-| Resource | Purpose |
-|----------|---------|
-| VPC, firewall, Cloud NAT | Network isolation and egress |
-| Static external IP | Stable target for DNS A records |
-| VM + data disk | Docker Compose host |
-| GCS bucket | Model/media object storage |
-| Secret Manager (optional) | `env-production`, `github-deploy-key` |
+
+| Resource                        | Purpose                                                                           |
+| ------------------------------- | --------------------------------------------------------------------------------- |
+| VPC, firewall, Cloud NAT        | Network isolation and egress                                                      |
+| Static external IP              | Stable target for DNS A records                                                   |
+| VM + data disk                  | Docker Compose host                                                               |
+| GCS bucket                      | Model/media object storage                                                        |
+| Secret Manager (optional)       | `env-production`, `github-deploy-key`                                             |
 | Cloudflare A records (optional) | `app.yourbrand.tech`, `rabbitmq.app.yourbrand.tech`, `grafana.app.yourbrand.tech` |
+
 
 **Not included:** app container deploy, Terraform CI, image registry, backups.
 
-**Observability:** self-hosted on the VM via Docker Compose overlay ([`docs/observability.md`](../../docs/observability.md)) — not GCP Cloud Monitoring. The VM service account has `roles/logging.logWriter` and `roles/monitoring.metricWriter` for optional future GCP agent use, but the default stack is Loki + Grafana + VictoriaMetrics + Tempo.
+**Observability:** self-hosted on the VM via Docker Compose overlay (`[docs/observability.md](../../docs/observability.md)`) — not GCP Cloud Monitoring. The VM service account has `roles/logging.logWriter` and `roles/monitoring.metricWriter` for optional future GCP agent use, but the default stack is Loki + Grafana + VictoriaMetrics + Tempo.
 
 ---
+
+
 
 ## Prerequisites
 
@@ -42,7 +46,11 @@ gcloud config set project YOUR_PROJECT_ID
 
 ---
 
+
+
 ## Setup checklist (in order)
+
+
 
 ### Step 1 — Terraform remote state bucket (one-time)
 
@@ -54,7 +62,7 @@ gsutil mb -l "$REGION" "gs://${PROJECT_ID}-terraform-state" 2>/dev/null || true
 gsutil versioning set on "gs://${PROJECT_ID}-terraform-state"
 ```
 
-Edit [`backend.tf`](backend.tf) if your bucket name differs:
+Edit `[backend.tf](backend.tf)` if your bucket name differs:
 
 ```hcl
 terraform {
@@ -66,6 +74,8 @@ terraform {
 ```
 
 ---
+
+
 
 ### Step 2 — SSH keys (two different keypairs)
 
@@ -88,6 +98,8 @@ Format for Terraform (one line; `USER` must match `deployment_user` in tfvars):
 ubuntu:ssh-ed25519 AAAA...comment gha-vm-deploy
 ```
 
+
+
 #### 2b — VM → GitHub (read-only deploy key)
 
 Used by the VM to `git clone` / `git pull` your private repo.
@@ -105,6 +117,8 @@ The **private** key `github_deploy_key` is read from `GP/keys/github_deploy_key`
 
 ---
 
+
+
 ### Step 3 — Cloudflare zone + get.tech nameservers (one-time)
 
 This enables **free** DNS automation for your `.tech` domain.
@@ -115,6 +129,8 @@ This enables **free** DNS automation for your `.tech` domain.
 2. Enter your apex zone, e.g. `yourbrand.tech`
 3. Select **Free** plan
 4. Cloudflare shows two nameservers, e.g. `ada.ns.cloudflare.com` and `bob.ns.cloudflare.com`
+
+
 
 #### 3b — Point get.tech to Cloudflare
 
@@ -128,6 +144,8 @@ Verify (optional):
 ```bash
 dig +short NS yourbrand.tech
 ```
+
+
 
 #### 3c — Cloudflare API token
 
@@ -147,9 +165,11 @@ echo "$CLOUDFLARE_API_TOKEN" | wc -c   # should be > 1
 
 ---
 
+
+
 ### Step 4 — Production environment file content
 
-Use [`.env.production.example`](../../.env.production.example) as a template.
+Use `[.env.production.example](../../.env.production.example)` as a template.
 
 **Subdomain setup (recommended):**
 
@@ -175,16 +195,20 @@ You will paste the **full file contents** into the `env-production` secret in st
 
 ---
 
+
+
 ### Step 5 — Secret source files
 
-Terraform reads secret **contents from files in `.tf` code** (not from `file()` in `.tfvars` — that is not allowed).
+Terraform reads secret **contents from files in** `.tf` **code** (not from `file()` in `.tfvars` — that is not allowed).
 
 Default paths (relative to `infra/terraform/`):
 
-| Secret | Default file |
-|--------|----------------|
-| `env-production` | `../../.env.production` (repo root) |
-| `github-deploy-key` | `../../../keys/github_deploy_key` |
+
+| Secret              | Default file                        |
+| ------------------- | ----------------------------------- |
+| `env-production`    | `../../.env.production` (repo root) |
+| `github-deploy-key` | `../../../keys/github_deploy_key`   |
+
 
 Ensure both files exist before `terraform apply`.
 
@@ -204,6 +228,8 @@ gcloud secrets versions add github-deploy-key --data-file=../../../keys/github_d
 
 ---
 
+
+
 ### Step 6 — Terraform variables
 
 ```bash
@@ -213,15 +239,17 @@ cp terraform.tfvars.example terraform.tfvars
 
 Edit `terraform.tfvars`. Required changes:
 
-| Variable | Example |
-|----------|---------|
-| `project_id` | your GCP project ID |
-| `environment` | `prod` |
-| `deployment_user` | `ubuntu` (must match SSH key user) |
-| `dns_enabled` | `true` (only after Cloudflare zone is Active) |
-| `dns_zone_name` | `yourbrand.tech` |
-| `dns_app_subdomain` | `app` |
-| `vm_ssh_public_key` | `ubuntu:ssh-ed25519 AAAA...` from step 2a |
+
+| Variable            | Example                                       |
+| ------------------- | --------------------------------------------- |
+| `project_id`        | your GCP project ID                           |
+| `environment`       | `prod`                                        |
+| `deployment_user`   | `ubuntu` (must match SSH key user)            |
+| `dns_enabled`       | `true` (only after Cloudflare zone is Active) |
+| `dns_zone_name`     | `yourbrand.tech`                              |
+| `dns_app_subdomain` | `app`                                         |
+| `vm_ssh_public_key` | `ubuntu:ssh-ed25519 AAAA...` from step 2a     |
+
 
 Recommended:
 
@@ -235,6 +263,8 @@ admin_cidr_blocks      = ["YOUR_IP/32"]  # optional: direct Flower port access
 ```
 
 ---
+
+
 
 ### Step 6b — Pre-apply checks
 
@@ -257,6 +287,8 @@ If `env-production` or `github-deploy-key` already exist, either `terraform impo
 
 ---
 
+
+
 ### Step 7 — Terraform init, plan, apply (first)
 
 ```bash
@@ -273,6 +305,8 @@ terraform apply -var-file=terraform.tfvars
 Wait for VM bootstrap (~5–10 minutes). The plan creates **30 resources** including a new GCS models bucket and deploy SSH firewall rule.
 
 ---
+
+
 
 ### Step 8 — Sync models bucket + secret (required)
 
@@ -300,6 +334,8 @@ gcloud compute ssh "$INSTANCE" --zone="$ZONE" --command "sudo google_metadata_sc
 
 ---
 
+
+
 ### Step 9 — Post-apply verification
 
 ```bash
@@ -317,14 +353,18 @@ gcloud compute ssh "$INSTANCE" --zone="$ZONE" --project="$PROJECT" \
 
 ---
 
+
+
 ### Step 10 — GitHub Actions secrets
 
-| Secret | Value |
-|--------|-------|
-| `GCP_VM_HOST` | `terraform output -raw deploy_hostname` |
-| `GCP_VM_USER` | same as `deployment_user` |
-| `GCP_VM_PORT` | `22` |
-| `GCP_VM_SSH_KEY` | private key from step 2a |
+
+| Secret           | Value                                   |
+| ---------------- | --------------------------------------- |
+| `GCP_VM_HOST`    | `terraform output -raw deploy_hostname` |
+| `GCP_VM_USER`    | same as `deployment_user`               |
+| `GCP_VM_PORT`    | `22`                                    |
+| `GCP_VM_SSH_KEY` | private key from step 2a                |
+
 
 ```bash
 gh secret set GCP_VM_HOST --body "$(terraform output -raw deploy_hostname)"
@@ -334,28 +374,37 @@ gh secret set GCP_VM_SSH_KEY < ./gha_vm_deploy_key
 
 ---
 
+
+
 ### Step 11 — Deploy application
 
 Push to `main` or run the **Deploy to GCP VM** workflow. It checks `https://app.yourbrand.tech/api/health`.
 
 ---
 
+
+
 ## Troubleshooting
 
-| Issue | Fix |
-|-------|-----|
-| Cloudflare plan fails | `export CLOUDFLARE_API_TOKEN=...` in the same terminal; use API Token not Global API Key; zone must be Active |
-| HTTPS / ACME fails | `dns_proxied = false`; DNS must point to VM IP |
-| GHA SSH fails | `enable_deploy_ssh = true`; `enable_oslogin = false`; user matches `vm_ssh_public_key`; check `deploy_ssh` firewall rule exists |
-| Models not loading from GCS | `S3_MODELS_BUCKET` must match `terraform output storage_bucket_name`; HMAC key needs bucket IAM |
-| Git clone on VM fails | Deploy key on GitHub; `github-deploy-key` secret populated |
-| Bootstrap incomplete | `sudo google_metadata_script_runner startup` on VM |
-| Secret already exists | `gcloud secrets list`; import or delete before apply |
+
+| Issue                       | Fix                                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare plan fails       | `export CLOUDFLARE_API_TOKEN=...` in the same terminal; use API Token not Global API Key; zone must be Active                   |
+| HTTPS / ACME fails          | `dns_proxied = false`; DNS must point to VM IP                                                                                  |
+| GHA SSH fails               | `enable_deploy_ssh = true`; `enable_oslogin = false`; user matches `vm_ssh_public_key`; check `deploy_ssh` firewall rule exists |
+| Models not loading from GCS | `S3_MODELS_BUCKET` must match `terraform output storage_bucket_name`; HMAC key needs bucket IAM                                 |
+| Git clone on VM fails       | Deploy key on GitHub; `github-deploy-key` secret populated                                                                      |
+| Bootstrap incomplete        | `sudo google_metadata_script_runner startup` on VM                                                                              |
+| Secret already exists       | `gcloud secrets list`; import or delete before apply                                                                            |
+
 
 ---
+
+
 
 ## Cleanup
 
 ```bash
 terraform destroy -var-file=terraform.tfvars
 ```
+

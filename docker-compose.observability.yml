@@ -61,14 +61,30 @@ services:
     networks:
       - dabljaar_network
 
+  tempo-init:
+    image: grafana/tempo:2.7.1
+    container_name: dabljaar_tempo_init
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c", "chown -R 10001:10001 /var/tempo"]
+    volumes:
+      - tempo_data:/var/tempo
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - dabljaar_network
+
   tempo:
     image: grafana/tempo:2.7.1
     container_name: dabljaar_tempo
     command: ["-config.file=/etc/tempo/config.yml"]
     volumes:
       - ./infra/observability/tempo-config.yml:/etc/tempo/config.yml:ro
-      - tempo_data:/tmp/tempo
+      - tempo_data:/var/tempo
     mem_limit: 384m
+    depends_on:
+      tempo-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
