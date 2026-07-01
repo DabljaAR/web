@@ -54,11 +54,18 @@ export function useGoogleAuth(onCredential) {
       return;
     }
 
+    let cancelled = false;
+
     loadGoogleScript()
-      .then(() => setIsReady(true))
-      .catch((err) => console.error('Google script load failed:', err));
+      .then(() => {
+        if (!cancelled) setIsReady(true);
+      })
+      .catch((err) => {
+        if (!cancelled) console.error('Google script load failed:', err);
+      });
 
     return () => {
+      cancelled = true;
       if (window.google?.accounts?.id) {
         window.google.accounts.id.cancel();
         initializedRef.current = false;

@@ -191,7 +191,7 @@ class AuthService:
             raise InvalidCredentialsException("Google authentication is not configured on the server")
 
         try:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     "https://oauth2.googleapis.com/tokeninfo",
                     params={"id_token": credential},

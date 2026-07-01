@@ -70,13 +70,13 @@ class UserService:
             )
 
         # Check if email already exists
-        if await self.user_repo.email_exists(user_data.email):
+        existing_user = await self.user_repo.get_by_email(user_data.email)
+        if existing_user:
             # Google-only accounts have an empty password. They should set a password
             # from their profile (after signing in with Google) rather than via public
             # signup, to prevent an attacker from setting a password on someone else's
             # Google account without proving email ownership.
-            existing_user = await self.user_repo.get_by_email(user_data.email)
-            if existing_user and not existing_user.password:
+            if not existing_user.password:
                 raise UserAlreadyExistsException(
                     "This email is registered via Google. Please sign in with Google, "
                     "then set a password from your profile settings."
