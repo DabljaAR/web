@@ -170,7 +170,7 @@ jobs:
             echo "| Repository SHA | \`${{ github.sha }}\` |"
             echo "| Target branch | \`${{ env.TARGET_BRANCH }}\` |"
             echo "| Target VM path | \`${{ env.APP_DIR }}\` |"
-            echo "| Compose file | \`docker-compose.microservices.prod.yml\` (+ observability overlay when \`GRAFANA_ADMIN_PASSWORD\` is set on VM) |"
+            echo "| Compose file | \`docker-compose.microservices.prod.yml\` + \`docker-compose.observability.yml\` (LGTM via \`COMPOSE_PROFILES=observability\`) |"
             echo "| Deploy script | \`infra/scripts/deploy-production.sh\` |"
             echo "| Deploy log on VM | \`${{ env.APP_DIR }}/deploy.log\` |"
             echo "| Grafana (when enabled) | \`https://grafana.\$DOMAIN\` — see VM \`.env.production\` |"

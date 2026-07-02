@@ -287,7 +287,7 @@ variable "dns_proxied" {
 }
 
 variable "dns_include_grafana" {
-  description = "Create grafana.<app_subdomain> A record (needed when observability overlay is enabled)"
+  description = "Create grafana.<app_subdomain> A record for Caddy grafana.{$DOMAIN}"
   type        = bool
   default     = true
 }

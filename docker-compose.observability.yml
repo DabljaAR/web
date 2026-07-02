@@ -1,4 +1,5 @@
 # Observability overlay — Loki, Grafana, VictoriaMetrics, Tempo, exporters.
+# Opt-in via COMPOSE_PROFILES=observability in .env.production
 #
 #   docker compose --env-file .env.production \
 #     -f docker-compose.microservices.prod.yml \
@@ -6,6 +7,7 @@
 
 services:
   loki:
+    profiles: [observability]
     image: grafana/loki:3.4.2
     container_name: dabljaar_loki
     command: -config.file=/etc/loki/config.yml
@@ -26,6 +28,7 @@ services:
       - dabljaar_network
 
   promtail:
+    profiles: [observability]
     image: grafana/promtail:3.4.2
     container_name: dabljaar_promtail
     command: -config.file=/etc/promtail/config.yml
@@ -43,6 +46,7 @@ services:
       - dabljaar_network
 
   victoriametrics:
+    profiles: [observability]
     image: victoriametrics/victoria-metrics:v1.109.1
     container_name: dabljaar_victoriametrics
     command:
@@ -62,6 +66,7 @@ services:
       - dabljaar_network
 
   tempo-init:
+    profiles: [observability]
     image: grafana/tempo:2.7.1
     container_name: dabljaar_tempo_init
     user: "0:0"
@@ -75,6 +80,7 @@ services:
       - dabljaar_network
 
   tempo:
+    profiles: [observability]
     image: grafana/tempo:2.7.1
     container_name: dabljaar_tempo
     command: ["-config.file=/etc/tempo/config.yml"]
@@ -92,6 +98,7 @@ services:
       - dabljaar_network
 
   otel-collector:
+    profiles: [observability]
     image: otel/opentelemetry-collector-contrib:0.120.0
     container_name: dabljaar_otel_collector
     command: ["--config=/etc/otel-collector.yml"]
@@ -99,8 +106,10 @@ services:
       - ./infra/observability/otel-collector.yml:/etc/otel-collector.yml:ro
     mem_limit: 128m
     depends_on:
-      - tempo
-      - victoriametrics
+      tempo:
+        condition: service_started
+      victoriametrics:
+        condition: service_started
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -108,11 +117,12 @@ services:
       - dabljaar_network
 
   grafana:
+    profiles: [observability]
     image: grafana/grafana:11.5.2
     container_name: dabljaar_grafana
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is required when observability stack is enabled}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_ROOT_URL: https://grafana.${DOMAIN}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
@@ -139,6 +149,7 @@ services:
       - dabljaar_network
 
   node_exporter:
+    profiles: [observability]
     image: prom/node-exporter:v1.9.0
     container_name: dabljaar_node_exporter
     command:
@@ -159,6 +170,7 @@ services:
       - dabljaar_network
 
   cadvisor:
+    profiles: [observability]
     image: gcr.io/cadvisor/cadvisor:v0.51.0
     container_name: dabljaar_cadvisor
     volumes:
@@ -173,6 +185,7 @@ services:
       - dabljaar_network
 
   postgres_exporter:
+    profiles: [observability]
     image: prometheuscommunity/postgres-exporter:v0.16.0
     container_name: dabljaar_postgres_exporter
     environment:
@@ -186,59 +199,6 @@ services:
       - no-new-privileges:true
     networks:
       - dabljaar_network
-
-  caddy:
-    environment:
-      GRAFANA_BASIC_AUTH_USER: ${GRAFANA_BASIC_AUTH_USER:-admin}
-      GRAFANA_BASIC_AUTH_HASH: ${GRAFANA_BASIC_AUTH_HASH:-}
-    volumes:
-      - ./Caddyfile.production:/etc/caddy/Caddyfile:ro
-
-  rabbitmq:
-    volumes:
-      - ./infra/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
-      - ./infra/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
-      - rabbitmq_data:/var/lib/rabbitmq
-
-  backend:
-    environment:
-      LOG_JSON_FORMAT: "true"
-      SERVICE_NAME: backend
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_SERVICE_NAME: backend
-
-  orchestrator:
-    environment:
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_SERVICE_NAME: orchestrator
-
-  stt-service:
-    environment:
-      LOG_JSON_FORMAT: "true"
-      SERVICE_NAME: stt
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_SERVICE_NAME: stt
-
-  nmt-service:
-    environment:
-      LOG_JSON_FORMAT: "true"
-      SERVICE_NAME: nmt
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_SERVICE_NAME: nmt
-
-  tts-service:
-    environment:
-      LOG_JSON_FORMAT: "true"
-      SERVICE_NAME: tts
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_SERVICE_NAME: tts
-
-  media-service:
-    environment:
-      LOG_JSON_FORMAT: "true"
-      SERVICE_NAME: media
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      OTEL_SERVICE_NAME: media
 
 volumes:
   loki_data:
