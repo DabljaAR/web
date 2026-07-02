@@ -15,7 +15,7 @@ tags = ["dablja", "placeholder", "credentials"]
 [[rules]]
 id = "dablja-bearer-token"
 description = "Bearer token that matches a real token pattern (not EXAMPLE_ prefix)"
-regex = '''Bearer\s+(?!EXAMPLE_)[A-Za-z0-9\-_.]{20,}'''
+regex = '''Bearer\s+\S{20,}'''
 tags = ["dablja", "bearer", "token"]
 
 [[rules]]
