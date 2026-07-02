@@ -274,14 +274,14 @@ jobs:
             "${images[@]}"
 
       - name: Upload SARIF
-        if: success() || failure()
+        if: (success() || failure()) && hashFiles('trivy-image-report.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image-report.sarif
           category: trivy-image
 
       - name: Upload image scan artifact
-        if: success() || failure()
+        if: (success() || failure()) && hashFiles('trivy-image-report.sarif') != ''
         uses: actions/upload-artifact@v4
         with:
           name: trivy-image-report
