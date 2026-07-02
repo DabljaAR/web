@@ -20,7 +20,13 @@ on every pull request and on a weekly schedule.
   run unconditionally. Rescans against updated CVE databases.
 - **Workflow dispatch** — manual trigger, runs all scans.
 
-Concurrency: group by PR ref, cancel in-progress runs on new pushes.
+Concurrency — two groups:
+
+- **Pull requests:** group key constructed from PR number,
+  cancel-in-progress: true. Only the latest commit matters per PR.
+- **Push to main:** group key scoped to commit SHA,
+  cancel-in-progress: false. Two merges landing close together must both
+  scan independently.
 
 ## Tools
 
@@ -31,9 +37,13 @@ indicate sensitive data in code or documentation.
 
 **Scan scope varies by trigger:**
 
-- **Pull request** — diff scan only (`detect --log-opts=origin/main..HEAD`).
-  Flags only secrets introduced in the PR's commits. Requires
-  `fetch-depth: 0` on checkout so the merge-base is available.
+- **Pull request** — diff scan only. Uses the exact PR commit range:
+  ```
+  gitleaks detect --log-opts=${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+  ```
+  This is robust regardless of target branch name and does not depend on
+  ref-naming conventions. Requires `fetch-depth: 0` on checkout so both
+  base and head SHAs are available.
 - **Weekly schedule / workflow_dispatch** — full working-tree scan. Catches
   anything that may have slipped through diff scans.
 
@@ -48,7 +58,7 @@ indicate sensitive data in code or documentation.
 **Output:**
 
 1. Full verbose log to workflow output (file, line, rule, matched prefix)
-2. SARIF report uploaded to GitHub code scanning (inline PR annotations)
+ 2. SARIF report uploaded to GitHub code scanning (inline PR annotations, category: gitleaks)
 3. JSON report as build artifact (retention-days: 7; matched value redacted
    to avoid embedding real secrets in downloadable artifacts)
 
@@ -78,7 +88,7 @@ Lints all Dockerfiles in the project against a project-wide
 **Output:**
 
 1. Full lint output to workflow log
-2. SARIF report for GitHub code scanning annotations
+ 2. SARIF report for GitHub code scanning annotations (category: hadolint)
 
 ### Trivy — Vulnerability Scanner
 
@@ -114,8 +124,9 @@ net for anything a narrow path filter misses.
 **Output:**
 
 1. Table summary to workflow log
-2. SARIF report for code scanning
-3. JSON report as build artifact
+ 2. SARIF reports for code scanning (one upload per sub-scan: categories
+    trivy-fs, trivy-config, trivy-image)
+ 3. JSON report as build artifact
 
 ## Docker Hardening
 
@@ -175,6 +186,25 @@ All jobs set `timeout-minutes: 15`. Image scan may need longer — set
 
 Trivy action uses `cache: true` to persist the vulnerability DB across runs,
 preventing GHCR rate-limit failures on shared runners.
+
+**SARIF categories:** every SARIF upload step sets a distinct `category`
+input so findings from different tools do not overwrite each other in the
+code scanning UI:
+
+| Upload step | Category |
+|---|---|
+| gitleaks | `gitleaks` |
+| Hadolint | `hadolint` |
+| Trivy filesystem | `trivy-fs` |
+| Trivy config | `trivy-config` |
+| Trivy image | `trivy-image` |
+
+**Path-filtered image scan:** use `dorny/paths-filter` action with a filter
+pattern, not a workflow-level `on.pull_request.paths` gate. FS + config scan
+jobs run unconditionally. The image-scan job runs only when the filter output
+is true (`if: steps.filter.outputs.image == 'true'`). Filter pattern:
+`Dockerfile*`, `requirements*`, `uv.lock`, `go.sum`, `package-lock.json`,
+`pyproject.toml`, and service source under the 5 buildable services.
 
 gitleaks JSON artifact sets `retention-days: 7` and redacts the matched value
 in the artifact payload (keeps file, line, rule — not the snippet).
