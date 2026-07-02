@@ -121,6 +121,15 @@ sync_repository() {
 
 sync_repository
 
+# git sync updates files on disk but not the running shell's loaded script.
+# Re-exec once so the remainder of the deploy uses the synced script version.
+if [ "${DEPLOY_SCRIPT_SYNCED:-}" != "1" ]; then
+  log "Re-execing deploy script after git sync"
+  cd "$APP_DIR"
+  export DEPLOY_SCRIPT_SYNCED=1
+  exec bash "$APP_DIR/infra/scripts/deploy-production.sh"
+fi
+
 # ---------------------------------------------------------------------------
 # Env file validation
 # ---------------------------------------------------------------------------
