@@ -1,7 +1,17 @@
 # Production microservices stack — RabbitMQ + orchestrator + stage workers.
 # External S3/GCS (no MinIO). No Celery / Redis / Flower.
 #
-#   docker compose --env-file .env.production -f docker-compose.microservices.prod.yml up -d --build
+#   docker compose --env-file .env.production \
+#     -f docker-compose.microservices.prod.yml \
+#     -f docker-compose.observability.yml up -d --build
+#
+# Set COMPOSE_PROFILES=observability in .env.production to start the LGTM stack.
+
+x-otel-env: &otel-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+
+x-worker-log-env: &worker-log-env
+  LOG_JSON_FORMAT: ${LOG_JSON_FORMAT:-true}
 
 x-s3-env: &s3-env
   STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
@@ -109,6 +119,8 @@ services:
       RABBITMQ_URL: ${RABBITMQ_URL:?RABBITMQ_URL is required}
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}?sslmode=disable
       HEALTH_PORT: "8081"
+      <<: *otel-env
+      OTEL_SERVICE_NAME: orchestrator
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/readiness"]
       interval: 30s
@@ -135,9 +147,11 @@ services:
         docker_torch: ./libs/docker-torch
     container_name: dabljaar_stt_service
     environment:
-      <<: [*s3-env, *model-cache-env]
+      <<: [*s3-env, *model-cache-env, *worker-log-env, *otel-env]
       RABBITMQ_URL: ${RABBITMQ_URL}
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      SERVICE_NAME: stt
+      OTEL_SERVICE_NAME: stt
       STT_MODEL_SIZE: ${STT_MODEL_SIZE:-medium}
       STT_MODEL_KEY: ${STT_MODEL_KEY:-whisper-medium}
       STT_MODEL_LOCAL_PATH: ${STT_MODEL_LOCAL_PATH:-/model-cache/whisper-medium}
@@ -177,9 +191,11 @@ services:
         docker_torch: ./libs/docker-torch
     container_name: dabljaar_nmt_service
     environment:
-      <<: [*s3-env, *model-cache-env]
+      <<: [*s3-env, *model-cache-env, *worker-log-env, *otel-env]
       RABBITMQ_URL: ${RABBITMQ_URL}
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      SERVICE_NAME: nmt
+      OTEL_SERVICE_NAME: nmt
       NMT_MODEL_KEY: ${NMT_MODEL_KEY:-nmt-v4}
       NMT_MODEL_LOCAL_PATH: ${NMT_MODEL_LOCAL_PATH:-/model-cache/nmt-v4}
       NMT_HF_FALLBACK: ${NMT_HF_FALLBACK:-facebook/nllb-200-distilled-600M}
@@ -223,9 +239,11 @@ services:
         docker_onnx: ./libs/docker-onnx
     container_name: dabljaar_tts_service
     environment:
-      <<: [*s3-env, *model-cache-env]
+      <<: [*s3-env, *model-cache-env, *worker-log-env, *otel-env]
       RABBITMQ_URL: ${RABBITMQ_URL}
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      SERVICE_NAME: tts
+      OTEL_SERVICE_NAME: tts
       OMNIVOICE_MODEL_NAME: ${OMNIVOICE_MODEL_NAME:-k2-fsa/OmniVoice}
       OMNIVOICE_DEVICE: ${OMNIVOICE_DEVICE:-cpu}
       OMNIVOICE_DTYPE: ${OMNIVOICE_DTYPE:-float16}
@@ -264,9 +282,11 @@ services:
         shared: ./libs/dablja-worker
     container_name: dabljaar_media_service
     environment:
-      <<: *s3-env
+      <<: [*s3-env, *worker-log-env, *otel-env]
       RABBITMQ_URL: ${RABBITMQ_URL}
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dabljaar}
+      SERVICE_NAME: media
+      OTEL_SERVICE_NAME: media
       AWS_ENDPOINT_URL: ${S3_ENDPOINT_URL}
       AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
@@ -322,13 +342,14 @@ services:
       RABBITMQ_URL: ${RABBITMQ_URL}
       TTS_SERVICE_URL: http://tts-service:8005
       STT_SERVICE_URL: http://stt-service:8001
-      <<: *s3-env
+      <<: [*s3-env, *otel-env]
       PIPELINE_SEGMENTS_MODE: ${PIPELINE_SEGMENTS_MODE:-single}
       NMT_FALLBACK_MODE: ${NMT_FALLBACK_MODE:-stage2_only}
       ENVIRONMENT: production
       DEBUG: "false"
       LOG_JSON_FORMAT: ${LOG_JSON_FORMAT:-true}
       SERVICE_NAME: backend
+      OTEL_SERVICE_NAME: backend
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()"]
       interval: 30s

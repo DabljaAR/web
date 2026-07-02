@@ -2,22 +2,34 @@
 
 Self-hosted LGTM stack (Loki, Grafana, VictoriaMetrics, Tempo) for the microservices production deployment.
 
-## Production deploy path
+## Enable / disable
 
-Observability is **optional**. It activates when `GRAFANA_ADMIN_PASSWORD` is set in the VM's `.env.production` (from Secret Manager `env-production`).
+Observability is **optional**. Both compose files are always used; Docker Compose **profiles** control whether LGTM services start.
+
+Add to `.env.production` (Secret Manager `env-production` on the VM):
+
+```env
+COMPOSE_PROFILES=observability
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=your-strong-password
+GRAFANA_BASIC_AUTH_USER=admin
+GRAFANA_BASIC_AUTH_HASH=<caddy hash-password output>
+```
+
+Remove or comment out `COMPOSE_PROFILES=observability` to run the app stack without Loki/Grafana/Tempo. The pipeline does not depend on observability containers.
+
+**DNS:** `grafana.app.yourbrand.tech` should resolve to the VM (`terraform apply` with `dns_include_grafana = true`, then `dig +short grafana.app.yourbrand.tech`).
+
+## Production deploy path
 
 ```
 push to main → .github/workflows/deploy-gcp.yml → infra/scripts/deploy-production.sh
-  → assemble Caddyfile.production (with grafana block only when enabled)
-  → Phase B2: loki, victoriametrics, tempo, otel-collector
-  → Phase E2: promtail, exporters, grafana
-  → Phase E3: caddy (TLS for grafana.app.$ZONE)
-  → health gate: https://grafana.$DOMAIN/api/health
+  → validate committed Caddyfile.production
+  → linear COMPOSE up -d (profile services start when COMPOSE_PROFILES=observability)
+  → app health gates (Grafana check is warning-only)
 ```
 
-**DNS prerequisite:** `grafana.app.yourbrand.tech` must resolve to the VM before the first observability deploy (`terraform apply` with `dns_include_grafana = true`, then `dig +short grafana.app.yourbrand.tech`).
-
-For manual ops commands, use the shared compose helper from repo root:
+For manual ops from repo root:
 
 ```bash
 source infra/scripts/lib/compose-env.sh
@@ -28,19 +40,16 @@ $COMPOSE logs grafana --tail=50
 ## Quick start
 
 ```bash
-# Generate Caddy basic-auth hash for Grafana (run once)
-caddy hash-password --plaintext 'your-strong-password'
-
-# Add to .env.production, then upload to Secret Manager and re-deploy:
-#   GRAFANA_ADMIN_USER=admin
+# In .env.production:
+#   COMPOSE_PROFILES=observability
 #   GRAFANA_ADMIN_PASSWORD=your-strong-password
-#   GRAFANA_BASIC_AUTH_USER=admin
-#   GRAFANA_BASIC_AUTH_HASH=<output of caddy hash-password>
+#   GRAFANA_BASIC_AUTH_HASH=$(caddy hash-password --plaintext 'your-strong-password')
 
 source infra/scripts/lib/compose-env.sh
-{ cat Caddyfile.minimal; echo; cat infra/observability/Caddyfile.grafana; } > Caddyfile.production
 $COMPOSE up -d --build
 ```
+
+Deploy can auto-generate `GRAFANA_BASIC_AUTH_HASH` for a single run when the profile is enabled and the hash is still a placeholder.
 
 Access:
 
@@ -50,6 +59,8 @@ Access:
 | RabbitMQ | `https://rabbitmq.$DOMAIN` | `RABBITMQ_DEFAULT_USER` / `RABBITMQ_DEFAULT_PASS` |
 
 Internal endpoints (not exposed publicly): VictoriaMetrics `:8428`, Loki `:3100`, Tempo `:3200`, OTLP `:4317`.
+
+**Note:** `Caddyfile.production` includes the Grafana site block even when the profile is off. If DNS points at the VM but Grafana is not running, `https://grafana.$DOMAIN` may return 502 until you enable the profile.
 
 ## Log search (LogQL)
 
@@ -67,7 +78,7 @@ Structured JSON filter:
 {service=~"stt|nmt|tts|media"} | json | job_id="YOUR_CHILD_JOB_ID"
 ```
 
-Trace correlation (after tracing is enabled):
+Trace correlation:
 
 ```logql
 {service=~".+"} | json | trace_id="YOUR_TRACE_ID"
@@ -150,10 +161,11 @@ The production Docker build runs `go mod vendor` automatically.
 
 ## Local dev (optional)
 
-Observability overlay is optional. For local debugging without the full stack:
+Run without the observability profile:
 
 ```bash
-docker compose -f docker-compose.microservices.prod.yml up -d
+source infra/scripts/lib/compose-env.sh
+$COMPOSE up -d
 ```
 
 Enable JSON logs only:

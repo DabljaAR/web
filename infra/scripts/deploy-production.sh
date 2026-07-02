@@ -163,47 +163,31 @@ log "Target domain: $DOMAIN_VALUE"
 # ---------------------------------------------------------------------------
 # shellcheck source=lib/compose-env.sh
 source "$APP_DIR/infra/scripts/lib/compose-env.sh"
-if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
-  log "Observability overlay enabled (GRAFANA_ADMIN_PASSWORD set)"
-fi
 
-CADDY_FILE="$APP_DIR/Caddyfile.production"
-OBSERVABILITY_MARKER="${HOME}/.observability-bootstrap.done"
-
-assemble_caddyfile() {
-  if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
-    { cat "$APP_DIR/Caddyfile.minimal"; echo; cat "$APP_DIR/infra/observability/Caddyfile.grafana"; } > "$CADDY_FILE"
-    log "Assembled $CADDY_FILE (app + rabbitmq + grafana)"
-  else
-    cp "$APP_DIR/Caddyfile.minimal" "$CADDY_FILE"
-    log "Assembled $CADDY_FILE (app + rabbitmq only)"
-  fi
+compose_profiles_enabled() {
+  grep -Eq '^[[:space:]]*COMPOSE_PROFILES=.*observability' "$APP_DIR/$ENV_FILE" 2>/dev/null
 }
 
-validate_observability_env() {
-  if [ "$OBSERVABILITY_ENABLED" != "true" ]; then
+maybe_generate_grafana_basic_auth_hash() {
+  if ! compose_profiles_enabled; then
     return 0
   fi
-  require_env GRAFANA_ADMIN_PASSWORD
-  require_env GRAFANA_BASIC_AUTH_HASH
-  local hash
-  hash="$(grep -E '^[[:space:]]*GRAFANA_BASIC_AUTH_HASH=' "$ENV_FILE" | tail -n1 | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
-  if [ -z "$hash" ] || [ "$hash" = "replace-with-bcrypt-hash" ]; then
-    log "GRAFANA_BASIC_AUTH_HASH is missing or still a placeholder in $ENV_FILE"
-    log "Generate with: caddy hash-password --plaintext 'your-password'"
-    log "See docs/observability.md"
-    exit 1
+  local hash password
+  hash="$(grep -E '^[[:space:]]*GRAFANA_BASIC_AUTH_HASH=' "$APP_DIR/$ENV_FILE" | tail -n1 | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+  if [ -n "$hash" ] && [ "$hash" != "replace-with-bcrypt-hash" ]; then
+    return 0
   fi
-  case "$hash" in
-    \$2a\$*|\$2b\$*) ;;
-    *)
-      log "Warning: GRAFANA_BASIC_AUTH_HASH does not look like a bcrypt hash (\$2a\$ / \$2b\$)"
-      ;;
-  esac
+  password="$(grep -E '^[[:space:]]*GRAFANA_ADMIN_PASSWORD=' "$APP_DIR/$ENV_FILE" | tail -n1 | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+  if [ -z "$password" ] || [ "$password" = "replace-with-strong-password" ]; then
+    log "Warning: COMPOSE_PROFILES includes observability but GRAFANA_ADMIN_PASSWORD is unset or placeholder"
+    return 0
+  fi
+  export GRAFANA_BASIC_AUTH_HASH
+  GRAFANA_BASIC_AUTH_HASH="$(docker run --rm caddy:2.10-alpine caddy hash-password --plaintext "$password")"
+  log "Generated GRAFANA_BASIC_AUTH_HASH for this deploy from GRAFANA_ADMIN_PASSWORD"
 }
 
-validate_observability_env
-assemble_caddyfile
+maybe_generate_grafana_basic_auth_hash
 
 # ---------------------------------------------------------------------------
 # Diagnostics helper (called by on_exit trap on failure)
@@ -216,7 +200,7 @@ print_diagnostics() {
   $COMPOSE logs --tail=100 \
     backend caddy orchestrator rabbitmq \
     stt-service nmt-service tts-service media-service 2>/dev/null || true
-  if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
+  if compose_profiles_enabled; then
     echo "=== deploy diagnostics: observability service logs ==="
     $COMPOSE logs --tail=50 \
       loki grafana promtail victoriametrics tempo otel-collector 2>/dev/null || true
@@ -258,11 +242,7 @@ check_disk_space() {
   log "Disk space OK: ${available_gb}GB available on $(df -k "$APP_DIR" | awk 'NR==2 {print $1}')"
 }
 
-if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
-  check_disk_space 10
-else
-  check_disk_space 5
-fi
+check_disk_space 5
 
 # ---------------------------------------------------------------------------
 # Validate Caddyfile before starting any containers
@@ -270,7 +250,7 @@ fi
 log "Validating Caddyfile..."
 docker run --rm \
   --env-file "$APP_DIR/$ENV_FILE" \
-  -v "$CADDY_FILE:/etc/caddy/Caddyfile:ro" \
+  -v "$APP_DIR/Caddyfile.production:/etc/caddy/Caddyfile:ro" \
   caddy:2.10-alpine \
   caddy validate --config /etc/caddy/Caddyfile
 log "Caddyfile is valid."
@@ -380,69 +360,6 @@ infra_up_end="$(date +%s)"
 log "Infra tier up in $((infra_up_end - infra_up_start))s"
 
 # ---------------------------------------------------------------------------
-# Phase B2: Observability data plane (optional)
-# ---------------------------------------------------------------------------
-observability_data_start=0
-observability_data_end=0
-observability_agents_start=0
-observability_agents_end=0
-
-wait_for_container_running() {
-  local name="$1"
-  local max_attempts="${2:-30}"
-  local sleep_s="${3:-5}"
-  local attempt=1
-  while [ "$attempt" -le "$max_attempts" ]; do
-    if docker inspect --format '{{.State.Running}}' "$name" 2>/dev/null | grep -q true; then
-      log "Container $name is running (attempt $attempt)"
-      return 0
-    fi
-    log "  waiting for $name: attempt $attempt/$max_attempts..."
-    sleep "$sleep_s"
-    attempt=$((attempt + 1))
-  done
-  log "FAIL: container $name did not reach running state"
-  return 1
-}
-
-wait_for_grafana_health() {
-  local max_attempts="${1:-30}"
-  local sleep_s="${2:-5}"
-  local attempt=1
-  while [ "$attempt" -le "$max_attempts" ]; do
-    if $COMPOSE exec -T grafana wget --spider -q http://127.0.0.1:3000/api/health 2>/dev/null; then
-      log "grafana health check passed (attempt $attempt)"
-      return 0
-    fi
-    log "  grafana: attempt $attempt/$max_attempts, retrying in ${sleep_s}s..."
-    sleep "$sleep_s"
-    attempt=$((attempt + 1))
-  done
-  log "FAIL: grafana health check timed out"
-  return 1
-}
-
-if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
-  phase "OBSERVABILITY DATA PLANE (loki, victoriametrics, tempo, otel-collector)"
-
-  if [ ! -f "$OBSERVABILITY_MARKER" ]; then
-    log "First observability deploy — recreating rabbitmq for prometheus plugin"
-    $COMPOSE up -d --force-recreate rabbitmq
-    wait_for_infra
-    touch "$OBSERVABILITY_MARKER"
-  fi
-
-  observability_data_start="$(date +%s)"
-  $COMPOSE up -d loki victoriametrics tempo otel-collector
-  wait_for_container_running dabljaar_loki 24 5
-  wait_for_container_running dabljaar_victoriametrics 24 5
-  wait_for_container_running dabljaar_tempo 24 5
-  wait_for_container_running dabljaar_otel_collector 24 5
-  observability_data_end="$(date +%s)"
-  log "Observability data plane up in $((observability_data_end - observability_data_start))s"
-fi
-
-# ---------------------------------------------------------------------------
 # Phase C: Database migrations
 # Run in a one-off backend container with --no-deps (infra already running).
 # ---------------------------------------------------------------------------
@@ -488,26 +405,15 @@ $COMPOSE up -d --build backend
 log "Backend container started."
 
 # ---------------------------------------------------------------------------
-# Phase E2: Observability agents + Grafana (optional, before Caddy)
-# ---------------------------------------------------------------------------
-if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
-  phase "OBSERVABILITY AGENTS (promtail, exporters, grafana)"
-  observability_agents_start="$(date +%s)"
-  $COMPOSE up -d promtail node_exporter cadvisor postgres_exporter grafana
-  wait_for_grafana_health 36 5
-  observability_agents_end="$(date +%s)"
-  log "Observability agents up in $((observability_agents_end - observability_agents_start))s"
-fi
-
-# ---------------------------------------------------------------------------
-# Phase E3: Caddy — force-recreate picks up fresh frontend/dist bind mount
+# Phase E2: Caddy — force-recreate picks up fresh frontend/dist bind mount
 # ---------------------------------------------------------------------------
 phase "CADDY"
 
 $COMPOSE up -d --force-recreate caddy
+$COMPOSE up -d
 log "Caddy container force-recreated (picks up fresh frontend/dist and Caddyfile.production)."
 app_up_end="$(date +%s)"
-log "Backend + observability + Caddy tier up in $((app_up_end - app_up_start))s"
+log "Backend + Caddy tier up in $((app_up_end - app_up_start))s"
 
 # ---------------------------------------------------------------------------
 # Readiness gates — wait for each service to confirm it's accepting requests
@@ -649,7 +555,7 @@ if [ "$spa_root_healthy" != "true" ]; then
 fi
 log "SPA root and security headers check passed."
 
-if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
+if compose_profiles_enabled; then
   grafana_external_healthy=false
   GRAFANA_BASIC_AUTH_USER="$(grep -E '^[[:space:]]*GRAFANA_BASIC_AUTH_USER=' "$ENV_FILE" | tail -n1 | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
   GRAFANA_BASIC_AUTH_USER="${GRAFANA_BASIC_AUTH_USER:-admin}"
@@ -663,10 +569,10 @@ if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
     sleep 5
   done
   if [ "$grafana_external_healthy" != "true" ]; then
-    log "FAIL: Grafana external health check failed on https://grafana.${DOMAIN_VALUE}/api/health"
-    exit 1
+    log "Warning: Grafana external health check failed on https://grafana.${DOMAIN_VALUE}/api/health (deploy continues)"
+  else
+    log "Grafana external health check passed (https://grafana.${DOMAIN_VALUE})."
   fi
-  log "Grafana external health check passed (https://grafana.${DOMAIN_VALUE})."
 fi
 
 health_checks_end="$(date +%s)"
@@ -699,17 +605,11 @@ echo "  ai_tier          = $((ai_up_end - ai_up_start))s (async — still warmin
 echo "  backend_caddy    = $((app_up_end - app_up_start))s"
 echo "  readiness_gates  = $((readiness_end - readiness_start))s"
 echo "  health_checks    = $((health_checks_end - health_checks_start))s"
-if [ "$OBSERVABILITY_ENABLED" = "true" ] && [ "$observability_data_end" -gt 0 ]; then
-  echo "  obs_data_plane   = $((observability_data_end - observability_data_start))s"
-fi
-if [ "$OBSERVABILITY_ENABLED" = "true" ] && [ "$observability_agents_end" -gt 0 ]; then
-  echo "  obs_agents       = $((observability_agents_end - observability_agents_start))s"
-fi
 echo "  ─────────────────────────────────────"
 echo "  total            = ${total_seconds}s"
 echo ""
 echo "deployed $DEPLOYED_SHA on branch $(git branch --show-current) → https://${DOMAIN_VALUE}/"
-if [ "$OBSERVABILITY_ENABLED" = "true" ]; then
-  echo "observability: https://grafana.${DOMAIN_VALUE}/"
+if compose_profiles_enabled; then
+  echo "observability: https://grafana.${DOMAIN_VALUE}/ (COMPOSE_PROFILES=observability)"
 fi
 $COMPOSE ps

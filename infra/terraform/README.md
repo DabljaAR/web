@@ -178,18 +178,19 @@ DOMAIN=app.yourbrand.tech
 ACME_EMAIL=you@yourbrand.tech
 ```
 
-Caddy also requests certificates for `rabbitmq.app.yourbrand.tech` and (when observability is enabled) `grafana.app.yourbrand.tech` (`Caddyfile.minimal` + `infra/observability/Caddyfile.grafana`).
+Caddy also requests certificates for `rabbitmq.app.yourbrand.tech` and `grafana.app.yourbrand.tech` (see committed [`Caddyfile.production`](../../Caddyfile.production)).
 
-When enabling observability, also set in `.env.production`:
+To start the LGTM stack, set in `.env.production`:
 
 ```env
+COMPOSE_PROFILES=observability
 GRAFANA_ADMIN_USER=admin
 GRAFANA_ADMIN_PASSWORD=replace-with-strong-password
 GRAFANA_BASIC_AUTH_USER=admin
 GRAFANA_BASIC_AUTH_HASH=replace-with-bcrypt-hash   # caddy hash-password
 ```
 
-Run `terraform apply` so `grafana.app.yourbrand.tech` resolves before the first observability deploy. Verify: `dig +short grafana.app.yourbrand.tech`.
+Run `terraform apply` so `grafana.app.yourbrand.tech` resolves (`dns_include_grafana` defaults to `true`). Verify: `dig +short grafana.app.yourbrand.tech`.
 
 You will paste the **full file contents** into the `env-production` secret in step 5.
 

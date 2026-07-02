@@ -41,7 +41,7 @@ deploy_ssh_cidr_blocks = ["0.0.0.0/0"]
 dns_enabled       = true
 dns_zone_name     = "yourbrand.tech"
 dns_app_subdomain = "app" # -> app.yourbrand.tech (set DOMAIN to this in env-production)
-dns_include_grafana = true # -> grafana.app.yourbrand.tech (when observability enabled)
+dns_include_grafana = true # -> grafana.app.yourbrand.tech
 dns_proxied       = false # must stay false for Caddy ACME on the VM
 
 # Cloudflare: export CLOUDFLARE_API_TOKEN before plan/apply (see README step 3c)

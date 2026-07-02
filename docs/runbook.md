@@ -250,7 +250,7 @@ docker compose up --scale worker-media=3 -d
 
 ## Microservices observability (production)
 
-The microservices stack ships with an optional self-hosted observability overlay. See [docs/observability.md](observability.md) for full setup.
+The microservices stack ships with an optional self-hosted observability overlay (`COMPOSE_PROFILES=observability`). See [docs/observability.md](observability.md).
 
 ### Quick access
 
