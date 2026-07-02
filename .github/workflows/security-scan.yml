@@ -1,0 +1,289 @@
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || format('push-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HADOLINT_IMAGE: ghcr.io/hadolint/hadolint:v2.12.0
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.18.2
+  TRIVY_IMAGE: aquasec/trivy:0.60.0
+  TRIVY_DB_CACHE_DIR: /root/.cache/trivy
+
+jobs:
+  gitleaks-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+
+      - name: Run gitleaks (PR diff scan)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src \
+            ${{ env.GITLEAKS_IMAGE }} \
+            detect \
+            --config /src/.gitleaks.toml \
+            --log-opts="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" \
+            --report-format sarif \
+            --report-path /src/gitleaks-report.sarif \
+            --redact \
+            --verbose
+
+      - name: Run gitleaks (full scan)
+        if: github.event_name != 'pull_request'
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src \
+            ${{ env.GITLEAKS_IMAGE }} \
+            detect \
+            --config /src/.gitleaks.toml \
+            --source /src \
+            --report-format sarif \
+            --report-path /src/gitleaks-report.sarif \
+            --redact \
+            --verbose
+
+      - name: Upload SARIF
+        if: success() || failure()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gitleaks-report.sarif
+          category: gitleaks
+
+      - name: Upload artifact
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.sarif
+          retention-days: 7
+
+  hadolint-lint:
+    name: hadolint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Hadolint on all Dockerfiles
+        run: |
+          failures=0
+          while IFS= read -r -d '' df; do
+            echo "=== Linting: $df ==="
+            if echo "$df" | grep -qE 'Dockerfile\.gpu'; then
+              config=".hadolint-gpu.yaml"
+            else
+              config=".hadolint.yaml"
+            fi
+            [ -f "$config" ] || config=".hadolint.yaml"
+            docker run --rm \
+              -v "${{ github.workspace }}:/src" \
+              -w /src \
+              ${{ env.HADOLINT_IMAGE }} \
+              hadolint \
+              --config "/src/$config" \
+              --failure-threshold error \
+              "/src/$df" 2>&1 || ((failures++))
+          done < <(find . -name 'Dockerfile*' -type f -not -path './.git/*' -print0)
+
+          if [ "$failures" -gt 0 ]; then
+            echo "Hadolint: $failures Dockerfile(s) failed linting"
+            exit 1
+          fi
+          echo "Hadolint: all Dockerfiles pass"
+
+  trivy-fs:
+    name: trivy-filesystem
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TRIVY_DB_CACHE_DIR }}
+          key: trivy-db-${{ runner.os }}
+
+      - name: Trivy FS scan (all severities — SARIF output)
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -v ${{ env.TRIVY_DB_CACHE_DIR }}:/trivy-cache \
+            ${{ env.TRIVY_IMAGE }} \
+            fs \
+            --severity CRITICAL,HIGH,MEDIUM,LOW \
+            --exit-code 0 \
+            --format sarif \
+            --output /workspace/trivy-fs-report.sarif \
+            --cache-dir /trivy-cache \
+            /workspace
+
+      - name: Trivy FS scan (CRITICAL/HIGH — blocking)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -v ${{ env.TRIVY_DB_CACHE_DIR }}:/trivy-cache \
+            ${{ env.TRIVY_IMAGE }} \
+            fs \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --cache-dir /trivy-cache \
+            /workspace
+
+      - name: Upload SARIF
+        if: success() || failure()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-fs-report.sarif
+          category: trivy-fs
+
+  trivy-config:
+    name: trivy-config
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TRIVY_DB_CACHE_DIR }}
+          key: trivy-db-${{ runner.os }}
+
+      - name: Run Trivy config scan
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -v ${{ env.TRIVY_DB_CACHE_DIR }}:/trivy-cache \
+            ${{ env.TRIVY_IMAGE }} \
+            config \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --format sarif \
+            --output /workspace/trivy-config-report.sarif \
+            --cache-dir /trivy-cache \
+            /workspace
+
+      - name: Upload SARIF
+        if: success() || failure()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-config-report.sarif
+          category: trivy-config
+
+  trivy-image:
+    name: trivy-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Path filter
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            image:
+              - "backend/Dockerfile*"
+              - "frontend/Dockerfile*"
+              - "orchestrator/Dockerfile*"
+              - "backend/requirements*"
+              - "frontend/package-lock.json"
+              - "orchestrator/go.sum"
+              - "backend/uv.lock"
+              - "backend/pyproject.toml"
+              - "libs/**"
+              - ".github/workflows/security-scan.yml"
+
+      - name: Set up Docker Buildx
+        if: steps.filter.outputs.image == 'true' || github.event_name != 'pull_request'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Trivy DB
+        if: steps.filter.outputs.image == 'true' || github.event_name != 'pull_request'
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TRIVY_DB_CACHE_DIR }}
+          key: trivy-db-${{ runner.os }}
+
+      - name: Build and scan images
+        if: steps.filter.outputs.image == 'true' || github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          images=()
+          for dir in backend frontend orchestrator; do
+            df="$dir/Dockerfile"
+            [ -f "$df" ] || continue
+            tag="dabljaar/$dir:ci-scan"
+            echo "Building $tag from $df"
+            docker buildx build -t "$tag" -f "$df" "$dir" --load 2>&1 || {
+              echo "WARNING: $df build failed, skipping scan"
+              continue
+            }
+            images+=("$tag")
+          done
+
+          if [ ${#images[@]} -eq 0 ]; then
+            echo "No images to scan — skipping"
+            exit 0
+          fi
+
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${{ github.workspace }}:/workspace" \
+            -v ${{ env.TRIVY_DB_CACHE_DIR }}:/trivy-cache \
+            ${{ env.TRIVY_IMAGE }} \
+            image \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --format sarif \
+            --output /workspace/trivy-image-report.sarif \
+            --cache-dir /trivy-cache \
+            "${images[@]}"
+
+      - name: Upload SARIF
+        if: (success() || failure()) && hashFiles('trivy-image-report.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-image-report.sarif
+          category: trivy-image
+
+      - name: Upload image scan artifact
+        if: (success() || failure()) && hashFiles('trivy-image-report.sarif') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-report
+          path: trivy-image-report.sarif
+          retention-days: 14

@@ -1,0 +1,45 @@
+# Hadolint configuration for DabljaAR
+# See https://github.com/hadolint/hadolint for rule reference
+
+failure-threshold: error
+
+override:
+  # DL3008: Pin versions in apt-get install (we use --no-install-recommends
+  # but don't always pin minor versions — acceptable for slim images)
+  - code: DL3008
+    level: style
+  # DL3013: Pin versions in pip install (pinned in requirements files, but
+  # inline pip installs in Dockerfiles are acceptable for dev tooling)
+  - code: DL3013
+    level: style
+  # DL3042: No cache clean after pip install (we use --no-cache-dir)
+  - code: DL3042
+    level: style
+  # DL3045: No COPY — chown (acceptable for builder stages where files
+  # are ephemeral)
+  - code: DL3045
+    level: style
+  # DL4006: SHELL is bash (POSIX sh is fine for Alpine-based images)
+  - code: DL4006
+    level: style
+  # SC1091: Shellcheck can't follow external source (acceptable for
+  # common patterns like . /etc/os-release)
+  - code: SC1091
+    level: style
+  # DL3018: Pin apk add versions (Alpine packages are pinned by
+  # alpine:3.xx release, individual version pins are overly strict)
+  - code: DL3018
+    level: style
+
+  # DL3003: Change WORKDIR before RUN (acceptable patterns exist)
+  - code: DL3003
+    level: style
+  # DL3044: No heredoc (not relevant for this project)
+  - code: DL3044
+    level: style
+  # DL3040: No --mount in production stage
+  - code: DL3040
+    level: style
+  # DL3041: No -y for apk add
+  - code: DL3041
+    level: style

@@ -1,0 +1,43 @@
+# Hadolint configuration for GPU-specific Dockerfiles
+# GPU containers (stt-service, tts-service, media-service GPU variants)
+# require root for CUDA device access and NVIDIA driver interaction.
+
+failure-threshold: error
+
+override:
+  # DL3008: Pin versions in apt-get install
+  - code: DL3008
+    level: style
+  # DL3013: Pin versions in pip install
+  - code: DL3013
+    level: style
+  # DL3042: No cache clean after pip install
+  - code: DL3042
+    level: style
+  # DL3045: No COPY --chown in builder stages
+  - code: DL3045
+    level: style
+  # DL4006: SHELL is bash
+  - code: DL4006
+    level: style
+  # SC1091: Shellcheck external source
+  - code: SC1091
+    level: style
+  # DL3018: Pin apk add versions
+  - code: DL3018
+    level: style
+  # DL3002: GPU containers need root for CUDA device access
+  - code: DL3002
+    level: style
+  # DL3003: Change WORKDIR before RUN
+  - code: DL3003
+    level: style
+  # DL3044: No heredoc
+  - code: DL3044
+    level: style
+  # DL3040: No --mount in production stage
+  - code: DL3040
+    level: style
+  # DL3041: No -y for apk add
+  - code: DL3041
+    level: style
