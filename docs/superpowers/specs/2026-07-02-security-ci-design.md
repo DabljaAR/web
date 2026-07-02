@@ -9,12 +9,16 @@ on every pull request and on a weekly schedule.
 
 ## Triggers
 
-- **Pull request** — any path, any branch. Scans run in parallel. gitleaks and
-  Hadolint block on any finding. Trivy blocks only on CRITICAL and HIGH
-  severity findings.
-- **Schedule** — Monday 06:00 UTC weekly. Rescans dependencies and image layers
-  against updated CVE databases.
-- **Workflow dispatch** — manual trigger for ad-hoc scans.
+- **Pull request** — any path, any branch. FS + config scan runs
+  unconditionally. Image scan runs only when path filter matches (Dockerfiles,
+  lockfiles, or service source under buildable services). gitleaks and Hadolint
+  block on any finding. Trivy blocks only on CRITICAL and HIGH severity
+  findings.
+- **Push to main** — FS + config scan always. Image scan always. Acts as safety
+  net for anything a narrow PR path filter misses.
+- **Schedule** — Monday 06:00 UTC weekly. FS + config scan + image scan all
+  run unconditionally. Rescans against updated CVE databases.
+- **Workflow dispatch** — manual trigger, runs all scans.
 
 Concurrency: group by PR ref, cancel in-progress runs on new pushes.
 
@@ -22,8 +26,16 @@ Concurrency: group by PR ref, cancel in-progress runs on new pushes.
 
 ### gitleaks — Secrets & Dry-Run Scan
 
-Scans the entire repo for leaked credentials, API keys, tokens, and placeholder
-strings that indicate sensitive data in code or documentation.
+Scans for leaked credentials, API keys, tokens, and placeholder strings that
+indicate sensitive data in code or documentation.
+
+**Scan scope varies by trigger:**
+
+- **Pull request** — diff scan only (`detect --log-opts=origin/main..HEAD`).
+  Flags only secrets introduced in the PR's commits. Requires
+  `fetch-depth: 0` on checkout so the merge-base is available.
+- **Weekly schedule / workflow_dispatch** — full working-tree scan. Catches
+  anything that may have slipped through diff scans.
 
 **Custom rules** target patterns specific to this codebase:
 
@@ -35,12 +47,16 @@ strings that indicate sensitive data in code or documentation.
 
 **Output:**
 
-1. Full verbose log to workflow output (file, line, rule, matched snippet)
+1. Full verbose log to workflow output (file, line, rule, matched prefix)
 2. SARIF report uploaded to GitHub code scanning (inline PR annotations)
-3. JSON report uploaded as build artifact for offline inspection
+3. JSON report as build artifact (retention-days: 7; matched value redacted
+   to avoid embedding real secrets in downloadable artifacts)
 
 Exits with code 1 on any finding. PR annotations show the exact line and
 rule triggered.
+
+**Fork PRs:** Not applicable. DabljaAR does not accept external contributions.
+Revisit `pull_request_target` handling if that changes.
 
 ### Hadolint — Dockerfile Linter
 
@@ -66,19 +82,29 @@ Lints all Dockerfiles in the project against a project-wide
 
 ### Trivy — Vulnerability Scanner
 
-Runs three sub-scans in parallel within a single job:
+Runs three sub-scans. Frequency depends on scan type:
 
-1. **Filesystem scan** (`trivy fs .`) — dependency vulnerabilities across all
-   manifest files: `uv.lock`, `go.sum`, `requirements*.txt`,
-   `package-lock.json`, `pyproject.toml`. Skips `node_modules/` and `.venv*`.
-2. **Config scan** (`trivy config .`) — misconfigurations in Dockerfiles,
-   docker-compose files, and GitHub Actions workflow YAML. Detects containers
-   running as root, missing read-only rootfs, overly permissive capabilities.
-3. **Image scan** — scans built images for OS-level CVEs. Only the 5 services
-   that can build without GPU dependencies get an image scan: backend, frontend,
-   orchestrator, nmt-service, media-service. GPU-dependent services (stt-service,
-   tts-service) are covered by filesystem scan and Hadolint. Build uses
-   `--load` flag so the image is available locally without pushing.
+**Filesystem scan** — always on every PR, main push, and weekly schedule.
+Scans dependency manifests (`uv.lock`, `go.sum`, `requirements*.txt`,
+`package-lock.json`, `pyproject.toml`) for known CVEs. Skips `node_modules/`
+and `.venv*`. Cheap (~1-2 min). Uses Trivy action's built-in DB cache to
+avoid rate-limit flakiness from GHCR pulls.
+
+**Config scan** — always on every PR, main push, and weekly schedule.
+Scans Dockerfiles, docker-compose files, and GitHub Actions YAML for
+misconfigurations (containers running as root, missing read-only rootfs,
+overly permissive capabilities).
+
+**Image scan** — path-filtered on PRs, always on main push + weekly.
+Builds and scans images for OS-level CVEs (libc, openssl, ffmpeg, curl).
+Only the 5 services that can build without GPU dependencies: backend,
+frontend, orchestrator, nmt-service, media-service. GPU-dependent services
+(stt-service, tts-service) are covered by FS + config scan and Hadolint.
+
+Path filter for image scan on PRs includes: `Dockerfile*`, `requirements*`,
+`uv.lock`, `go.sum`, `package-lock.json`, `pyproject.toml`, and service
+source under the 5 buildable services. Main-branch push acts as a safety
+net for anything a narrow path filter misses.
 
 **Severity thresholds:**
 
@@ -105,20 +131,78 @@ The Hadolint rules and Trivy config scan cover the hardening requirements:
 Existing Dockerfiles already follow most of these patterns. The CI gates will
 prevent regressions.
 
-## Existing Findings to Address
+## Rollout Order
 
-- **Frontend Dockerfile** (`frontend/Dockerfile`): production stage runs as root
-  (no `USER` directive). `serve` is installed globally instead of using a
-  static file server as a non-root user.
-- **Orchestrator Dockerfile** (`orchestrator/Dockerfile`): uses `alpine:latest`
-  (unpinned). Final stage runs as root. No `WORKDIR` that matches the binary
-  location.
-- **Placeholder tokens in docs**: `backend/AGENTS.md` and `README.md` contain
-  `Bearer YOUR_TOKEN`, `YOUR_SECRET`, `sk-...` examples that gitleaks will
-  flag. These should be moved to a gitleaks allowlist or replaced with
-  non-secret strings like `EXAMPLE_BEARER_TOKEN`.
+All findings below are fixed in the same PR that adds the workflow, not as a
+follow-up. The PR contains two commits:
 
-The hardening phase of implementation will fix these.
+1. **Commit 1** — fixes findings (Dockerfile hardening, placeholder token
+   cleanup, gitleaks allowlist). Does not yet add or modify CI files.
+2. **Commit 2** — adds the security workflow and config files (`.hadolint.yaml`,
+   `.trivyignore`, `.gitleaks.toml`, `security-scan.yml`).
+
+This ordering means `git bisect` or revert on the workflow file never leaves
+the pipeline permanently red. If commit 2 is reverted, findings from commit 1
+are still gone. If commit 1 has a breaking change (e.g., a Dockerfile fix
+that breaks a build), it's a clean revert without touching CI.
+
+## Findings to Fix (Commit 1)
+
+### Dockerfiles
+
+- **Frontend** (`frontend/Dockerfile`): production stage runs as root (no
+  `USER` directive). `serve` runs as a non-root user by default, but `USER`
+  must be explicit. Add `USER node` after `COPY --from=builder`.
+- **Orchestrator** (`orchestrator/Dockerfile`): uses `alpine:latest` (unpinned).
+  Pin to `alpine:3.20`. Final stage runs as root — add `USER 1000`. Add
+  `WORKDIR /app` matching the binary location.
+
+Audit remaining Dockerfiles during implementation — the two listed are the
+confirmed violations.
+
+### Placeholder Tokens in Docs
+
+- `backend/AGENTS.md` and `README.md` contain `Bearer YOUR_TOKEN`,
+  `YOUR_SECRET`, `sk-...` examples that gitleaks flags. Replace each with
+  non-secret strings: `EXAMPLE_BEARER_TOKEN`, `EXAMPLE_SECRET_KEY`,
+  `sk_example_key`. Add remaining false-positive patterns to `.gitleaks.toml`
+  allowlist.
+
+## Job Configuration
+
+All jobs set `timeout-minutes: 15`. Image scan may need longer — set
+`timeout-minutes: 30` for that job to accommodate builds.
+
+Trivy action uses `cache: true` to persist the vulnerability DB across runs,
+preventing GHCR rate-limit failures on shared runners.
+
+gitleaks JSON artifact sets `retention-days: 7` and redacts the matched value
+in the artifact payload (keeps file, line, rule — not the snippet).
+
+## Branch Protection
+
+The three jobs must be added as required status checks in the repository's
+branch protection rules for `main`. Otherwise exit-code-1 exits are visible
+in CI but do not prevent merging.
+
+```
+Required checks (all):
+- gitleaks-scan
+- hadolint-lint
+- trivy-scan
+```
+
+## MEDIUM/LOW Findings
+
+Trivy MEDIUM and LOW findings are logged to the workflow run but not tracked
+elsewhere. If the team wants visibility into these later, options include
+auto-creating GitHub Issues or forwarding to a dashboard. For now they are
+informational only.
+
+## SBOM Generation
+
+Not included. Trivy supports CycloneDX SBOM output (`--format cyclonedx`) if
+supply-chain provenance becomes a requirement. Add as a future enhancement.
 
 ## Permissions
 
