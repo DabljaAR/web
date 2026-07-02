@@ -168,8 +168,11 @@ that breaks a build), it's a clean revert without touching CI.
   Pin to `alpine:3.20`. Final stage runs as root — add `USER 1000`. Add
   `WORKDIR /app` matching the binary location.
 
-Audit remaining Dockerfiles during implementation — the two listed are the
-confirmed violations.
+Audit of remaining Dockerfiles found 6 more that lack a `USER` directive
+(stt-service, nmt-service, tts-service, media-service — each with CPU and GPU
+variants). These are deferred: fixing them requires creating a non-root user
+and chowning `/app` in each, which is higher-risk and best validated against a
+running pipeline. Tagged as post-mvp hardening backlog.
 
 ### Placeholder Tokens in Docs
 
