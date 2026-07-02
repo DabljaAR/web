@@ -211,7 +211,8 @@ When `COMPOSE_PROFILES=observability` is set, these containers start. Together t
 | VictoriaMetrics scrape | [`infra/observability/victoriametrics/scrape.yml`](../infra/observability/victoriametrics/scrape.yml) |
 | Tempo | [`infra/observability/tempo-config.yml`](../infra/observability/tempo-config.yml) |
 | OTel Collector | [`infra/observability/otel-collector.yml`](../infra/observability/otel-collector.yml) |
-| Grafana datasources | [`infra/observability/grafana/provisioning/datasources.yml`](../infra/observability/grafana/provisioning/datasources.yml) |
+| Grafana datasources | [`infra/observability/grafana/provisioning/datasources/datasources.yml`](../infra/observability/grafana/provisioning/datasources/datasources.yml) |
+| Grafana dashboard provider | [`infra/observability/grafana/provisioning/dashboards/dashboards.yml`](../infra/observability/grafana/provisioning/dashboards/dashboards.yml) |
 | Grafana dashboards | [`infra/observability/grafana/dashboards/`](../infra/observability/grafana/dashboards/) |
 | Alert rules | [`infra/observability/grafana/provisioning/alerting/rules.yml`](../infra/observability/grafana/provisioning/alerting/rules.yml) |
 
