@@ -20,7 +20,7 @@ concurrency:
 env:
   HADOLINT_IMAGE: ghcr.io/hadolint/hadolint:v2.12.0
   GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.18.2
-  TRIVY_IMAGE: aquasecurity/trivy:0.60.0
+  TRIVY_IMAGE: aquasec/trivy:0.60.0
   TRIVY_DB_CACHE_DIR: /root/.cache/trivy
 
 jobs:
@@ -219,13 +219,9 @@ jobs:
               - "backend/Dockerfile*"
               - "frontend/Dockerfile*"
               - "orchestrator/Dockerfile*"
-              - "nmt-service/Dockerfile*"
-              - "media-service/Dockerfile*"
               - "backend/requirements*"
               - "frontend/package-lock.json"
               - "orchestrator/go.sum"
-              - "nmt-service/requirements*"
-              - "media-service/requirements*"
               - "backend/uv.lock"
               - "backend/pyproject.toml"
               - "libs/**"
@@ -247,7 +243,7 @@ jobs:
         shell: bash
         run: |
           images=()
-          for dir in backend frontend orchestrator nmt-service media-service; do
+          for dir in backend frontend orchestrator; do
             df="$dir/Dockerfile"
             [ -f "$df" ] || continue
             tag="dabljaar/$dir:ci-scan"
