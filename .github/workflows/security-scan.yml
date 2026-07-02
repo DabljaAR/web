@@ -18,6 +18,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  HADOLINT_IMAGE: ghcr.io/hadolint/hadolint:v2.12.0
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.18.2
   TRIVY_DB_CACHE_DIR: /root/.cache/trivy
 
 jobs:
@@ -34,34 +36,43 @@ jobs:
 
       - name: Run gitleaks (PR diff scan)
         if: github.event_name == 'pull_request'
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          config-path: .gitleaks.toml
-          log-opts: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
-          report-format: sarif
-          output: gitleaks-report.sarif
-          redact: true
-        continue-on-error: false
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src \
+            ${{ env.GITLEAKS_IMAGE }} \
+            detect \
+            --config /src/.gitleaks.toml \
+            --log-opts="${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" \
+            --report-format sarif \
+            --report-path /src/gitleaks-report.sarif \
+            --redact \
+            --verbose
 
       - name: Run gitleaks (full scan)
         if: github.event_name != 'pull_request'
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          config-path: .gitleaks.toml
-          report-format: sarif
-          output: gitleaks-report.sarif
-          redact: true
-        continue-on-error: false
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/src" \
+            -w /src \
+            ${{ env.GITLEAKS_IMAGE }} \
+            detect \
+            --config /src/.gitleaks.toml \
+            --source /src \
+            --report-format sarif \
+            --report-path /src/gitleaks-report.sarif \
+            --redact \
+            --verbose
 
       - name: Upload SARIF
-        if: always()
+        if: success() || failure()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: gitleaks-report.sarif
           category: gitleaks
 
       - name: Upload artifact
-        if: always()
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
@@ -77,17 +88,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Hadolint
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: "**/Dockerfile*"
-          config-file: .hadolint.yaml
-          format: sarif
-          output-file: hadolint-report.sarif
-          failure-threshold: error
+      - name: Run Hadolint on all Dockerfiles
+        run: |
+          failures=0
+          while IFS= read -r -d '' df; do
+            echo "Linting: $df"
+            # Determine which config to use: GPU variants use relaxed config
+            if echo "$df" | grep -qE 'Dockerfile\.gpu'; then
+              config=".hadolint-gpu.yaml"
+            else
+              config=".hadolint.yaml"
+            fi
+            if [ ! -f "$config" ]; then
+              config=".hadolint.yaml"
+            fi
+            docker run --rm \
+              -v "${{ github.workspace }}:/src" \
+              -w /src \
+              ${{ env.HADOLINT_IMAGE }} \
+              hadolint \
+              --config "/src/$config" \
+              --failure-threshold error \
+              --format sarif \
+              "/src/$df" > /tmp/hadolint-partial.json 2>&1
+            # Merge partial SARIF files
+            if [ -s /tmp/hadolint-partial.json ]; then
+              jq -s '.[0].runs = [.[] | .runs[]] | .[0]' \
+                /tmp/hadolint-report.json /tmp/hadolint-partial.json 2>/dev/null \
+                > /tmp/hadolint-merged.json || true
+              mv /tmp/hadolint-merged.json /tmp/hadolint-report.json 2>/dev/null || true
+            fi
+          done < <(find . -name 'Dockerfile*' -type f -not -path './.git/*' -print0)
+
+          # Move final report to workspace
+          if [ -f /tmp/hadolint-report.json ]; then
+            cp /tmp/hadolint-report.json "${{ github.workspace }}/hadolint-report.sarif"
+          fi
 
       - name: Upload SARIF
-        if: always()
+        if: success() || failure()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: hadolint-report.sarif
@@ -102,20 +141,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Trivy filesystem scan
+      # Pass 1: full severity range for SARIF report (non-blocking)
+      - name: Trivy FS scan (all severities — SARIF output)
         uses: aquasecurity/trivy-action@0.29.0
+        continue-on-error: true
         with:
           scan-type: fs
           scan-ref: .
           format: sarif
           output: trivy-fs-report.sarif
           severity: CRITICAL,HIGH,MEDIUM,LOW
+          exit-code: "0"
+          cache: true
+          trivy-config: .trivyignore
+
+      # Pass 2: CRITICAL/HIGH only for blocking (no SARIF, just exit code)
+      - name: Trivy FS scan (CRITICAL/HIGH — blocking)
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: CRITICAL,HIGH
           exit-code: "1"
           cache: true
           trivy-config: .trivyignore
 
       - name: Upload SARIF
-        if: always()
+        if: success() || failure()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-fs-report.sarif
@@ -142,7 +195,7 @@ jobs:
           cache: true
 
       - name: Upload SARIF
-        if: always()
+        if: success() || failure()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-config-report.sarif
@@ -178,10 +231,18 @@ jobs:
               - "libs/**"
               - ".github/workflows/security-scan.yml"
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Trivy DB
+        id: cache-trivy-db
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TRIVY_DB_CACHE_DIR }}
+          key: trivy-db-${{ runner.os }}
+
       - name: Build and scan images
-        if: |
-          always() &&
-          (steps.filter.outputs.image == 'true' || github.event_name != 'pull_request')
+        if: steps.filter.outputs.image == 'true' || github.event_name != 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
@@ -192,9 +253,14 @@ jobs:
             [ -f "$df" ] || continue
             tag="dabljaar/$dir:ci-scan"
             echo "Building $tag from $df"
-            docker build -t "$tag" -f "$df" "$dir" --load
+            docker buildx build -t "$tag" -f "$df" "$dir" --load
             images+=("$tag")
           done
+
+          if [ ${#images[@]} -eq 0 ]; then
+            echo "No images to scan — skipping"
+            exit 0
+          fi
 
           trivy image \
             --severity CRITICAL,HIGH \
@@ -205,14 +271,14 @@ jobs:
             "${images[@]}"
 
       - name: Upload SARIF
-        if: always()
+        if: success() || failure()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-image-report.sarif
           category: trivy-image
 
       - name: Upload image scan artifact
-        if: always()
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-image-report

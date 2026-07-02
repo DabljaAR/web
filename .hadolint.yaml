@@ -30,10 +30,7 @@ override:
   # alpine:3.xx release, individual version pins are overly strict)
   - code: DL3018
     level: style
-  # DL3002: USER root at last stage (documented exception for
-  # GPU/device-access containers that require root for CUDA)
-  - code: DL3002
-    level: style
+
   # DL3003: Change WORKDIR before RUN (acceptable patterns exist)
   - code: DL3003
     level: style
