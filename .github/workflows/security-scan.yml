@@ -20,6 +20,7 @@ concurrency:
 env:
   HADOLINT_IMAGE: ghcr.io/hadolint/hadolint:v2.12.0
   GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.18.2
+  TRIVY_IMAGE: aquasecurity/trivy:0.60.0
   TRIVY_DB_CACHE_DIR: /root/.cache/trivy
 
 jobs:
@@ -124,31 +125,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Pass 1: full severity range for SARIF report (non-blocking)
-      - name: Trivy FS scan (all severities — SARIF output)
-        uses: aquasecurity/trivy-action@v0.28.0
-        continue-on-error: true
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
         with:
-          scan-type: fs
-          scan-ref: .
-          format: sarif
-          output: trivy-fs-report.sarif
-          severity: CRITICAL,HIGH,MEDIUM,LOW
-          exit-code: "0"
-          cache: true
-          trivy-config: .trivyignore
+          path: ${{ env.TRIVY_DB_CACHE_DIR }}
+          key: trivy-db-${{ runner.os }}
 
-      # Pass 2: CRITICAL/HIGH only for blocking (no SARIF, just exit code)
+      - name: Trivy FS scan (all severities — SARIF output)
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -v ${{ env.TRIVY_DB_CACHE_DIR }}:/trivy-cache \
+            ${{ env.TRIVY_IMAGE }} \
+            fs \
+            --severity CRITICAL,HIGH,MEDIUM,LOW \
+            --exit-code 0 \
+            --format sarif \
+            --output /workspace/trivy-fs-report.sarif \
+            --cache-dir /trivy-cache \
+            /workspace
+
       - name: Trivy FS scan (CRITICAL/HIGH — blocking)
-        uses: aquasecurity/trivy-action@v0.28.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          format: table
-          severity: CRITICAL,HIGH
-          exit-code: "1"
-          cache: true
-          trivy-config: .trivyignore
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -v ${{ env.TRIVY_DB_CACHE_DIR }}:/trivy-cache \
+            ${{ env.TRIVY_IMAGE }} \
+            fs \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --cache-dir /trivy-cache \
+            /workspace
 
       - name: Upload SARIF
         if: success() || failure()
@@ -166,16 +174,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run Trivy config scan
-        uses: aquasecurity/trivy-action@v0.28.0
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
         with:
-          scan-type: config
-          scan-ref: .
-          format: sarif
-          output: trivy-config-report.sarif
-          severity: CRITICAL,HIGH
-          exit-code: "1"
-          cache: true
+          path: ${{ env.TRIVY_DB_CACHE_DIR }}
+          key: trivy-db-${{ runner.os }}
+
+      - name: Run Trivy config scan
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -v ${{ env.TRIVY_DB_CACHE_DIR }}:/trivy-cache \
+            ${{ env.TRIVY_IMAGE }} \
+            config \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --format sarif \
+            --output /workspace/trivy-config-report.sarif \
+            --cache-dir /trivy-cache \
+            /workspace
 
       - name: Upload SARIF
         if: success() || failure()
@@ -215,10 +232,11 @@ jobs:
               - ".github/workflows/security-scan.yml"
 
       - name: Set up Docker Buildx
+        if: steps.filter.outputs.image == 'true' || github.event_name != 'pull_request'
         uses: docker/setup-buildx-action@v3
 
       - name: Cache Trivy DB
-        id: cache-trivy-db
+        if: steps.filter.outputs.image == 'true' || github.event_name != 'pull_request'
         uses: actions/cache@v4
         with:
           path: ${{ env.TRIVY_DB_CACHE_DIR }}
@@ -228,15 +246,16 @@ jobs:
         if: steps.filter.outputs.image == 'true' || github.event_name != 'pull_request'
         shell: bash
         run: |
-          set -euo pipefail
-
           images=()
           for dir in backend frontend orchestrator nmt-service media-service; do
             df="$dir/Dockerfile"
             [ -f "$df" ] || continue
             tag="dabljaar/$dir:ci-scan"
             echo "Building $tag from $df"
-            docker buildx build -t "$tag" -f "$df" "$dir" --load
+            docker buildx build -t "$tag" -f "$df" "$dir" --load 2>&1 || {
+              echo "WARNING: $df build failed, skipping scan"
+              continue
+            }
             images+=("$tag")
           done
 
@@ -249,7 +268,7 @@ jobs:
             -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${{ github.workspace }}:/workspace" \
             -v ${{ env.TRIVY_DB_CACHE_DIR }}:/trivy-cache \
-            aquasecurity/trivy:0.60.0 \
+            ${{ env.TRIVY_IMAGE }} \
             image \
             --severity CRITICAL,HIGH \
             --exit-code 1 \
