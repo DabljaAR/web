@@ -1,0 +1,7 @@
+# Trivy exclusion rules for DabljaAR
+#
+# Format: CVE-ID or GHSA-ID, optionally followed by a comment.
+# Expiry dates can be added with "exp:YYYY-MM-DD".
+
+# Example (uncomment as needed):
+# CVE-2024-12345    # Accepted risk: only exploitable with local access

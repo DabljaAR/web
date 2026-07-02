@@ -1,0 +1,59 @@
+# gitleaks configuration for DabljaAR
+# Rules match patterns specific to this codebase's risk profile.
+
+title = "DabljaAR gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "dablja-placeholder-tokens"
+description = "Placeholder tokens that indicate hardcoded credential patterns in docs or code"
+regex = '''(?i)(YOUR_TOKEN|YOUR_SECRET|sk_live_|sk_test_|pk_live_|pk_test_|ghp_\w{36}|ghp_\w{19}|AKIA\w{16})'''
+tags = ["dablja", "placeholder", "credentials"]
+
+[[rules]]
+id = "dablja-bearer-token"
+description = "Bearer token that matches a real token pattern (not EXAMPLE_ prefix)"
+regex = '''Bearer\s+(?!EXAMPLE_)[A-Za-z0-9\-_.]{20,}'''
+tags = ["dablja", "bearer", "token"]
+
+[[rules]]
+id = "dablja-jwt-secret"
+description = "Hardcoded JWT secret or signing key"
+regex = '''(?i)(JWT_SECRET|SIGNING_KEY|SECRET_KEY)\s*=\s*['\"][A-Za-z0-9\-_!@#$%^&*()]{16,}['\"]'''
+tags = ["dablja", "jwt", "secret"]
+
+[[rules]]
+id = "dablja-connection-string"
+description = "Hardcoded database or message broker connection string with credentials"
+regex = '''(postgresql|postgres|redis|amqp|rabbitmq)://\w+:\w+@'''
+tags = ["dablja", "connection-string", "credentials"]
+
+[[rules]]
+id = "dablja-private-key"
+description = "Inline private key block"
+regex = '''-----BEGIN\s?(RSA|EC|OPENSSH|DSA|PRIVATE)\s?KEY-----'''
+tags = ["dablja", "private-key"]
+
+[allowlist]
+description = "False positive patterns for this project"
+paths = [
+    # Test fixtures and test data
+    '''(^|/)tests/''',
+    '''(^|/)test_''',
+]
+regexes = [
+    # Our replaced example placeholders
+    '''EXAMPLE_BEARER_TOKEN''',
+    '''EXAMPLE_SECRET_KEY''',
+    '''sk_example_key''',
+    # Deployment configuration (not secrets)
+    '''YOUR_PROJECT_ID''',
+    # Shell variable reference (not a literal token)
+    '''\$TOKEN''',
+    # Documentation examples using generic env var patterns
+    '''Bearer \$''',
+    # UUID patterns in documentation examples
+    '''[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}''',
+]

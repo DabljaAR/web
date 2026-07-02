@@ -1,0 +1,220 @@
+name: Security Scan
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || format('push-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TRIVY_DB_CACHE_DIR: /root/.cache/trivy
+
+jobs:
+  gitleaks-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+
+      - name: Run gitleaks (PR diff scan)
+        if: github.event_name == 'pull_request'
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          config-path: .gitleaks.toml
+          log-opts: ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+          report-format: sarif
+          output: gitleaks-report.sarif
+          redact: true
+        continue-on-error: false
+
+      - name: Run gitleaks (full scan)
+        if: github.event_name != 'pull_request'
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          config-path: .gitleaks.toml
+          report-format: sarif
+          output: gitleaks-report.sarif
+          redact: true
+        continue-on-error: false
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks-report.sarif
+          category: gitleaks
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.sarif
+          retention-days: 7
+
+  hadolint-lint:
+    name: hadolint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: "**/Dockerfile*"
+          config-file: .hadolint.yaml
+          format: sarif
+          output-file: hadolint-report.sarif
+          failure-threshold: error
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: hadolint-report.sarif
+          category: hadolint
+
+  trivy-fs:
+    name: trivy-filesystem
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs-report.sarif
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          exit-code: "1"
+          cache: true
+          trivy-config: .trivyignore
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs-report.sarif
+          category: trivy-fs
+
+  trivy-config:
+    name: trivy-config
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy config scan
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-config-report.sarif
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          cache: true
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-config-report.sarif
+          category: trivy-config
+
+  trivy-image:
+    name: trivy-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Path filter
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            image:
+              - "backend/Dockerfile*"
+              - "frontend/Dockerfile*"
+              - "orchestrator/Dockerfile*"
+              - "nmt-service/Dockerfile*"
+              - "media-service/Dockerfile*"
+              - "backend/requirements*"
+              - "frontend/package-lock.json"
+              - "orchestrator/go.sum"
+              - "nmt-service/requirements*"
+              - "media-service/requirements*"
+              - "backend/uv.lock"
+              - "backend/pyproject.toml"
+              - "libs/**"
+              - ".github/workflows/security-scan.yml"
+
+      - name: Build and scan images
+        if: |
+          always() &&
+          (steps.filter.outputs.image == 'true' || github.event_name != 'pull_request')
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          images=()
+          for dir in backend frontend orchestrator nmt-service media-service; do
+            df="$dir/Dockerfile"
+            [ -f "$df" ] || continue
+            tag="dabljaar/$dir:ci-scan"
+            echo "Building $tag from $df"
+            docker build -t "$tag" -f "$df" "$dir" --load
+            images+=("$tag")
+          done
+
+          trivy image \
+            --severity CRITICAL,HIGH \
+            --exit-code 1 \
+            --format sarif \
+            --output trivy-image-report.sarif \
+            --cache-dir "${{ env.TRIVY_DB_CACHE_DIR }}" \
+            "${images[@]}"
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image-report.sarif
+          category: trivy-image
+
+      - name: Upload image scan artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-report
+          path: trivy-image-report.sarif
+          retention-days: 14
